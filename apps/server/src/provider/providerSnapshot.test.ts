@@ -46,8 +46,8 @@ describe("providerModelsFromSettings", () => {
 describe("buildServerProvider", () => {
   it("leaves compatibility unset when no bundled policy matches this T3 Code version", () => {
     const provider = buildServerProvider({
-      driver: ProviderDriverKind.make("codex"),
-      presentation: { displayName: "Codex" },
+      driver: ProviderDriverKind.make("unmapped-test-driver"),
+      presentation: { displayName: "Test" },
       enabled: true,
       checkedAt: "2026-04-10T00:00:00.000Z",
       models: [],
