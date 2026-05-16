@@ -9,7 +9,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import * as DesktopBackendManager from "../../backend/DesktopBackendManager.ts";
+import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
 import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
 import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
 import * as DesktopWslEnvironment from "../../wsl/DesktopWslEnvironment.ts";
@@ -51,8 +51,9 @@ export const getLocalEnvironmentBootstrap = makeSyncIpcMethod({
   channel: IpcChannels.GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL,
   result: Schema.NullOr(DesktopEnvironmentBootstrapSchema),
   handler: Effect.fn("desktop.ipc.window.getLocalEnvironmentBootstrap")(function* () {
-    const backendManager = yield* DesktopBackendManager.DesktopBackendManager;
-    const config = yield* backendManager.currentConfig;
+    const pool = yield* DesktopBackendPool.DesktopBackendPool;
+    const primaryBackend = yield* pool.primary;
+    const config = yield* primaryBackend.currentConfig;
     return Option.match(config, {
       onNone: () => null,
       onSome: ({ bootstrap, httpBaseUrl }) => ({

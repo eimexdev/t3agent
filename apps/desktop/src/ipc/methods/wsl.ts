@@ -8,7 +8,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-import * as DesktopBackendManager from "../../backend/DesktopBackendManager.ts";
+import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
 import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
 import * as DesktopWslEnvironment from "../../wsl/DesktopWslEnvironment.ts";
 import * as IpcChannels from "../channels.ts";
@@ -64,7 +64,8 @@ export const setWslBackend = makeIpcMethod({
   result: DesktopWslStateSchema,
   handler: Effect.fn("desktop.ipc.wsl.setBackend")(function* (input) {
     const appSettings = yield* DesktopAppSettings.DesktopAppSettings;
-    const backendManager = yield* DesktopBackendManager.DesktopBackendManager;
+    const pool = yield* DesktopBackendPool.DesktopBackendPool;
+    const primaryBackend = yield* pool.primary;
     const wslEnvironment = yield* DesktopWslEnvironment.DesktopWslEnvironment;
 
     // Pre-warm the WSL VM before swapping so the new backend boot doesn't
@@ -81,23 +82,23 @@ export const setWslBackend = makeIpcMethod({
     }
 
     // In-process swap: stop the running backend, then start it again. The
-    // backend manager re-resolves config on start, so the new wslMode picks
+    // backend instance re-resolves config on start, so the new wslMode picks
     // up automatically.
-    yield* backendManager.stop();
-    yield* backendManager.start;
+    yield* primaryBackend.stop();
+    yield* primaryBackend.start;
 
     // Bounded readiness wait — if the new backend doesn't come up in time
     // (bad distro, missing node-pty, preflight failure that scheduled
     // restarts forever) revert to the previous mode so the user isn't stuck.
-    const ready = yield* backendManager.waitForReady(SWAP_READINESS_TIMEOUT);
+    const ready = yield* primaryBackend.waitForReady(SWAP_READINESS_TIMEOUT);
     if (!ready) {
       yield* appSettings.setWslMode({
         mode: previousSettings.wslMode,
         distro: previousSettings.wslDistro,
       });
-      yield* backendManager.stop();
-      yield* backendManager.start;
-      const rolledBack = yield* backendManager.waitForReady(SWAP_READINESS_TIMEOUT);
+      yield* primaryBackend.stop();
+      yield* primaryBackend.start;
+      const rolledBack = yield* primaryBackend.waitForReady(SWAP_READINESS_TIMEOUT);
       const failedTarget = input.mode === "wsl" ? "WSL backend" : "local backend";
       return yield* new WslBackendSwapError({
         message: rolledBack

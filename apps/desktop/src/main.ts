@@ -29,7 +29,6 @@ import * as DesktopAppIdentity from "./app/DesktopAppIdentity.ts";
 import * as DesktopApplicationMenu from "./window/DesktopApplicationMenu.ts";
 import * as DesktopAssets from "./app/DesktopAssets.ts";
 import * as DesktopBackendConfiguration from "./backend/DesktopBackendConfiguration.ts";
-import * as DesktopBackendManager from "./backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "./backend/DesktopBackendPool.ts";
 import * as DesktopEnvironment from "./app/DesktopEnvironment.ts";
 import * as DesktopLifecycle from "./app/DesktopLifecycle.ts";
@@ -129,14 +128,12 @@ const desktopServerExposureLayer = DesktopServerExposure.layer.pipe(
 
 const desktopWindowLayer = DesktopWindow.layer.pipe(Layer.provideMerge(desktopServerExposureLayer));
 
-// Phase-1 of the parallel-backend refactor: pool wraps the existing
-// singleton manager so consumers can migrate to instance-keyed access
-// incrementally. See DesktopBackendPool.ts header for the rollout plan.
-// provideMerge keeps the legacy DesktopBackendManager service exposed
-// for current consumers (window/wsl IPC, lifecycle hooks) until they
-// migrate to pool.primary.
+// Pool layer instantiates the backend factory once for the Windows
+// primary instance and exposes it via pool.primary. Consumers go through
+// the pool now; the legacy DesktopBackendManager service is gone. The
+// WSL second instance gets registered later in the migration. See
+// DesktopBackendPool.ts header for the full rollout plan.
 const desktopBackendLayer = DesktopBackendPool.layer.pipe(
-  Layer.provideMerge(DesktopBackendManager.layer),
   Layer.provideMerge(DesktopAppIdentity.layer),
   Layer.provideMerge(DesktopBackendConfiguration.layer),
   Layer.provideMerge(DesktopWslEnvironment.layer),
