@@ -800,6 +800,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [isComposerFooterCompact, setIsComposerFooterCompact] = useState(false);
   const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
   const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false);
+  const handleComposerModelPickerOpenChange = useCallback((open: boolean) => {
+    setIsComposerModelPickerOpen(open);
+  }, []);
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const isMobileViewport = useMediaQuery("max-sm");
   const isComposerCollapsedMobile = isMobileViewport && !isComposerFocused;
@@ -2340,9 +2343,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         activeProviderIconClassName: composerProviderState.modelPickerIconClassName,
                       }
                     : {})}
-                  onOpenChange={(open) => {
-                    setIsComposerModelPickerOpen(open);
-                  }}
+                  onOpenChange={handleComposerModelPickerOpenChange}
                   onInstanceModelChange={onProviderModelSelect}
                 />
 
