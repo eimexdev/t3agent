@@ -4,11 +4,12 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { it } from "@effect/vitest";
+import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as PlatformError from "effect/PlatformError";
+import * as Random from "effect/Random";
 import * as Scope from "effect/Scope";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { expect } from "vitest";
@@ -186,6 +187,22 @@ function runGitSyncForFakeGh(cwd: string, args: readonly string[]): void {
     operation: "execute",
     detail: `Failed to simulate gh checkout with git ${args.join(" ")}: ${result.stderr?.trim() || "unknown error"}`,
   });
+}
+
+function makeDeterministicRandomService(seed = 0x1234_5678): {
+  nextIntUnsafe: () => number;
+  nextDoubleUnsafe: () => number;
+} {
+  let state = seed >>> 0;
+  const nextIntUnsafe = (): number => {
+    state = (Math.imul(1_664_525, state) + 1_013_904_223) >>> 0;
+    return state;
+  };
+
+  return {
+    nextIntUnsafe,
+    nextDoubleUnsafe: () => nextIntUnsafe() / 0x1_0000_0000,
+  };
 }
 
 function isGitHubCliError(error: unknown): error is GitHubCliError {
@@ -3210,6 +3227,41 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       );
 
       expect(errorMessage).toContain("already checked out in the main repo");
+    }),
+  );
+
+  it.effect("uses Effect Random for implicit progress action ids", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      fs.writeFileSync(path.join(repoDir, "random-action-id.txt"), "random action id\n");
+
+      const { manager } = yield* makeManager();
+      const events: GitActionProgressEvent[] = [];
+      const seed = 0x5eed_c0de;
+      const expectedActionId = yield* Random.nextUUIDv4.pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService(seed)),
+      );
+
+      const result = yield* runStackedAction(
+        manager,
+        {
+          cwd: repoDir,
+          action: "commit",
+        },
+        {
+          progressReporter: {
+            publish: (event) =>
+              Effect.sync(() => {
+                events.push(event);
+              }),
+          },
+        },
+      ).pipe(Effect.provideService(Random.Random, makeDeterministicRandomService(seed)));
+
+      assert.equal(result.commit.status, "created");
+      assert.isAbove(events.length, 0);
+      assert.isTrue(events.every((event) => event.actionId === expectedActionId));
     }),
   );
 

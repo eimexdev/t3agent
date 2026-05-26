@@ -14,23 +14,32 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PlatformError from "effect/PlatformError";
+import * as Schema from "effect/Schema";
 
-interface TraceRecordLike {
-  readonly name?: unknown;
-  readonly traceId?: unknown;
-  readonly spanId?: unknown;
-  readonly startTimeUnixNano?: unknown;
-  readonly endTimeUnixNano?: unknown;
-  readonly durationMs?: unknown;
-  readonly exit?: unknown;
-  readonly events?: unknown;
-}
+const TraceRecordLine = Schema.Struct({
+  name: Schema.optional(Schema.Unknown),
+  traceId: Schema.optional(Schema.Unknown),
+  spanId: Schema.optional(Schema.Unknown),
+  startTimeUnixNano: Schema.optional(Schema.Unknown),
+  endTimeUnixNano: Schema.optional(Schema.Unknown),
+  durationMs: Schema.optional(Schema.Unknown),
+  exit: Schema.optional(Schema.Unknown),
+  events: Schema.optional(Schema.Array(Schema.Unknown)),
+});
 
-interface TraceEventLike {
-  readonly name?: unknown;
-  readonly timeUnixNano?: unknown;
-  readonly attributes?: unknown;
-}
+const TraceEvent = Schema.Struct({
+  name: Schema.optional(Schema.Unknown),
+  timeUnixNano: Schema.optional(Schema.Unknown),
+  attributes: Schema.optional(Schema.Unknown),
+});
+
+const TraceEventAttributes = Schema.Record(Schema.String, Schema.Unknown);
+
+type TraceEventLike = typeof TraceEvent.Type;
+
+const decodeTraceRecordLine = Schema.decodeUnknownOption(Schema.fromJsonString(TraceRecordLine));
+const decodeTraceEvent = Schema.decodeUnknownOption(TraceEvent);
+const decodeTraceEventAttributes = Schema.decodeUnknownOption(TraceEventAttributes);
 
 export interface TraceDiagnosticsOptions {
   readonly traceFilePath: string;
@@ -74,47 +83,46 @@ function toRotatedTracePaths(traceFilePath: string, maxFiles: number): ReadonlyA
   return [...backups, traceFilePath];
 }
 
-function isRecordObject(value: unknown): value is TraceRecordLike {
+function isRecordObject(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null;
 }
 
-function toStringValue(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
+function toStringValue(value: unknown): Option.Option<string> {
+  return typeof value === "string" && value.trim().length > 0
+    ? Option.some(value)
+    : Option.none();
 }
 
-function toNumberValue(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+function toNumberValue(value: unknown): Option.Option<number> {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Option.some(value)
+    : Option.none();
 }
 
-function unixNanoToDateTime(value: unknown): DateTime.Utc | null {
+function unixNanoToDateTime(value: unknown): Option.Option<DateTime.Utc> {
   const text = toStringValue(value);
-  if (!text) return null;
+  if (Option.isNone(text)) return Option.none();
   try {
-    const millis = Number(BigInt(text) / 1_000_000n);
-    return Option.getOrNull(DateTime.make(millis));
+    const millis = Number(BigInt(text.value) / 1_000_000n);
+    return DateTime.make(millis);
   } catch {
-    return null;
+    return Option.none();
   }
 }
 
-function readExitTag(exit: unknown): string | null {
-  if (!isRecordObject(exit) || !("_tag" in exit)) return null;
+function readExitTag(exit: unknown): Option.Option<string> {
+  if (!isRecordObject(exit) || !("_tag" in exit)) return Option.none();
   return toStringValue(exit._tag);
 }
 
 function readExitCause(exit: unknown): string {
   if (!isRecordObject(exit) || !("cause" in exit)) return "Failure";
-  return toStringValue(exit.cause)?.trim() ?? "Failure";
-}
-
-function isTraceEvent(value: unknown): value is TraceEventLike {
-  return typeof value === "object" && value !== null;
+  const cause = toStringValue(exit.cause);
+  return Option.isSome(cause) ? cause.value.trim() : "Failure";
 }
 
 function readEventAttributes(event: TraceEventLike): Readonly<Record<string, unknown>> {
-  return typeof event.attributes === "object" && event.attributes !== null
-    ? (event.attributes as Readonly<Record<string, unknown>>)
-    : {};
+  return Option.getOrElse(decodeTraceEventAttributes(event.attributes), () => ({}));
 }
 
 function makeEmptyDiagnostics(input: {
@@ -199,8 +207,8 @@ export function aggregateTraceDiagnostics(
   let failureCount = 0;
   let interruptionCount = 0;
   let slowSpanCount = 0;
-  let firstSpanAt: DateTime.Utc | null = null;
-  let lastSpanAt: DateTime.Utc | null = null;
+  let firstSpanAt = Option.none<DateTime.Utc>();
+  let lastSpanAt = Option.none<DateTime.Utc>();
 
   const spansByName = new Map<
     string,
@@ -217,42 +225,50 @@ export function aggregateTraceDiagnostics(
     for (const line of lines) {
       if (line.trim().length === 0) continue;
 
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
+      const parsedOption = decodeTraceRecordLine(line);
+      if (Option.isNone(parsedOption)) {
         parseErrorCount += 1;
         continue;
       }
+      const parsed = parsedOption.value;
 
-      if (!isRecordObject(parsed)) {
-        parseErrorCount += 1;
-        continue;
-      }
-
-      const name = toStringValue(parsed.name);
-      const traceId = toStringValue(parsed.traceId);
-      const spanId = toStringValue(parsed.spanId);
-      const durationMs = toNumberValue(parsed.durationMs);
-      const endedAt = unixNanoToDateTime(parsed.endTimeUnixNano);
+      const nameOption = toStringValue(parsed.name);
+      const traceIdOption = toStringValue(parsed.traceId);
+      const spanIdOption = toStringValue(parsed.spanId);
+      const durationMsOption = toNumberValue(parsed.durationMs);
+      const endedAtOption = unixNanoToDateTime(parsed.endTimeUnixNano);
       const startedAt = unixNanoToDateTime(parsed.startTimeUnixNano);
 
-      if (!name || !traceId || !spanId || durationMs === null || !endedAt) {
+      if (
+        Option.isNone(nameOption) ||
+        Option.isNone(traceIdOption) ||
+        Option.isNone(spanIdOption) ||
+        Option.isNone(durationMsOption) ||
+        Option.isNone(endedAtOption)
+      ) {
         parseErrorCount += 1;
         continue;
       }
+      const name = nameOption.value;
+      const traceId = traceIdOption.value;
+      const spanId = spanIdOption.value;
+      const durationMs = durationMsOption.value;
+      const endedAt = endedAtOption.value;
 
       recordCount += 1;
-      firstSpanAt =
-        startedAt && (firstSpanAt === null || DateTime.isLessThan(startedAt, firstSpanAt))
-          ? startedAt
-          : firstSpanAt;
-      lastSpanAt =
-        lastSpanAt === null || DateTime.isGreaterThan(endedAt, lastSpanAt) ? endedAt : lastSpanAt;
+      if (
+        Option.isSome(startedAt) &&
+        (Option.isNone(firstSpanAt) || DateTime.isLessThan(startedAt.value, firstSpanAt.value))
+      ) {
+        firstSpanAt = startedAt;
+      }
+      if (Option.isNone(lastSpanAt) || DateTime.isGreaterThan(endedAt, lastSpanAt.value)) {
+        lastSpanAt = Option.some(endedAt);
+      }
 
       const exitTag = readExitTag(parsed.exit);
-      const isFailure = exitTag === "Failure";
-      const isInterrupted = exitTag === "Interrupted";
+      const isFailure = Option.isSome(exitTag) && exitTag.value === "Failure";
+      const isInterrupted = Option.isSome(exitTag) && exitTag.value === "Interrupted";
       if (isFailure) failureCount += 1;
       if (isInterrupted) interruptionCount += 1;
 
@@ -293,10 +309,13 @@ export function aggregateTraceDiagnostics(
 
       if (Array.isArray(parsed.events)) {
         for (const rawEvent of parsed.events) {
-          if (!isTraceEvent(rawEvent)) continue;
+          const eventOption = decodeTraceEvent(rawEvent);
+          if (Option.isNone(eventOption)) continue;
+          const rawEvent = eventOption.value;
           const attributes = readEventAttributes(rawEvent);
-          const level = toStringValue(attributes["effect.logLevel"]);
-          if (!level) continue;
+          const levelOption = toStringValue(attributes["effect.logLevel"]);
+          if (Option.isNone(levelOption)) continue;
+          const level = levelOption.value;
 
           logLevelCounts[level] = (logLevelCounts[level] ?? 0) + 1;
           const normalizedLevel = level.toLowerCase();
@@ -309,8 +328,11 @@ export function aggregateTraceDiagnostics(
             continue;
           }
 
-          const seenAt = unixNanoToDateTime(rawEvent.timeUnixNano) ?? endedAt;
-          const message = toStringValue(rawEvent.name)?.trim() ?? "Log event";
+          const seenAt = Option.getOrElse(unixNanoToDateTime(rawEvent.timeUnixNano), () => endedAt);
+          const message = Option.getOrElse(
+            Option.map(toStringValue(rawEvent.name), (value) => value.trim()),
+            () => "Log event",
+          );
           latestWarningAndErrorLogs.push({
             spanName: name,
             level,
@@ -342,8 +364,8 @@ export function aggregateTraceDiagnostics(
     readAt,
     recordCount,
     parseErrorCount,
-    firstSpanAt: Option.fromNullishOr(firstSpanAt),
-    lastSpanAt: Option.fromNullishOr(lastSpanAt),
+    firstSpanAt,
+    lastSpanAt,
     failureCount,
     interruptionCount,
     slowSpanThresholdMs,
