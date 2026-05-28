@@ -14,6 +14,7 @@ import * as Schema from "effect/Schema";
 import * as DesktopBackendPool from "../../backend/DesktopBackendPool.ts";
 import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
 import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
+import * as DesktopWslBackend from "../../wsl/DesktopWslBackend.ts";
 import * as DesktopWslEnvironment from "../../wsl/DesktopWslEnvironment.ts";
 import * as ElectronDialog from "../../electron/ElectronDialog.ts";
 import * as ElectronMenu from "../../electron/ElectronMenu.ts";
@@ -84,17 +85,15 @@ export const getLocalEnvironmentBootstraps = makeSyncIpcMethod({
   }),
 });
 
-const WSL_INSTANCE_ID_PREFIX = "wsl:";
-
 // Pull the distro selection out of a backend instance id like
 // "wsl:ubuntu". Returns null for "wsl:default", which is the sentinel
 // for "track the user's WSL default distro" and maps to the
 // wslEnv-derived default at picker time.
 function extractWslDistroFromEnvironmentId(envId: string): string | null {
-  if (!envId.startsWith(WSL_INSTANCE_ID_PREFIX)) {
+  if (!envId.startsWith(DesktopWslBackend.WSL_INSTANCE_ID_PREFIX)) {
     return null;
   }
-  const suffix = envId.slice(WSL_INSTANCE_ID_PREFIX.length);
+  const suffix = envId.slice(DesktopWslBackend.WSL_INSTANCE_ID_PREFIX.length);
   return suffix === "default" || suffix.length === 0 ? null : suffix;
 }
 
@@ -119,13 +118,13 @@ export const pickFolder = makeIpcMethod({
     //   - anything else (incl. PRIMARY_LOCAL_ENVIRONMENT_ID): primary picker.
     const targetId = options?.targetEnvironmentId;
     const wslDistroFromTarget =
-      targetId !== undefined && targetId.startsWith(WSL_INSTANCE_ID_PREFIX)
+      targetId !== undefined && targetId.startsWith(DesktopWslBackend.WSL_INSTANCE_ID_PREFIX)
         ? extractWslDistroFromEnvironmentId(targetId)
         : null;
     const useWsl =
       targetId !== undefined &&
       targetId !== PRIMARY_LOCAL_ENVIRONMENT_ID &&
-      targetId.startsWith(WSL_INSTANCE_ID_PREFIX);
+      targetId.startsWith(DesktopWslBackend.WSL_INSTANCE_ID_PREFIX);
     const settings = yield* appSettings.get;
     // Fall back to the persisted wslDistro when the id is the
     // "wsl:default" sentinel; the orchestrator uses the same fallback

@@ -35,7 +35,11 @@ import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopWslEnvironment from "./DesktopWslEnvironment.ts";
 
-const WSL_INSTANCE_ID_PREFIX = "wsl:";
+// Exported so callers that parse pool ids (e.g. the pickFolder IPC
+// handler in ipc/methods/window.ts) reference the same prefix this
+// module produces. Keeping it inline in two places risks silent
+// divergence if one ever gets renamed.
+export const WSL_INSTANCE_ID_PREFIX = "wsl:";
 const WSL_DEFAULT_DISTRO_ID = `${WSL_INSTANCE_ID_PREFIX}default`;
 const MAX_TCP_PORT = 65_535;
 
