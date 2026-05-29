@@ -325,26 +325,34 @@ const backendLogFilePathForInstance = (
   return environment.path.join(environment.logDir, `server-child-${sanitized}.log`);
 };
 
-const makeBackendOutputLogForInstance = (
+// Just the IO sink. Cacheable by resolved file path so two ids that
+// sanitize to the same filename share a single RotatingLogFileWriter
+// (no race on currentSize tracking). Splitting the sink off from the
+// per-call shape lets the shape annotate writes with the *caller's*
+// id rather than whatever id created the cached writer first.
+const makeBackendOutputSinkForInstance = (
   environment: DesktopEnvironment.DesktopEnvironmentShape,
   id: string,
 ): Effect.Effect<
-  DesktopBackendOutputLogShape,
+  Option.Option<RotatingLogFileWriter>,
   never,
   FileSystem.FileSystem | Path.Path | Scope.Scope
 > =>
-  Effect.gen(function* () {
-    const writer = yield* makeRotatingLogFileWriter({
-      filePath: backendLogFilePathForInstance(environment, id),
-    }).pipe(Effect.option);
+  makeRotatingLogFileWriter({
+    filePath: backendLogFilePathForInstance(environment, id),
+  }).pipe(Effect.option);
 
-    return Option.match(writer, {
-      onNone: () => DesktopBackendOutputLogNoop,
-      onSome: (logFile) =>
-        ({
-          writeSessionBoundary: Effect.fn(
-            "desktop.observability.backendOutput.writeSessionBoundary",
-          )(function* ({ phase, details }) {
+const makeBackendOutputLogShape = (
+  environment: DesktopEnvironment.DesktopEnvironmentShape,
+  id: string,
+  sink: Option.Option<RotatingLogFileWriter>,
+): DesktopBackendOutputLogShape =>
+  Option.match(sink, {
+    onNone: () => DesktopBackendOutputLogNoop,
+    onSome: (logFile) =>
+      ({
+        writeSessionBoundary: Effect.fn("desktop.observability.backendOutput.writeSessionBoundary")(
+          function* ({ phase, details }) {
             const runId = yield* currentDesktopRunId;
             yield* writeBackendChildLogRecord(logFile, {
               message: `backend child process session ${phase.toLowerCase()}`,
@@ -357,28 +365,28 @@ const makeBackendOutputLogForInstance = (
                 details: sanitizeLogValue(details),
               },
             });
-          }),
-          writeOutputChunk: Effect.fn("desktop.observability.backendOutput.writeOutputChunk")(
-            function* (streamName, chunk) {
-              if (environment.isDevelopment) {
-                yield* writeDevelopmentConsoleOutput(streamName, chunk);
-              }
-              const runId = yield* currentDesktopRunId;
-              yield* writeBackendChildLogRecord(logFile, {
-                message: "backend child process output",
-                level: streamName === "stderr" ? "ERROR" : "INFO",
-                annotations: {
-                  component: "desktop-backend-child",
-                  runId,
-                  instanceId: id,
-                  stream: streamName,
-                  text: textDecoder.decode(chunk),
-                },
-              });
-            },
-          ),
-        }) satisfies DesktopBackendOutputLogShape,
-    });
+          },
+        ),
+        writeOutputChunk: Effect.fn("desktop.observability.backendOutput.writeOutputChunk")(
+          function* (streamName, chunk) {
+            if (environment.isDevelopment) {
+              yield* writeDevelopmentConsoleOutput(streamName, chunk);
+            }
+            const runId = yield* currentDesktopRunId;
+            yield* writeBackendChildLogRecord(logFile, {
+              message: "backend child process output",
+              level: streamName === "stderr" ? "ERROR" : "INFO",
+              annotations: {
+                component: "desktop-backend-child",
+                runId,
+                instanceId: id,
+                stream: streamName,
+                text: textDecoder.decode(chunk),
+              },
+            });
+          },
+        ),
+      }) satisfies DesktopBackendOutputLogShape,
   });
 
 const backendOutputLogFactoryLayer = Layer.effect(
@@ -388,33 +396,39 @@ const backendOutputLogFactoryLayer = Layer.effect(
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const factoryScope = yield* Scope.Scope;
-    // Per-id cache so repeated forInstance(id) calls reuse the same
-    // rotating writer instead of opening a second handle on the same
-    // file. Each writer pins itself to the factory's scope so all log
-    // resources tear down together at app exit. Mutex serializes
-    // concurrent first-time lookups for the same id.
-    const cacheRef = yield* SynchronizedRef.make<ReadonlyMap<string, DesktopBackendOutputLogShape>>(
-      new Map(),
-    );
+    // Per-file-path cache of the IO sink only. The per-call shape
+    // wraps the sink with the caller's instance id so a cache hit on
+    // a path collision (e.g. "wsl:default" and "wsl_default" both
+    // resolve to server-child-wsl_default.log) doesn't attribute the
+    // second caller's writes to the first caller's id. Each sink pins
+    // itself to the factory's scope so all log resources tear down
+    // together at app exit. Mutex serializes concurrent first-time
+    // lookups for the same file path.
+    const cacheRef = yield* SynchronizedRef.make<
+      ReadonlyMap<string, Option.Option<RotatingLogFileWriter>>
+    >(new Map());
 
     const makeForId = (id: string): Effect.Effect<DesktopBackendOutputLogShape> =>
       SynchronizedRef.modifyEffect(cacheRef, (cache) => {
-        // Key the cache by the resolved file path, not the raw id.
-        // Otherwise two ids that sanitize to the same filename (e.g.
-        // `wsl:default` and `wsl_default`) would each create their
-        // own RotatingLogFileWriter pointing at the same file, with
-        // independent currentSize tracking and a race on writes.
         const cacheKey = backendLogFilePathForInstance(environment, id);
         const cached = cache.get(cacheKey);
-        if (cached !== undefined) return Effect.succeed([cached, cache] as const);
-        return makeBackendOutputLogForInstance(environment, id).pipe(
+        if (cached !== undefined) {
+          return Effect.succeed([
+            makeBackendOutputLogShape(environment, id, cached),
+            cache,
+          ] as const);
+        }
+        return makeBackendOutputSinkForInstance(environment, id).pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.provideService(Path.Path, path),
           Scope.provide(factoryScope),
-          Effect.map((shape) => {
+          Effect.map((sink) => {
             const next = new Map(cache);
-            next.set(cacheKey, shape);
-            return [shape, next as ReadonlyMap<string, DesktopBackendOutputLogShape>] as const;
+            next.set(cacheKey, sink);
+            return [
+              makeBackendOutputLogShape(environment, id, sink),
+              next as ReadonlyMap<string, Option.Option<RotatingLogFileWriter>>,
+            ] as const;
           }),
         );
       });

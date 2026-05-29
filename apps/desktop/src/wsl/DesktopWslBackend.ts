@@ -20,6 +20,7 @@
 // (127.0.0.1) since the WSL backend is loopback-only — the primary
 // owns LAN exposure when the user opts in.
 
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -209,9 +210,22 @@ export const layer = Layer.effect(
       }
     });
 
+    // Top-level safety net. Every internal step today already catches
+    // its own failures (port allocation, register, preWarm), so the
+    // inferred error type is `never` and this catch is a no-op in
+    // steady state. It's here to enforce the file-header contract
+    // ("reconcile never fails; errors are logged") if a future change
+    // introduces an unhandled failure path — otherwise IPC callers
+    // like setWslBackendEnabled would surface it to the renderer as
+    // an opaque error.
     const reconcile = reconcileMutex
       .withPermits(1)(reconcileBody)
-      .pipe(Effect.withSpan("desktop.wslBackend.reconcile"));
+      .pipe(
+        Effect.catchCause((cause) =>
+          logWslBackendWarning("reconcile failed", { cause: Cause.pretty(cause) }),
+        ),
+        Effect.withSpan("desktop.wslBackend.reconcile"),
+      );
 
     return DesktopWslBackend.of({ reconcile });
   }),
