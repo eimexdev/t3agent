@@ -14,7 +14,7 @@ import { buildSshChildEnvironment, type SshAuthOptions } from "./auth.ts";
 import { SshCommandError, SshInvalidTargetError } from "./errors.ts";
 
 const PUBLISHABLE_T3_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
-const DEFAULT_SSH_COMMAND_TIMEOUT_MS = 60_000;
+const DEFAULT_SSH_COMMAND_TIMEOUT = Duration.seconds(60);
 
 const encoder = new TextEncoder();
 
@@ -27,7 +27,7 @@ export interface RunSshCommandOptions extends SshAuthOptions {
   readonly preHostArgs?: ReadonlyArray<string>;
   readonly remoteCommandArgs?: ReadonlyArray<string>;
   readonly stdin?: string;
-  readonly timeoutMs?: number;
+  readonly timeout?: Duration.Input;
 }
 
 export function parseSshResolveOutput(alias: string, stdout: string): DesktopSshEnvironmentTarget {
@@ -146,6 +146,8 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > {
   const hostSpec = yield* buildSshHostSpecEffect(target);
+  const timeout = Duration.fromInputUnsafe(input.timeout ?? DEFAULT_SSH_COMMAND_TIMEOUT);
+  const timeoutMs = Duration.toMillis(timeout);
   const environment = yield* buildSshChildEnvironment({
     ...(input.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
     ...(input.authSecret === undefined ? {} : { authSecret: input.authSecret }),
@@ -174,7 +176,7 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
     ...sshTargetLogFields(target),
     command: ["ssh", ...args],
     hasStdin: input.stdin !== undefined,
-    timeoutMs: input.timeoutMs ?? DEFAULT_SSH_COMMAND_TIMEOUT_MS,
+    timeoutMs,
   });
   const child = yield* spawner
     .spawn(
@@ -258,10 +260,12 @@ export const runSshCommand = Effect.fn("ssh/command.runSshCommand")(function* (
   SshCommandError | SshInvalidTargetError,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > {
+  const timeout = Duration.fromInputUnsafe(input.timeout ?? DEFAULT_SSH_COMMAND_TIMEOUT);
+  const timeoutMs = Duration.toMillis(timeout);
   return yield* Effect.scopedWith((commandScope) =>
     runSshCommandInScope(target, input, commandScope),
   ).pipe(
-    Effect.timeoutOption(Duration.millis(input.timeoutMs ?? DEFAULT_SSH_COMMAND_TIMEOUT_MS)),
+    Effect.timeoutOption(timeout),
     Effect.flatMap((result) =>
       Option.match(result, {
         onSome: Effect.succeed,
@@ -269,7 +273,7 @@ export const runSshCommand = Effect.fn("ssh/command.runSshCommand")(function* (
           Effect.gen(function* () {
             yield* Effect.logWarning("ssh.command.timedOut", {
               ...sshTargetLogFields(target),
-              timeoutMs: input.timeoutMs ?? DEFAULT_SSH_COMMAND_TIMEOUT_MS,
+              timeoutMs,
               remoteCommandArgs: input.remoteCommandArgs ?? [],
               preHostArgs: input.preHostArgs ?? [],
               hasStdin: input.stdin !== undefined,
@@ -278,7 +282,7 @@ export const runSshCommand = Effect.fn("ssh/command.runSshCommand")(function* (
               command: ["ssh"],
               exitCode: null,
               stderr: "",
-              message: `SSH command timed out after ${input.timeoutMs ?? DEFAULT_SSH_COMMAND_TIMEOUT_MS}ms.`,
+              message: `SSH command timed out after ${timeoutMs}ms.`,
             });
           }),
       }),
