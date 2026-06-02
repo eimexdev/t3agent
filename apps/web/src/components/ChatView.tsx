@@ -792,12 +792,11 @@ export default function ChatView(props: ChatViewProps) {
   const activeThreadLastVisitedAt = useUiStateStore((store) =>
     routeKind === "server" ? store.threadLastVisitedAtById[routeThreadKey] : undefined,
   );
-  const settings = useSettings();
+  const timestampFormat = useSettings((settings) => settings.timestampFormat);
+  const autoOpenPlanSidebar = useSettings((settings) => settings.autoOpenPlanSidebar);
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
   );
-  const timestampFormat = settings.timestampFormat;
-  const autoOpenPlanSidebar = settings.autoOpenPlanSidebar;
   const navigate = useNavigate();
   const rawSearch = useSearch({
     strict: false,
@@ -833,6 +832,7 @@ export default function ChatView(props: ChatViewProps) {
   const setLogicalProjectDraftThreadId = useComposerDraftStore(
     (store) => store.setLogicalProjectDraftThreadId,
   );
+  const settings = useSettings();
   const draftThread = useComposerDraftStore((store) =>
     routeKind === "server"
       ? store.getDraftSessionByRef(routeThreadRef)
@@ -3870,7 +3870,6 @@ export default function ChatView(props: ChatViewProps) {
                   activeThreadModelSelection={activeThread?.modelSelection}
                   activeThreadActivities={activeThread?.activities}
                   resolvedTheme={resolvedTheme}
-                  settings={settings}
                   keybindings={keybindings}
                   terminalOpen={Boolean(terminalUiState.terminalOpen)}
                   gitCwd={gitCwd}
