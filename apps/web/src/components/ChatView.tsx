@@ -96,6 +96,7 @@ import {
   type TurnDiffSummary,
 } from "../types";
 import { useTheme } from "../hooks/useTheme";
+import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
@@ -794,6 +795,18 @@ export default function ChatView(props: ChatViewProps) {
   );
   const timestampFormat = useSettings((settings) => settings.timestampFormat);
   const autoOpenPlanSidebar = useSettings((settings) => settings.autoOpenPlanSidebar);
+  const providerSettings = useSettings((settings) => settings.providers);
+  const providerInstancesSettings = useSettings((settings) => settings.providerInstances);
+  const providerModelPreferences = useSettings((settings) => settings.providerModelPreferences);
+  const modelSettings = useMemo(
+    () => ({
+      ...DEFAULT_UNIFIED_SETTINGS,
+      providers: providerSettings,
+      providerInstances: providerInstancesSettings,
+      providerModelPreferences,
+    }),
+    [providerInstancesSettings, providerModelPreferences, providerSettings],
+  );
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
   );
@@ -832,7 +845,6 @@ export default function ChatView(props: ChatViewProps) {
   const setLogicalProjectDraftThreadId = useComposerDraftStore(
     (store) => store.setLogicalProjectDraftThreadId,
   );
-  const settings = useSettings();
   const draftThread = useComposerDraftStore((store) =>
     routeKind === "server"
       ? store.getDraftSessionByRef(routeThreadRef)
@@ -3621,7 +3633,7 @@ export default function ChatView(props: ChatViewProps) {
       }
       const resolvedModel = resolveAppModelSelectionForInstance(
         instanceId,
-        settings,
+        modelSettings,
         providerStatuses,
         model,
       );
@@ -3647,7 +3659,7 @@ export default function ChatView(props: ChatViewProps) {
       setComposerDraftModelSelection,
       setStickyComposerModelSelection,
       providerStatuses,
-      settings,
+      modelSettings,
     ],
   );
   const onEnvModeChange = useCallback(

@@ -9,8 +9,12 @@
  * write. The hook transparently routes reads/writes to the correct backing
  * store.
  */
-import { useCallback, useMemo, useSyncExternalStore } from "react";
-import { ServerSettings, type ServerSettingsPatch } from "@t3tools/contracts";
+import { useCallback, useRef, useSyncExternalStore } from "react";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  ServerSettings,
+  type ServerSettingsPatch,
+} from "@t3tools/contracts";
 import {
   type ClientSettingsPatch,
   type ClientSettings,
@@ -21,7 +25,7 @@ import {
 import { ensureLocalApi } from "~/localApi";
 import * as Struct from "effect/Struct";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
-import { applySettingsUpdated, getServerConfig, useServerSettings } from "~/rpc/serverState";
+import { applySettingsUpdated, getServerConfig, onServerConfigUpdated } from "~/rpc/serverState";
 
 const CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE = "[CLIENT_SETTINGS]";
 
@@ -30,6 +34,9 @@ const clientSettingsHydrationListeners = new Set<() => void>();
 let clientSettingsSnapshot = DEFAULT_CLIENT_SETTINGS;
 let clientSettingsHydrated = false;
 let clientSettingsHydrationPromise: Promise<void> | null = null;
+let unifiedServerSettingsSnapshot = DEFAULT_SERVER_SETTINGS;
+let unifiedClientSettingsSnapshot = DEFAULT_CLIENT_SETTINGS;
+let unifiedSettingsSnapshot = DEFAULT_UNIFIED_SETTINGS;
 
 function emitClientSettingsChange() {
   for (const listener of clientSettingsListeners) {
@@ -45,6 +52,28 @@ function emitClientSettingsHydrationChange() {
 
 function getClientSettingsSnapshot(): ClientSettings {
   return clientSettingsSnapshot;
+}
+
+function getServerSettingsSnapshot(): ServerSettings {
+  return getServerConfig()?.settings ?? DEFAULT_SERVER_SETTINGS;
+}
+
+function getUnifiedSettingsSnapshot(): UnifiedSettings {
+  const serverSettings = getServerSettingsSnapshot();
+  const clientSettings = getClientSettingsSnapshot();
+  if (
+    serverSettings === unifiedServerSettingsSnapshot &&
+    clientSettings === unifiedClientSettingsSnapshot
+  ) {
+    return unifiedSettingsSnapshot;
+  }
+  unifiedServerSettingsSnapshot = serverSettings;
+  unifiedClientSettingsSnapshot = clientSettings;
+  unifiedSettingsSnapshot = {
+    ...serverSettings,
+    ...clientSettings,
+  };
+  return unifiedSettingsSnapshot;
 }
 
 function replaceClientSettingsSnapshot(settings: ClientSettings): void {
@@ -65,6 +94,17 @@ function subscribeClientSettings(listener: () => void): () => void {
   void hydrateClientSettings();
   return () => {
     clientSettingsListeners.delete(listener);
+  };
+}
+
+function subscribeUnifiedSettings(listener: () => void): () => void {
+  const unsubscribeClient = subscribeClientSettings(listener);
+  const unsubscribeServer = onServerConfigUpdated(() => {
+    listener();
+  });
+  return () => {
+    unsubscribeClient();
+    unsubscribeServer();
   };
 }
 
@@ -168,22 +208,61 @@ export function useClientSettingsHydrated(): boolean {
 }
 
 export function useSettings<T = UnifiedSettings>(selector?: (s: UnifiedSettings) => T): T {
-  const serverSettings = useServerSettings();
-  const clientSettings = useSyncExternalStore(
-    subscribeClientSettings,
-    getClientSettingsSnapshot,
-    () => DEFAULT_CLIENT_SETTINGS,
+  const selectorRef = useRef(selector);
+  selectorRef.current = selector;
+  const lastSourceRef = useRef<UnifiedSettings | null>(null);
+  const lastSelectorRef = useRef<typeof selector | undefined>(undefined);
+  const lastSelectedRef = useRef<T | null>(null);
+  const hasSelectedRef = useRef(false);
+
+  const selectSnapshot = useCallback((settings: UnifiedSettings): T => {
+    const currentSelector = selectorRef.current;
+    if (
+      hasSelectedRef.current &&
+      lastSourceRef.current === settings &&
+      lastSelectorRef.current === currentSelector
+    ) {
+      return lastSelectedRef.current as T;
+    }
+
+    const selected = currentSelector ? currentSelector(settings) : (settings as T);
+    lastSourceRef.current = settings;
+    lastSelectorRef.current = currentSelector;
+    if (hasSelectedRef.current && Object.is(lastSelectedRef.current, selected)) {
+      return lastSelectedRef.current as T;
+    }
+
+    hasSelectedRef.current = true;
+    lastSelectedRef.current = selected;
+    return selected;
+  }, []);
+
+  const getSelectedSnapshot = useCallback((): T => {
+    return selectSnapshot(getUnifiedSettingsSnapshot());
+  }, [selectSnapshot]);
+
+  const getServerSelectedSnapshot = useCallback((): T => {
+    return selectSnapshot(DEFAULT_UNIFIED_SETTINGS);
+  }, [selectSnapshot]);
+
+  const subscribeSelectedSettings = useCallback(
+    (listener: () => void): (() => void) =>
+      subscribeUnifiedSettings(() => {
+        const hadSelected = hasSelectedRef.current;
+        const previousSelected = lastSelectedRef.current;
+        const nextSelected = selectSnapshot(getUnifiedSettingsSnapshot());
+        if (!hadSelected || !Object.is(previousSelected, nextSelected)) {
+          listener();
+        }
+      }),
+    [selectSnapshot],
   );
 
-  const merged = useMemo<UnifiedSettings>(
-    () => ({
-      ...serverSettings,
-      ...clientSettings,
-    }),
-    [clientSettings, serverSettings],
+  return useSyncExternalStore(
+    subscribeSelectedSettings,
+    getSelectedSnapshot,
+    getServerSelectedSnapshot,
   );
-
-  return useMemo(() => (selector ? selector(merged) : (merged as T)), [merged, selector]);
 }
 
 /**
@@ -227,6 +306,9 @@ export function __resetClientSettingsPersistenceForTests(): void {
   clientSettingsSnapshot = DEFAULT_CLIENT_SETTINGS;
   clientSettingsHydrated = false;
   clientSettingsHydrationPromise = null;
+  unifiedServerSettingsSnapshot = DEFAULT_SERVER_SETTINGS;
+  unifiedClientSettingsSnapshot = DEFAULT_CLIENT_SETTINGS;
+  unifiedSettingsSnapshot = DEFAULT_UNIFIED_SETTINGS;
   clientSettingsListeners.clear();
   clientSettingsHydrationListeners.clear();
 }

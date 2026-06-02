@@ -100,7 +100,7 @@ import {
   type ProviderInstanceEntry,
 } from "../../providerInstances";
 import { type AppModelOption, getAppModelOptionsForInstance } from "../../modelSelection";
-import type { UnifiedSettings } from "@t3tools/contracts/settings";
+import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import type { SessionPhase, Thread } from "../../types";
 import type { PendingUserInputDraftAnswer } from "../../pendingUserInput";
 import type { PendingApproval, PendingUserInput } from "../../session-logic";
@@ -108,6 +108,7 @@ import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { useSettings } from "../../hooks/useSettings";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 
@@ -434,7 +435,6 @@ export interface ChatComposerProps {
 
   // Misc
   resolvedTheme: "light" | "dark";
-  settings: UnifiedSettings;
   keybindings: ResolvedKeybindingsConfig;
   terminalOpen: boolean;
   gitCwd: string | null;
@@ -524,7 +524,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThreadModelSelection,
     activeThreadActivities,
     resolvedTheme,
-    settings,
     keybindings,
     terminalOpen,
     gitCwd,
@@ -561,6 +560,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerImages = composerDraft.images;
   const composerTerminalContexts = composerDraft.terminalContexts;
   const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
+  const providerSettings = useSettings((settings) => settings.providers);
+  const providerInstancesSettings = useSettings((settings) => settings.providerInstances);
+  const providerModelPreferences = useSettings((settings) => settings.providerModelPreferences);
+  const modelSettings = useMemo(
+    () => ({
+      ...DEFAULT_UNIFIED_SETTINGS,
+      providers: providerSettings,
+      providerInstances: providerInstancesSettings,
+      providerModelPreferences,
+    }),
+    [providerInstancesSettings, providerModelPreferences, providerSettings],
+  );
 
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
   const addComposerDraftImage = useComposerDraftStore((store) => store.addImage);
@@ -696,7 +707,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     selectedInstanceId,
     threadModelSelection: activeThreadModelSelection,
     projectModelSelection: activeProjectDefaultModelSelection,
-    settings,
+    settings: modelSettings,
   });
 
   // Resolve the active instance's snapshot by `instanceId` so a custom
@@ -759,10 +770,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   >(() => {
     const out = new Map<ProviderInstanceId, ReadonlyArray<AppModelOption>>();
     for (const entry of providerInstanceEntries) {
-      out.set(entry.instanceId, getAppModelOptionsForInstance(settings, entry));
+      out.set(entry.instanceId, getAppModelOptionsForInstance(modelSettings, entry));
     }
     return out;
-  }, [providerInstanceEntries, settings]);
+  }, [modelSettings, providerInstanceEntries]);
   const selectedModelForPickerWithCustomFallback = useMemo(() => {
     const currentOptions = modelOptionsByInstance.get(selectedInstanceId) ?? [];
     return currentOptions.some((option) => option.slug === selectedModelForPicker)
