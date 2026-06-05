@@ -100,7 +100,7 @@ const makeLockedFileSystemLayer = (attempts: { count: number }) =>
     writeFileString: (path) =>
       Effect.gen(function* () {
         attempts.count += 1;
-        return yield* Effect.fail(fileSystemError("AlreadyExists", "writeFileString", path));
+        return yield* fileSystemError("AlreadyExists", "writeFileString", path);
       }),
   });
 
