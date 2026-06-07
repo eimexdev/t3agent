@@ -88,9 +88,11 @@ interface ShellResult {
 const TIMEOUT_RESULT: ShellResult = { exitCode: 124, stdout: "", stderr: "\n[timeout]" };
 
 // Reuse the SSH remote resolver so WSL and SSH discover version-managed Node
-// the same way. WSL keeps its separate toolchain version check, so this script
-// is built without an engine range and used only to repair PATH.
-const WSL_NODE_ENV_PREAMBLE = `${buildRemoteNodeEnvScript()}
+// the same way. Passing the engine range lets the resolver fall through to
+// version managers like nvm when a system node exists but is too old.
+export const buildWslNodeEnvPreamble = (
+  nodeEngineRange?: string | null,
+): string => `${buildRemoteNodeEnvScript({ nodeEngineRange: nodeEngineRange ?? null })}
 ensure_remote_node_path || true
 `;
 
@@ -101,6 +103,7 @@ const runWslShell = (
   distro: string | null,
   bashScript: string,
   timeout: Duration.Duration,
+  options: EnsureWslNodePtyOptions = {},
 ): Effect.Effect<ShellResult, never, ChildProcessSpawner.ChildProcessSpawner> => {
   const spawner = ChildProcessSpawner.ChildProcessSpawner;
   // -l picks up profile-managed PATH; the shared resolver covers supported
@@ -110,7 +113,9 @@ const runWslShell = (
     "wsl.exe",
     [...buildDistroArgs(distro), "--", "bash", "-l", "-s"],
     {
-      stdin: Stream.encodeText(Stream.make(`${WSL_NODE_ENV_PREAMBLE}${bashScript}`)),
+      stdin: Stream.encodeText(
+        Stream.make(`${buildWslNodeEnvPreamble(options.nodeEngineRange)}${bashScript}`),
+      ),
       stdout: "pipe",
       stderr: "pipe",
       killSignal: "SIGTERM",
@@ -293,14 +298,24 @@ const ensureNodePtyImpl = (
     // there rather than the monorepo root, where Bun's hoist layout omits it.
     const linuxServerDir = `${linuxRepoRoot}/apps/server`;
 
-    const probe = yield* runWslShell(distro, NODE_PTY_PROBE_SCRIPT(linuxServerDir), PROBE_TIMEOUT);
+    const probe = yield* runWslShell(
+      distro,
+      NODE_PTY_PROBE_SCRIPT(linuxServerDir),
+      PROBE_TIMEOUT,
+      options,
+    );
     const nodePath = parseNodePath(probe.stdout);
 
     // No node at all, even after the shared resolver repaired PATH. Surface
     // the specific, actionable toolchain message rather than a confusing
     // node-pty error, and don't try to build.
     if (nodePath === null) {
-      const toolchainCheck = yield* runWslShell(distro, TOOLCHAIN_CHECK_SCRIPT, TOOLCHAIN_TIMEOUT);
+      const toolchainCheck = yield* runWslShell(
+        distro,
+        TOOLCHAIN_CHECK_SCRIPT,
+        TOOLCHAIN_TIMEOUT,
+        options,
+      );
       const report = parseToolchainReport(toolchainCheck.stdout);
       const reason =
         formatMissingToolsReason(report, options.nodeEngineRange?.trim() || null) ??
@@ -315,7 +330,12 @@ const ensureNodePtyImpl = (
     // surfaces as a specific, actionable message in both dev and packaged
     // builds — otherwise users saw a generic "node-pty is not prepared" error
     // pointing at a script that itself would have failed for the same reason.
-    const toolchainCheck = yield* runWslShell(distro, TOOLCHAIN_CHECK_SCRIPT, TOOLCHAIN_TIMEOUT);
+    const toolchainCheck = yield* runWslShell(
+      distro,
+      TOOLCHAIN_CHECK_SCRIPT,
+      TOOLCHAIN_TIMEOUT,
+      options,
+    );
     const report = parseToolchainReport(toolchainCheck.stdout);
     const missingReason = formatMissingToolsReason(report, options.nodeEngineRange?.trim() || null);
     if (missingReason !== null) {
@@ -330,7 +350,12 @@ const ensureNodePtyImpl = (
       } as const;
     }
 
-    const build = yield* runWslShell(distro, NODE_PTY_BUILD_SCRIPT(linuxServerDir), BUILD_TIMEOUT);
+    const build = yield* runWslShell(
+      distro,
+      NODE_PTY_BUILD_SCRIPT(linuxServerDir),
+      BUILD_TIMEOUT,
+      options,
+    );
     if (build.exitCode === 0) return { ok: true, nodePath } as const;
     const trimmedTail = `${build.stdout}${build.stderr}`.trim().slice(-500);
     return {

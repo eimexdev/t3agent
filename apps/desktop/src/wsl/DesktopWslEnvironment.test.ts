@@ -1,10 +1,26 @@
 import { describe, it, expect } from "vite-plus/test";
 
 import {
+  buildWslNodeEnvPreamble,
   formatMissingToolsReason,
   parseNodePath,
   parseToolchainReport,
 } from "./DesktopWslEnvironment.ts";
+
+describe("buildWslNodeEnvPreamble", () => {
+  it("passes the required Node engine range into the shared resolver", () => {
+    const preamble = buildWslNodeEnvPreamble("^22.16 || ^23.11 || >=24.10");
+
+    expect(preamble).toContain("T3_NODE_ENGINE_RANGE='^22.16 || ^23.11 || >=24.10'");
+    expect(preamble.indexOf("T3_NODE_ENGINE_RANGE=")).toBeLessThan(
+      preamble.lastIndexOf("ensure_remote_node_path || true"),
+    );
+  });
+
+  it("keeps the shared resolver permissive when no Node engine range is provided", () => {
+    expect(buildWslNodeEnvPreamble()).toContain("T3_NODE_ENGINE_RANGE=''");
+  });
+});
 
 describe("parseToolchainReport", () => {
   it("returns no missing tools and no node version on empty output", () => {
