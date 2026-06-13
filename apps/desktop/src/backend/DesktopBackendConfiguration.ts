@@ -462,21 +462,29 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
     } satisfies DesktopBackendManager.DesktopBackendStartConfig;
   }
 
+  // The WSL server spawns commands its providers reference by name — `npm`/`npx`
+  // for provider updates, and the installed CLIs themselves (e.g. `codex`). Those
+  // live in the resolved Node's bin dir, which `wsl.exe -- node` does NOT put on
+  // the process PATH, so `npm install -g ...` fails with NotFound. Launch through
+  // a shell that front-loads that bin dir (plus the standard system dirs) onto
+  // PATH, then `exec` the resolved Node. exec keeps fd 0, so the
+  // bootstrap-over-stdin delivery is unchanged, and we still run the exact
+  // version-managed Node node-pty was built against (not a bare `node`),
+  // regardless of PATH ordering.
+  const lastSlash = preflight.nodePath.lastIndexOf("/");
+  const nodeBinDir = lastSlash > 0 ? preflight.nodePath.slice(0, lastSlash) : "/usr/bin";
+  const wslShellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+  const launchPathPrefix = `${nodeBinDir}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
+  const wslServerCommand = [
+    `export PATH=${wslShellQuote(launchPathPrefix)}:"$PATH"`,
+    `exec ${wslShellQuote(preflight.nodePath)} ${wslShellQuote(preflight.linuxEntryPath)} --bootstrap-fd 0${devUrlArgs
+      .map((arg) => ` ${wslShellQuote(arg)}`)
+      .join("")}`,
+  ].join("; ");
+
   return {
     ...baseConfig,
-    args: [
-      ...distroArgs,
-      "--",
-      // Absolute node path resolved by the preflight after the shared remote
-      // resolver repaired PATH. `wsl.exe -- node` would run against the bare
-      // non-login PATH and hit /usr/bin/node instead of the version-managed
-      // node node-pty was built against.
-      preflight.nodePath,
-      preflight.linuxEntryPath,
-      "--bootstrap-fd",
-      "0",
-      ...devUrlArgs,
-    ],
+    args: [...distroArgs, "--", "bash", "-c", wslServerCommand],
     preflightFailure: Option.none(),
   } satisfies DesktopBackendManager.DesktopBackendStartConfig;
 });
