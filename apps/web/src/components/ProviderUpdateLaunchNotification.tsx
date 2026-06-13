@@ -3,7 +3,7 @@ import { DownloadIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { type ProviderDriverKind, type ProviderInstanceId } from "@t3tools/contracts";
 
-import { ensureLocalApi } from "../localApi";
+import { updateProviderAcrossLocalEnvironments } from "../environmentApi";
 import { useDismissedProviderUpdateNotificationKeys } from "../providerUpdateDismissal";
 import { useServerProviders } from "../rpc/serverState";
 import { PROVIDER_ICON_BY_PROVIDER } from "./chat/providerIconUtils";
@@ -207,11 +207,8 @@ export function ProviderUpdateLaunchNotification() {
       });
 
       void Promise.allSettled(
-        oneClickProviders.map(async (provider) =>
-          ensureLocalApi().server.updateProvider({
-            provider: provider.driver,
-            instanceId: provider.instanceId,
-          }),
+        oneClickProviders.flatMap((provider) =>
+          updateProviderAcrossLocalEnvironments(provider.driver, provider.instanceId),
         ),
       ).then((results) => {
         const activeUpdateToast = activeToastRef.current;

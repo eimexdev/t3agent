@@ -46,6 +46,7 @@ import {
   sortProviderInstanceEntries,
 } from "../../providerInstances";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
+import { updateProviderAcrossLocalEnvironments } from "../../environmentApi";
 import { useShallow } from "zustand/react/shallow";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
@@ -985,10 +986,13 @@ export function ProviderSettingsPanel() {
     }
 
     try {
-      await ensureLocalApi().server.updateProvider({
-        provider: candidate.driver,
-        instanceId: candidate.instanceId,
-      });
+      const results = await Promise.allSettled(
+        updateProviderAcrossLocalEnvironments(candidate.driver, candidate.instanceId),
+      );
+      const rejected = results.find((result) => result.status === "rejected");
+      if (rejected?.status === "rejected") {
+        throw rejected.reason;
+      }
     } catch (error) {
       toastManager.add(
         stackedThreadToast({

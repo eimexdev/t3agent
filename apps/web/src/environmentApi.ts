@@ -1,7 +1,18 @@
-import type { EnvironmentId, EnvironmentApi } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  EnvironmentApi,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  ServerProviderUpdatedPayload,
+} from "@t3tools/contracts";
 
 import type { WsRpcClient } from "@t3tools/client-runtime";
-import { readEnvironmentConnection } from "./environments/runtime";
+import {
+  getPrimaryEnvironmentConnection,
+  getSavedEnvironmentRuntimeState,
+  listSavedEnvironmentRecords,
+  readEnvironmentConnection,
+} from "./environments/runtime";
 
 const environmentApiOverridesForTests = new Map<EnvironmentId, EnvironmentApi>();
 
@@ -85,6 +96,47 @@ export function ensureEnvironmentApi(environmentId: EnvironmentId): EnvironmentA
     throw new Error(`Environment API not found for environment ${environmentId}`);
   }
   return api;
+}
+
+/**
+ * Dispatch a provider update to every connected local backend that has the
+ * provider configured — the primary plus any local secondary (e.g. WSL) — and
+ * return one in-flight promise per environment so callers can aggregate results
+ * with the existing toast helpers. The update candidate always comes from the
+ * primary's provider list, so its instance id is passed in for the primary;
+ * each secondary's instance id is looked up from that environment's own server
+ * config, since the same driver has a distinct instance id per environment.
+ */
+export function updateProviderAcrossLocalEnvironments(
+  driver: ProviderDriverKind,
+  primaryInstanceId: ProviderInstanceId,
+): ReadonlyArray<Promise<ServerProviderUpdatedPayload>> {
+  const primary = getPrimaryEnvironmentConnection();
+  const dispatches: Array<Promise<ServerProviderUpdatedPayload>> = [
+    primary.client.server.updateProvider({ provider: driver, instanceId: primaryInstanceId }),
+  ];
+
+  for (const record of listSavedEnvironmentRecords()) {
+    // Local backends only (skip SSH / relay / remote), and never the primary twice.
+    if (!record.desktopLocal || record.environmentId === primary.environmentId) {
+      continue;
+    }
+    const connection = readEnvironmentConnection(record.environmentId);
+    if (!connection) {
+      continue; // not connected / not settled
+    }
+    const providers =
+      getSavedEnvironmentRuntimeState(record.environmentId).serverConfig?.providers ?? [];
+    const match = providers.find((provider) => provider.driver === driver);
+    if (!match) {
+      continue; // provider not configured in this environment
+    }
+    dispatches.push(
+      connection.client.server.updateProvider({ provider: driver, instanceId: match.instanceId }),
+    );
+  }
+
+  return dispatches;
 }
 
 export function __setEnvironmentApiOverrideForTests(
