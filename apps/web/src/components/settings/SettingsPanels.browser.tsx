@@ -214,58 +214,77 @@ function resetServerConfigSnapshot(): void {
 }
 
 vi.mock("@effect/atom-react", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@effect/atom-react")>();
+  const [actual, Exit] = await Promise.all([
+    importOriginal<typeof import("@effect/atom-react")>(),
+    import("effect/Exit"),
+  ]);
+  const withSuccessfulExit =
+    <Args extends Array<unknown>, A>(run: (...args: Args) => A | Promise<A>) =>
+    async (...args: Args) =>
+      Exit.succeed(await run(...args));
+  const refreshProviders = withSuccessfulExit(mockRefreshProviders);
+  const connectPairingEnvironment = withSuccessfulExit(mockConnectPairingEnvironment);
+  const connectDesktopSshEnvironment = withSuccessfulExit(mockConnectDesktopSshEnvironment);
+  const connectRelayEnvironment = withSuccessfulExit(mockConnectRelayEnvironment);
+  const removeEnvironment = withSuccessfulExit(mockRemoveEnvironment);
+  const retryEnvironment = withSuccessfulExit(mockRetryEnvironment);
+  const refreshRelayEnvironments = withSuccessfulExit(mockRefreshRelayEnvironments);
+  const updateProvider = withSuccessfulExit(mockUpdateProvider);
+  const signalProcess = withSuccessfulExit(
+    ({ input }: { readonly input: Parameters<LocalApi["server"]["signalProcess"]>[0] }) =>
+      window.nativeApi?.server.signalProcess(input),
+  );
+  const openInEditor = withSuccessfulExit(
+    ({
+      input,
+    }: {
+      readonly input: {
+        readonly cwd: string;
+        readonly editor: Parameters<LocalApi["shell"]["openInEditor"]>[1];
+      };
+    }) => window.nativeApi?.shell.openInEditor(input.cwd, input.editor),
+  );
+  const succeedWithNoResult = async () => Exit.succeed(undefined);
 
   return {
     ...actual,
     useAtomSet: (atom: unknown, options: unknown) => {
       if (atom === directAtomMocks.refreshProvidersAction) {
-        return mockRefreshProviders;
+        return refreshProviders;
       }
       if (atom === directAtomMocks.connectPairingAction) {
-        return mockConnectPairingEnvironment;
+        return connectPairingEnvironment;
       }
       if (atom === directAtomMocks.connectSshEnvironmentAction) {
-        return mockConnectDesktopSshEnvironment;
+        return connectDesktopSshEnvironment;
       }
       if (atom === directAtomMocks.environmentRegisterAction) {
-        return mockConnectRelayEnvironment;
+        return connectRelayEnvironment;
       }
       if (atom === directAtomMocks.environmentRemoveAction) {
-        return mockRemoveEnvironment;
+        return removeEnvironment;
       }
       if (atom === directAtomMocks.environmentRetryAction) {
-        return mockRetryEnvironment;
+        return retryEnvironment;
       }
       if (atom === directAtomMocks.refreshRelayEnvironmentsAction) {
-        return mockRefreshRelayEnvironments;
+        return refreshRelayEnvironments;
       }
       if (atom === directAtomMocks.updateProviderAction) {
-        return mockUpdateProvider;
+        return updateProvider;
       }
       if (atom === directAtomMocks.signalProcessAction) {
-        return async ({
-          input,
-        }: {
-          readonly input: Parameters<LocalApi["server"]["signalProcess"]>[0];
-        }) => window.nativeApi?.server.signalProcess(input);
+        return signalProcess;
       }
       if (atom === directAtomMocks.openInEditorAction) {
-        return async ({
-          input,
-        }: {
-          readonly input: {
-            readonly cwd: string;
-            readonly editor: Parameters<LocalApi["shell"]["openInEditor"]>[1];
-          };
-        }) => window.nativeApi?.shell.openInEditor(input.cwd, input.editor);
+        return openInEditor;
       }
       if (
         atom === directAtomMocks.removeKeybindingAction ||
         atom === directAtomMocks.updateSettingsAction ||
         atom === directAtomMocks.upsertKeybindingAction
       ) {
-        return async () => undefined;
+        return succeedWithNoResult;
       }
       return actual.useAtomSet(atom as never, options as never);
     },
