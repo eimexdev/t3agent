@@ -3186,6 +3186,34 @@ export default function Sidebar() {
     projectRevealKey && sidebarProjectRevealRequest
       ? { projectKey: projectRevealKey, requestId: sidebarProjectRevealRequest.requestId }
       : null;
+
+  // Auto-complete reveal requests that no SidebarProjectItem can fulfil:
+  //  - projectRevealTarget is null (project key couldn't be resolved)
+  //  - isOnSettings is true (project list replaced by SettingsSidebarNav)
+  // A short delay allows async navigation or data hydration to settle first.
+  useEffect(() => {
+    if (!sidebarProjectRevealRequest) return;
+    if (projectRevealTarget && !isOnSettings) return;
+
+    const timer = window.setTimeout(() => {
+      completeSidebarProjectReveal(sidebarProjectRevealRequest.requestId);
+    }, 2_000);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    sidebarProjectRevealRequest,
+    projectRevealTarget,
+    isOnSettings,
+    completeSidebarProjectReveal,
+  ]);
+
+  // On mobile, open the sidebar sheet so the reveal scroll is visible.
+  useEffect(() => {
+    if (isMobile && projectRevealTarget) {
+      setOpenMobile(true);
+    }
+  }, [isMobile, projectRevealTarget, setOpenMobile]);
+
   const sidebarThreadByKey = useMemo(
     () =>
       new Map(
