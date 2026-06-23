@@ -126,7 +126,12 @@ describe("ProcessResourceMonitor", () => {
         maxRssBytes: 4_096,
         maxProcessCount: 2,
       });
-      expect(result.error).toEqual(Option.some({ message: "collector stalled" }));
+      expect(result.error).toEqual(
+        Option.some({
+          failureTag: "ProcessDiagnosticsQueryFailedError",
+          message: "collector stalled",
+        }),
+      );
     }),
   );
 });

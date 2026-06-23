@@ -13,6 +13,13 @@ const providedConnectionPlatformLayer = connectionPlatformLayer.pipe(
   Layer.provide(runtimeContextLayer),
 );
 
+type ConnectionLayerSource =
+  | typeof Connection.layer
+  | typeof runtimeContextLayer
+  | typeof connectionPlatformLayer
+  | typeof backgroundActivityObserverLayer
+  | typeof backgroundActivityReporterLayer;
+
 const providedClientConnectionLayer = Connection.layer.pipe(
   Layer.provideMerge(
     Layer.mergeAll(
@@ -23,11 +30,9 @@ const providedClientConnectionLayer = Connection.layer.pipe(
   ),
 );
 
-export const connectionLayer = backgroundActivityReporterLayer.pipe(
+const connectionLayer = backgroundActivityReporterLayer.pipe(
   Layer.provideMerge(providedClientConnectionLayer),
 );
-
-type ConnectionLayerSource = typeof connectionLayer;
 
 export const connectionAtomRuntime: Atom.AtomRuntime<
   Layer.Success<ConnectionLayerSource>,

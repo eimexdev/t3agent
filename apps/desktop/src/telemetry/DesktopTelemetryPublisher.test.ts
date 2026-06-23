@@ -40,7 +40,7 @@ function makeElectronAppLayer(
     setDockIcon: () => Effect.void,
     appendCommandLineSwitch: () => Effect.void,
     on: () => Effect.void,
-  } satisfies ElectronApp.ElectronAppShape);
+  } satisfies ElectronApp.ElectronApp["Service"]);
 }
 
 describe("DesktopTelemetryPublisher", () => {

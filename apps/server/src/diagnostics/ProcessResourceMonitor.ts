@@ -61,7 +61,12 @@ export const make = Effect.fn("makeProcessResourceMonitor")(function* () {
             maxProcessCount: bucket.maxProcessCount,
           })),
           topProcesses,
-          error: history.health.native.lastError.pipe(Option.map((message) => ({ message }))),
+          error: history.health.native.lastError.pipe(
+            Option.map((message) => ({
+              failureTag: "ProcessDiagnosticsQueryFailedError" as const,
+              message,
+            })),
+          ),
         };
       }),
     );

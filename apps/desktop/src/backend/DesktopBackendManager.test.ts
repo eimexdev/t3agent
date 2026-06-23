@@ -309,6 +309,7 @@ describe("DesktopBackendManager", () => {
       );
       const error = yield* DesktopBackendManager.runBackendProcess({
         ...baseConfig,
+        desktopTelemetryStream: Stream.empty,
         bootstrap: {
           ...baseConfig.bootstrap,
           port: 0,
@@ -348,7 +349,10 @@ describe("DesktopBackendManager", () => {
         ChildProcessSpawner.ChildProcessSpawner,
         ChildProcessSpawner.make(() => Effect.fail(spawnCause)),
       );
-      const error = yield* DesktopBackendManager.runBackendProcess(baseConfig).pipe(
+      const error = yield* DesktopBackendManager.runBackendProcess({
+        ...baseConfig,
+        desktopTelemetryStream: Stream.empty,
+      }).pipe(
         Effect.flip,
         Effect.scoped,
         Effect.provide(Layer.merge(spawnerLayer, healthyHttpClientLayer)),
@@ -389,7 +393,10 @@ describe("DesktopBackendManager", () => {
           ),
         ),
       );
-      const error = yield* DesktopBackendManager.runBackendProcess(baseConfig).pipe(
+      const error = yield* DesktopBackendManager.runBackendProcess({
+        ...baseConfig,
+        desktopTelemetryStream: Stream.empty,
+      }).pipe(
         Effect.flip,
         Effect.scoped,
         Effect.provide(Layer.merge(spawnerLayer, healthyHttpClientLayer)),
@@ -433,6 +440,7 @@ describe("DesktopBackendManager", () => {
 
       const exit = yield* DesktopBackendManager.runBackendProcess({
         ...baseConfig,
+        desktopTelemetryStream: Stream.empty,
         onOutputFailure: (error) => Deferred.succeed(reported, error).pipe(Effect.asVoid),
       }).pipe(Effect.scoped, Effect.provide(Layer.merge(spawnerLayer, healthyHttpClientLayer)));
       const error = yield* Deferred.await(reported);
@@ -472,6 +480,7 @@ describe("DesktopBackendManager", () => {
 
       const exit = yield* DesktopBackendManager.runBackendProcess({
         ...baseConfig,
+        desktopTelemetryStream: Stream.empty,
         onOutput: () => Effect.fail(outputCause),
         onOutputFailure: (error) => Deferred.succeed(reported, error).pipe(Effect.asVoid),
       }).pipe(Effect.scoped, Effect.provide(Layer.merge(spawnerLayer, healthyHttpClientLayer)));
