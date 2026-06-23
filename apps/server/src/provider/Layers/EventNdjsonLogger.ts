@@ -318,7 +318,7 @@ function drainPending(input: {
   }
 
   const sinks = new Map(input.state.sinks);
-  const failedSegments = new Set(input.state.failedSegments);
+  const failedSegments = new Set<string>();
   const failures: Array<FileOperationFailure> = [];
   const attributionByStream = new Map<
     EventNdjsonStream,
@@ -399,7 +399,7 @@ function drainPending(input: {
       pendingBytes: 0,
       sinks,
       failedSegments,
-      flushScheduled: input.timerFired ? false : input.state.flushScheduled,
+      flushScheduled: false,
       closed: input.close,
       lastRetentionAt: retentionDue ? input.now : input.state.lastRetentionAt,
     },
@@ -557,7 +557,14 @@ export const makeEventNdjsonLogStore = Effect.fnUntraced(function* (
       if (action.flush) {
         yield* flush(false, false);
       } else if (action.schedule) {
-        yield* scheduleFlush();
+        yield* scheduleFlush().pipe(
+          Effect.catchCause(() =>
+            SynchronizedRef.update(stateRef, (state) => ({
+              ...state,
+              flushScheduled: false,
+            })),
+          ),
+        );
       }
     });
 
