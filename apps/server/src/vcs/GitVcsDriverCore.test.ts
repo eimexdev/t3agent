@@ -8,6 +8,7 @@ import * as PlatformError from "effect/PlatformError";
 import * as Scope from "effect/Scope";
 
 import { GitCommandError } from "@t3tools/contracts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { ServerConfig } from "../config.ts";
 import { splitNullSeparatedGitStdoutPaths } from "./GitVcsDriverCore.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
@@ -57,6 +58,20 @@ const git = (
     });
     return result.stdout.trim();
   });
+
+const findGitExecutable = Effect.fn("GitVcsDriver.test.findGitExecutable")(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const pathService = yield* Path.Path;
+  const pathDelimiter = (yield* HostProcessPlatform) === "win32" ? ";" : ":";
+  for (const entry of (process.env.PATH ?? "").split(pathDelimiter)) {
+    if (entry.length === 0) continue;
+    const candidate = pathService.join(entry, "git");
+    if (yield* fileSystem.exists(candidate)) {
+      return yield* fileSystem.realPath(candidate);
+    }
+  }
+  return yield* Effect.die(new Error("Could not find the Git executable in PATH."));
+});
 
 const initRepoWithCommit = (
   cwd: string,
@@ -148,6 +163,7 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         const cwd = pathService.join(parent, "missing");
         const driver = yield* GitVcsDriver.GitVcsDriver;
 
+        yield* driver.refreshStatusUpstream(cwd);
         const [localStatus, remoteStatus, refs] = yield* Effect.all([
           driver.statusDetails(cwd),
           driver.statusDetailsRemote(cwd, { refreshUpstream: false }),
@@ -435,8 +451,16 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
           process.env.SSH_ASKPASS_REQUIRE = "force";
           process.env.T3_TEST_SSH_ASKPASS_LOG = sshLogPath;
 
-          yield* (yield* GitVcsDriver.GitVcsDriver).statusDetails(cwd);
+          const refreshError = yield* (yield* GitVcsDriver.GitVcsDriver)
+            .refreshStatusUpstream(cwd)
+            .pipe(Effect.flip);
 
+          assert.deepInclude(refreshError, {
+            _tag: "GitCommandError",
+            operation: "GitVcsDriver.fetchRemoteForStatus",
+            cwd,
+            detail: "Background Git fetch failed.",
+          });
           assert.deepEqual((yield* fileSystem.readFileString(sshLogPath)).trim().split(/\r?\n/), [
             "GCM_INTERACTIVE=never",
             "GIT_ASKPASS=",
@@ -455,6 +479,191 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
                   process.env[key] = previous;
                 }
               }
+            }),
+          ),
+        );
+      }),
+    );
+
+    it.effect("fetches status remotes from the worktree with hardened background flags", () =>
+      Effect.gen(function* () {
+        const platform = yield* HostProcessPlatform;
+        if (platform === "win32") return;
+
+        const cwd = yield* makeTmpDir();
+        const remote = yield* makeTmpDir("git-vcs-driver-remote-");
+        const wrapperDir = yield* makeTmpDir("git-vcs-driver-wrapper-");
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+        const realGit = yield* findGitExecutable();
+        const wrapperPath = pathService.join(wrapperDir, "git");
+        const invocationLogPath = pathService.join(wrapperDir, "fetch-invocation.txt");
+        const fetchHeadPath = pathService.join(cwd, ".git", "FETCH_HEAD");
+        const previousPath = process.env.PATH;
+        const previousRealGit = process.env.T3_TEST_REAL_GIT;
+        const previousInvocationLog = process.env.T3_TEST_FETCH_INVOCATION_LOG;
+
+        yield* git(remote, ["init", "--bare"]);
+        yield* git(cwd, ["remote", "add", "origin", remote]);
+        yield* git(cwd, ["push", "-u", "origin", initialBranch]);
+        yield* fileSystem.writeFileString(fetchHeadPath, "sentinel-fetch-head\n");
+        yield* fileSystem.writeFileString(
+          wrapperPath,
+          [
+            "#!/bin/sh",
+            "is_fetch=0",
+            'for arg in "$@"; do',
+            '  if [ "$arg" = "fetch" ]; then is_fetch=1; fi',
+            "done",
+            'if [ "$is_fetch" = "1" ]; then',
+            '  printf "cwd=%s\\n" "$PWD" > "$T3_TEST_FETCH_INVOCATION_LOG"',
+            '  for arg in "$@"; do',
+            '    printf "arg=%s\\n" "$arg" >> "$T3_TEST_FETCH_INVOCATION_LOG"',
+            "  done",
+            "fi",
+            'exec "$T3_TEST_REAL_GIT" "$@"',
+            "",
+          ].join("\n"),
+        );
+        yield* fileSystem.chmod(wrapperPath, 0o755);
+
+        yield* Effect.gen(function* () {
+          process.env.PATH = `${wrapperDir}:${previousPath ?? ""}`;
+          process.env.T3_TEST_REAL_GIT = realGit;
+          process.env.T3_TEST_FETCH_INVOCATION_LOG = invocationLogPath;
+
+          yield* (yield* GitVcsDriver.GitVcsDriver).refreshStatusUpstream(cwd);
+
+          assert.deepStrictEqual(
+            (yield* fileSystem.readFileString(invocationLogPath)).trim().split(/\r?\n/),
+            [
+              `cwd=${cwd}`,
+              "arg=fetch",
+              "arg=--quiet",
+              "arg=--no-tags",
+              "arg=--no-write-fetch-head",
+              "arg=--no-auto-maintenance",
+              "arg=--no-recurse-submodules",
+              "arg=--",
+              "arg=origin",
+            ],
+          );
+          assert.equal(yield* fileSystem.readFileString(fetchHeadPath), "sentinel-fetch-head\n");
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (previousPath === undefined) delete process.env.PATH;
+              else process.env.PATH = previousPath;
+              if (previousRealGit === undefined) delete process.env.T3_TEST_REAL_GIT;
+              else process.env.T3_TEST_REAL_GIT = previousRealGit;
+              if (previousInvocationLog === undefined) {
+                delete process.env.T3_TEST_FETCH_INVOCATION_LOG;
+              } else {
+                process.env.T3_TEST_FETCH_INVOCATION_LOG = previousInvocationLog;
+              }
+            }),
+          ),
+        );
+      }),
+    );
+
+    it.effect("coalesces matching refreshes and serializes different remotes sharing objects", () =>
+      Effect.gen(function* () {
+        const platform = yield* HostProcessPlatform;
+        if (platform === "win32") return;
+
+        const cwd = yield* makeTmpDir();
+        const origin = yield* makeTmpDir("git-vcs-driver-origin-");
+        const backup = yield* makeTmpDir("git-vcs-driver-backup-");
+        const worktreeParent = yield* makeTmpDir("git-vcs-driver-worktrees-");
+        const wrapperDir = yield* makeTmpDir("git-vcs-driver-wrapper-");
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const fileSystem = yield* FileSystem.FileSystem;
+        const pathService = yield* Path.Path;
+        const worktreeCwd = pathService.join(worktreeParent, "feature");
+        const realGit = yield* findGitExecutable();
+        const wrapperPath = pathService.join(wrapperDir, "git");
+        const invocationLogPath = pathService.join(wrapperDir, "fetches.txt");
+        const activeLockPath = pathService.join(wrapperDir, "active-fetch");
+        const overlapLogPath = pathService.join(wrapperDir, "overlap.txt");
+        const previousPath = process.env.PATH;
+        const previousRealGit = process.env.T3_TEST_REAL_GIT;
+        const previousInvocationLog = process.env.T3_TEST_FETCH_INVOCATION_LOG;
+        const previousActiveLock = process.env.T3_TEST_FETCH_ACTIVE_LOCK;
+        const previousOverlapLog = process.env.T3_TEST_FETCH_OVERLAP_LOG;
+
+        yield* git(origin, ["init", "--bare"]);
+        yield* git(backup, ["init", "--bare"]);
+        yield* git(cwd, ["remote", "add", "origin", origin]);
+        yield* git(cwd, ["remote", "add", "backup", backup]);
+        yield* git(cwd, ["push", "-u", "origin", initialBranch]);
+        yield* git(cwd, ["worktree", "add", "-b", "feature/serialized", worktreeCwd]);
+        yield* git(worktreeCwd, ["push", "-u", "backup", "feature/serialized"]);
+        yield* fileSystem.writeFileString(
+          wrapperPath,
+          [
+            "#!/bin/sh",
+            "is_fetch=0",
+            'for arg in "$@"; do',
+            '  if [ "$arg" = "fetch" ]; then is_fetch=1; fi',
+            "done",
+            'if [ "$is_fetch" = "1" ]; then',
+            '  printf "start\\n" >> "$T3_TEST_FETCH_INVOCATION_LOG"',
+            '  if ! mkdir "$T3_TEST_FETCH_ACTIVE_LOCK" 2>/dev/null; then',
+            '    printf "overlap\\n" >> "$T3_TEST_FETCH_OVERLAP_LOG"',
+            "  fi",
+            "  sleep 0.2",
+            '  "$T3_TEST_REAL_GIT" "$@"',
+            "  status=$?",
+            '  rmdir "$T3_TEST_FETCH_ACTIVE_LOCK" 2>/dev/null || true',
+            '  printf "end\\n" >> "$T3_TEST_FETCH_INVOCATION_LOG"',
+            "  exit $status",
+            "fi",
+            'exec "$T3_TEST_REAL_GIT" "$@"',
+            "",
+          ].join("\n"),
+        );
+        yield* fileSystem.chmod(wrapperPath, 0o755);
+
+        yield* Effect.gen(function* () {
+          process.env.PATH = `${wrapperDir}:${previousPath ?? ""}`;
+          process.env.T3_TEST_REAL_GIT = realGit;
+          process.env.T3_TEST_FETCH_INVOCATION_LOG = invocationLogPath;
+          process.env.T3_TEST_FETCH_ACTIVE_LOCK = activeLockPath;
+          process.env.T3_TEST_FETCH_OVERLAP_LOG = overlapLogPath;
+
+          const driver = yield* GitVcsDriver.GitVcsDriver;
+          yield* Effect.all(
+            [
+              driver.refreshStatusUpstream(cwd),
+              driver.refreshStatusUpstream(cwd),
+              driver.refreshStatusUpstream(worktreeCwd),
+            ],
+            { concurrency: "unbounded", discard: true },
+          );
+
+          const invocationLines = (yield* fileSystem.readFileString(invocationLogPath))
+            .trim()
+            .split(/\r?\n/);
+          assert.deepStrictEqual(invocationLines, ["start", "end", "start", "end"]);
+          assert.equal(yield* fileSystem.exists(overlapLogPath), false);
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (previousPath === undefined) delete process.env.PATH;
+              else process.env.PATH = previousPath;
+              if (previousRealGit === undefined) delete process.env.T3_TEST_REAL_GIT;
+              else process.env.T3_TEST_REAL_GIT = previousRealGit;
+              if (previousInvocationLog === undefined) {
+                delete process.env.T3_TEST_FETCH_INVOCATION_LOG;
+              } else {
+                process.env.T3_TEST_FETCH_INVOCATION_LOG = previousInvocationLog;
+              }
+              if (previousActiveLock === undefined) delete process.env.T3_TEST_FETCH_ACTIVE_LOCK;
+              else process.env.T3_TEST_FETCH_ACTIVE_LOCK = previousActiveLock;
+              if (previousOverlapLog === undefined) delete process.env.T3_TEST_FETCH_OVERLAP_LOG;
+              else process.env.T3_TEST_FETCH_OVERLAP_LOG = previousOverlapLog;
             }),
           ),
         );

@@ -355,11 +355,19 @@ export const make = Effect.gen(function* () {
     cwd: string,
     options?: { readonly refreshUpstream?: boolean },
   ) {
+    const refreshExit =
+      options?.refreshUpstream === false
+        ? Exit.void
+        : yield* workflow.refreshStatusUpstream(cwd).pipe(Effect.exit);
     if (options?.refreshUpstream !== false) {
       yield* workflow.invalidateRemoteStatus(cwd);
     }
-    const remote = yield* workflow.remoteStatus({ cwd }, options);
-    return yield* updateCachedRemoteStatus(cwd, remote, { publish: true });
+    const remote = yield* workflow.remoteStatus({ cwd }, { refreshUpstream: false });
+    const updated = yield* updateCachedRemoteStatus(cwd, remote, { publish: true });
+    if (Exit.isFailure(refreshExit)) {
+      return yield* Effect.failCause(refreshExit.cause);
+    }
+    return updated;
   });
 
   const refreshStatus: VcsStatusBroadcaster["Service"]["refreshStatus"] = Effect.fn(

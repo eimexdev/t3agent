@@ -1,13 +1,14 @@
 import * as Arr from "effect/Array";
 import * as Cache from "effect/Cache";
-import * as Data from "effect/Data";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Equal from "effect/Equal";
 import * as Encoding from "effect/Encoding";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
+import * as Hash from "effect/Hash";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
@@ -48,9 +49,9 @@ const REVIEW_DIFF_PATCH_MAX_OUTPUT_BYTES = 120_000;
 const REVIEW_UNTRACKED_DIFF_MAX_OUTPUT_BYTES = 80_000;
 const WORKSPACE_FILES_MAX_OUTPUT_BYTES = 120_000;
 const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
-const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
+const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.minutes(1);
 
-const STATUS_UPSTREAM_REFRESH_FAILURE_COOLDOWN = Duration.seconds(5);
+const STATUS_UPSTREAM_REFRESH_FAILURE_COOLDOWN = Duration.seconds(30);
 const STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY = 2_048;
 const STATUS_UPSTREAM_REFRESH_ENV = Object.freeze({
   GCM_INTERACTIVE: "never",
@@ -90,10 +91,34 @@ type TraceTailState = {
   remainder: string;
 };
 
-class StatusRemoteRefreshCacheKey extends Data.Class<{
-  gitCommonDir: string;
-  remoteName: string;
-}> {}
+class StatusRemoteRefreshCacheKey {
+  readonly objectDir: string;
+  readonly remoteName: string;
+  readonly cwd: string;
+
+  constructor(objectDir: string, remoteName: string, cwd: string) {
+    this.objectDir = objectDir;
+    this.remoteName = remoteName;
+    this.cwd = cwd;
+  }
+
+  [Equal.symbol](that: unknown) {
+    return (
+      that instanceof StatusRemoteRefreshCacheKey &&
+      this.objectDir === that.objectDir &&
+      this.remoteName === that.remoteName
+    );
+  }
+
+  [Hash.symbol]() {
+    return Hash.string(`${this.objectDir}\0${this.remoteName}`);
+  }
+}
+
+interface StatusRefreshLock {
+  readonly semaphore: Semaphore.Semaphore;
+  readonly users: number;
+}
 
 interface ExecuteGitOptions {
   stdin?: string | undefined;
@@ -920,23 +945,26 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     );
   });
 
-  const fetchRemoteForStatus = (
-    gitCommonDir: string,
-    remoteName: string,
-  ): Effect.Effect<void, GitCommandError> => {
-    const fetchCwd =
-      path.basename(gitCommonDir) === ".git" ? path.dirname(gitCommonDir) : gitCommonDir;
-    return executeGit(
+  const fetchRemoteForStatus = (cwd: string, remoteName: string) =>
+    executeGit(
       "GitVcsDriver.fetchRemoteForStatus",
-      fetchCwd,
-      ["--git-dir", gitCommonDir, "fetch", "--quiet", "--no-tags", remoteName],
+      cwd,
+      [
+        "fetch",
+        "--quiet",
+        "--no-tags",
+        "--no-write-fetch-head",
+        "--no-auto-maintenance",
+        "--no-recurse-submodules",
+        "--",
+        remoteName,
+      ],
       {
-        allowNonZeroExit: true,
         env: STATUS_UPSTREAM_REFRESH_ENV,
+        fallbackErrorDetail: "Background Git fetch failed.",
         timeoutMs: Duration.toMillis(STATUS_UPSTREAM_REFRESH_TIMEOUT),
       },
     ).pipe(Effect.asVoid);
-  };
 
   const resolveGitCommonDir = Effect.fn("resolveGitCommonDir")(function* (cwd: string) {
     const gitCommonDir = yield* runGitStdout("GitVcsDriver.resolveGitCommonDir", cwd, [
@@ -946,10 +974,72 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     return path.isAbsolute(gitCommonDir) ? gitCommonDir : path.resolve(cwd, gitCommonDir);
   });
 
+  const resolveCanonicalGitObjectDir = Effect.fn("resolveCanonicalGitObjectDir")(function* (
+    cwd: string,
+  ) {
+    const gitCommonDir = yield* resolveGitCommonDir(cwd);
+    const objectDir = path.join(gitCommonDir, "objects");
+    return yield* fileSystem.realPath(objectDir).pipe(Effect.orElseSucceed(() => objectDir));
+  });
+
+  const statusRefreshLocks = yield* Ref.make<ReadonlyMap<string, StatusRefreshLock>>(new Map());
+  const statusRefreshLocksGuard = yield* Semaphore.make(1);
+
+  const withStatusRefreshLock = <A, E, R>(objectDir: string, effect: Effect.Effect<A, E, R>) =>
+    Effect.acquireUseRelease(
+      statusRefreshLocksGuard.withPermits(1)(
+        Effect.gen(function* () {
+          const current = yield* Ref.get(statusRefreshLocks);
+          const existing = current.get(objectDir);
+          if (existing) {
+            yield* Ref.set(
+              statusRefreshLocks,
+              new Map(current).set(objectDir, {
+                semaphore: existing.semaphore,
+                users: existing.users + 1,
+              }),
+            );
+            return existing.semaphore;
+          }
+
+          const semaphore = yield* Semaphore.make(1);
+          yield* Ref.set(
+            statusRefreshLocks,
+            new Map(current).set(objectDir, { semaphore, users: 1 }),
+          );
+          return semaphore;
+        }),
+      ),
+      (semaphore) => semaphore.withPermits(1)(effect),
+      (semaphore) =>
+        statusRefreshLocksGuard.withPermits(1)(
+          Ref.update(statusRefreshLocks, (current) => {
+            const existing = current.get(objectDir);
+            if (!existing || existing.semaphore !== semaphore) {
+              return current;
+            }
+
+            const next = new Map(current);
+            if (existing.users === 1) {
+              next.delete(objectDir);
+            } else {
+              next.set(objectDir, {
+                semaphore,
+                users: existing.users - 1,
+              });
+            }
+            return next;
+          }),
+        ),
+    );
+
   const refreshStatusRemoteCacheEntry = Effect.fn("refreshStatusRemoteCacheEntry")(function* (
     cacheKey: StatusRemoteRefreshCacheKey,
   ) {
-    yield* fetchRemoteForStatus(cacheKey.gitCommonDir, cacheKey.remoteName);
+    yield* withStatusRefreshLock(
+      cacheKey.objectDir,
+      fetchRemoteForStatus(cacheKey.cwd, cacheKey.remoteName),
+    );
     return true as const;
   });
 
@@ -967,15 +1057,22 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   ) {
     const upstream = yield* resolveCurrentUpstream(cwd);
     if (!upstream) return;
-    const gitCommonDir = yield* resolveGitCommonDir(cwd);
+    const objectDir = yield* resolveCanonicalGitObjectDir(cwd);
     yield* Cache.get(
       statusRemoteRefreshCache,
-      new StatusRemoteRefreshCacheKey({
-        gitCommonDir,
-        remoteName: upstream.remoteName,
-      }),
+      new StatusRemoteRefreshCacheKey(objectDir, upstream.remoteName, cwd),
     );
   });
+
+  const refreshStatusUpstream: GitVcsDriver.GitVcsDriver["Service"]["refreshStatusUpstream"] =
+    Effect.fn("refreshStatusUpstream")(function* (cwd) {
+      yield* refreshStatusUpstreamIfStale(cwd).pipe(
+        Effect.catchTags({
+          GitCommandError: (error) =>
+            isMissingGitCwdError(error) ? Effect.void : Effect.fail(error),
+        }),
+      );
+    });
 
   const resolveDefaultBranchName = (
     cwd: string,
@@ -1474,26 +1571,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const statusDetails: GitVcsDriver.GitVcsDriver["Service"]["statusDetails"] = Effect.fn(
     "statusDetails",
   )(function* (cwd) {
-    yield* refreshStatusUpstreamIfStale(cwd).pipe(
-      Effect.catchTags({
-        GitCommandError: (error) =>
-          isMissingGitCwdError(error) ? Effect.void : Effect.fail(error),
-      }),
-      Effect.ignoreCause({ log: true }),
-    );
+    yield* refreshStatusUpstream(cwd).pipe(Effect.ignore);
     return yield* readStatusDetailsLocal(cwd);
   });
 
   const statusDetailsRemote: GitVcsDriver.GitVcsDriver["Service"]["statusDetailsRemote"] =
     Effect.fn("statusDetailsRemote")(function* (cwd, options) {
       if (options?.refreshUpstream !== false) {
-        yield* refreshStatusUpstreamIfStale(cwd).pipe(
-          Effect.catchTags({
-            GitCommandError: (error) =>
-              isMissingGitCwdError(error) ? Effect.void : Effect.fail(error),
-          }),
-          Effect.ignoreCause({ log: true }),
-        );
+        yield* refreshStatusUpstream(cwd).pipe(Effect.ignore);
       }
       return yield* readStatusDetailsRemote(cwd);
     });
@@ -2535,6 +2620,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     statusDetails,
     statusDetailsLocal,
     statusDetailsRemote,
+    refreshStatusUpstream,
     prepareCommitContext,
     commit,
     pushCurrentBranch,
