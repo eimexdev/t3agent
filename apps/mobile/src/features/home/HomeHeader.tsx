@@ -10,9 +10,10 @@ import {
 } from "@t3tools/contracts";
 import type { MenuAction } from "@react-native-menu/menu";
 import { Stack } from "expo-router";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Platform, Pressable, Text as RNText, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import type { SearchBarCommands } from "react-native-screens";
 
 import { ControlPill, ControlPillMenu } from "../../components/ControlPill";
 import { SymbolView } from "../../components/AppSymbol";
@@ -342,6 +343,7 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
 }
 
 function IosHomeHeader(props: HomeHeaderProps) {
+  const searchBarRef = useRef<SearchBarCommands>(null);
   const iconColor = useThemeColor("--color-icon");
   const mutedColor = useThemeColor("--color-foreground-muted");
   const subtleColor = useThemeColor("--color-subtle");
@@ -350,6 +352,10 @@ function IosHomeHeader(props: HomeHeaderProps) {
     props.projectSortOrder !== DEFAULT_SIDEBAR_PROJECT_SORT_ORDER ||
     props.threadSortOrder !== DEFAULT_SIDEBAR_THREAD_SORT_ORDER ||
     props.projectGroupingMode !== DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE;
+
+  useEffect(() => {
+    searchBarRef.current?.setText(props.searchQuery);
+  }, [props.searchQuery]);
 
   return (
     <>
@@ -362,6 +368,7 @@ function IosHomeHeader(props: HomeHeaderProps) {
           headerTintColor: iconColor,
           headerTitle: "",
           headerSearchBarOptions: {
+            ref: searchBarRef,
             placeholder: "Search threads",
             hideNavigationBar: false,
             onChangeText: (event) => {

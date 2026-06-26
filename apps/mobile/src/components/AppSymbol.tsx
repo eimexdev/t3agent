@@ -116,6 +116,10 @@ export function SymbolView(props: SymbolViewProps) {
     return <ExpoSymbolView {...props} />;
   }
 
+  if (typeof props.name === "object" && props.name.android) {
+    return <ExpoSymbolView {...props} />;
+  }
+
   const sfSymbol = typeof props.name === "string" ? props.name : props.name.ios;
   const AndroidIcon = sfSymbol ? ANDROID_ICON_BY_SF_SYMBOL[sfSymbol] : undefined;
 

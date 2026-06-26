@@ -1,4 +1,5 @@
 import { useAuth, useUser } from "@clerk/expo";
+import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { Link, Stack, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
@@ -74,6 +75,7 @@ function LocalSettingsRouteScreen() {
 }
 
 function ConfiguredSettingsRouteScreen() {
+  const isIosPersonalTeamBuild = Constants.expoConfig?.extra?.iosPersonalTeamBuild === true;
   const insets = useSafeAreaInsets();
   const { push } = useRouter();
   const { expand: expandClerkSheet } = useClerkSettingsSheetDetent();
@@ -361,17 +363,27 @@ function ConfiguredSettingsRouteScreen() {
           <SettingsSwitchRow
             icon="bell.badge"
             label="Device Notifications"
-            disabled={notificationStatus === "checking" || notificationStatus === "unsupported"}
-            value={notificationStatus === "enabled"}
+            disabled={
+              isIosPersonalTeamBuild ||
+              notificationStatus === "checking" ||
+              notificationStatus === "unsupported"
+            }
+            value={!isIosPersonalTeamBuild && notificationStatus === "enabled"}
             onValueChange={handleDeviceNotificationsChange}
           />
           <SettingsSwitchRow
             disabled={
-              !isLoaded || liveActivityStatus === "checking" || liveActivityStatus === "linking"
+              isIosPersonalTeamBuild ||
+              !isLoaded ||
+              liveActivityStatus === "checking" ||
+              liveActivityStatus === "linking"
             }
             icon="bolt.circle"
             label="Live Activity Updates"
-            value={liveActivityStatus === "enabled" || liveActivityStatus === "linking"}
+            value={
+              !isIosPersonalTeamBuild &&
+              (liveActivityStatus === "enabled" || liveActivityStatus === "linking")
+            }
             onValueChange={handleLiveActivitiesChange}
           />
         </SettingsSection>
