@@ -56,4 +56,15 @@ describe("workspace connection status", () => {
     expect(shouldShowWorkspaceConnectionStatus(state)).toBe(true);
     expect(workspaceConnectionStatusLabel(state)).toBe("Reconnecting to Julius’s Mac mini");
   });
+
+  it("surfaces connection errors before the generic disconnected fallback", () => {
+    const state = workspaceState({
+      connectionError: "Could not reach Julius’s Mac mini",
+      hasLoadedShellSnapshot: false,
+      hasReadyEnvironment: false,
+    });
+
+    expect(shouldShowWorkspaceConnectionStatus(state)).toBe(true);
+    expect(workspaceConnectionStatusLabel(state)).toBe("Could not reach Julius’s Mac mini");
+  });
 });

@@ -59,9 +59,9 @@ export function WorkspacePaneDivider(props: WorkspacePaneDividerProps) {
   const handleAccessibilityAction = (event: AccessibilityActionEvent) => {
     props.onResizeStart?.();
     if (event.nativeEvent.actionName === "increment") {
-      props.onResizeBy(ACCESSIBILITY_RESIZE_STEP * props.resizeDirection);
+      props.onResizeBy(ACCESSIBILITY_RESIZE_STEP);
     } else if (event.nativeEvent.actionName === "decrement") {
-      props.onResizeBy(-ACCESSIBILITY_RESIZE_STEP * props.resizeDirection);
+      props.onResizeBy(-ACCESSIBILITY_RESIZE_STEP);
     }
     props.onResizeEnd?.();
   };

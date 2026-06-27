@@ -217,6 +217,10 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const isExpanded = isFocused;
   const canSend = hasContent;
 
+  useEffect(() => {
+    sendInFlightRef.current = false;
+  }, [props.selectedThread.id]);
+
   const onPressImage = useCallback(
     (uri: string) => {
       wasExpandedBeforePreviewRef.current = isFocused;

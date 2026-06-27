@@ -256,6 +256,23 @@ function ThreadRouteContent(
       ? inspectorSelection.mode
       : null;
 
+  useEffect(() => {
+    setInspectorSelection((current) => {
+      if (props.renderInspector === undefined) {
+        if (current === null || current.mode === "route") {
+          return null;
+        }
+        return { ...current, routeThreadIdentity };
+      }
+
+      if (current === null || current.mode === "route") {
+        return { routeThreadIdentity, mode: "route" };
+      }
+
+      return { ...current, routeThreadIdentity };
+    });
+  }, [props.renderInspector, routeThreadIdentity]);
+
   useFocusEffect(
     useCallback(() => {
       return () => {

@@ -190,9 +190,11 @@ export function AdaptiveWorkspaceLayout(props: { readonly children: ReactNode })
   useHardwareKeyboardCommand("toggleSidebar", handleToggleSidebarCommand);
   const showAuxiliaryPane = useCallback((role: WorkspaceAuxiliaryPaneRole) => {
     if (role === "inspector") {
+      setFocusedAuxiliaryPaneRole("inspector");
       setFileInspectorPreferredVisible(true);
       return;
     }
+    setFocusedAuxiliaryPaneRole("supplementary");
     setSupplementaryPanePreferredVisible(true);
   }, []);
   const handleOpenFilesCommand = useCallback(() => {

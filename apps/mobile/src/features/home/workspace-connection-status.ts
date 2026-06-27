@@ -17,5 +17,6 @@ export function workspaceConnectionStatusLabel(state: WorkspaceState): string {
   if (state.connectingEnvironments.length > 1) {
     return `Reconnecting ${state.connectingEnvironments.length} environments`;
   }
+  if (state.connectionError !== null) return state.connectionError;
   return "Not connected";
 }
