@@ -8,7 +8,7 @@ import {
   TriangleAlertIcon,
 } from "lucide-react";
 import { useAuth } from "@clerk/react";
-import { type ReactNode, memo, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AuthAccessReadScope,
   AuthAccessWriteScope,
@@ -2224,6 +2224,7 @@ export function ConnectionsSettings() {
   const [pendingConnectClientActionKey, setPendingConnectClientActionKey] = useState<string | null>(
     null,
   );
+  const isConnectClientActionPendingRef = useRef(false);
   const [addBackendDialogOpen, setAddBackendDialogOpen] = useState(false);
   const [savedBackendMode, setSavedBackendMode] = useState<"remote" | "ssh">("remote");
   const [savedBackendHost, setSavedBackendHost] = useState("");
@@ -2526,31 +2527,36 @@ export function ConnectionsSettings() {
     }
   }, []);
 
-  const handleUpdateConnectSecurityMode = useCallback(async (requiresApproval: boolean) => {
-    setIsUpdatingConnectSecurityMode(true);
-    setDesktopAccessManagementMutationError(null);
-    try {
-      await updateServerConnectSecurityMode(requiresApproval ? "client-approval" : "account");
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to update T3 Connect security.";
-      setDesktopAccessManagementMutationError(message);
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Could not update T3 Connect security",
-          description: message,
-        }),
-      );
-    } finally {
-      setIsUpdatingConnectSecurityMode(false);
-    }
-  }, []);
+  const handleUpdateConnectSecurityMode = useCallback(
+    async (requiresApproval: boolean) => {
+      setIsUpdatingConnectSecurityMode(true);
+      setDesktopAccessManagementMutationError(null);
+      try {
+        await updateServerConnectSecurityMode(requiresApproval ? "client-approval" : "account");
+        authAccessChanges.refresh();
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Failed to update T3 Connect security.";
+        setDesktopAccessManagementMutationError(message);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not update T3 Connect security",
+            description: message,
+          }),
+        );
+      } finally {
+        setIsUpdatingConnectSecurityMode(false);
+      }
+    },
+    [authAccessChanges],
+  );
 
   const handleConnectClientAction = useCallback(
     async (action: "approve" | "reject" | "revoke", clientProofKeyThumbprint: string) => {
-      if (pendingConnectClientActionKey !== null) return;
+      if (isConnectClientActionPendingRef.current) return;
       const actionKey = `${action}:${clientProofKeyThumbprint}`;
+      isConnectClientActionPendingRef.current = true;
       setPendingConnectClientActionKey(actionKey);
       setDesktopAccessManagementMutationError(null);
       try {
@@ -2573,10 +2579,11 @@ export function ConnectionsSettings() {
           }),
         );
       } finally {
+        isConnectClientActionPendingRef.current = false;
         setPendingConnectClientActionKey(null);
       }
     },
-    [pendingConnectClientActionKey],
+    [],
   );
 
   const handleAddSavedBackend = useCallback(async () => {
@@ -3105,22 +3112,45 @@ export function ConnectionsSettings() {
         title="T3 Connect approval"
         description={
           desktopConnectSecurityMode === null
-            ? "Loading T3 Connect approval state."
+            ? desktopAccessManagementError
+              ? "T3 Connect approval state could not be loaded."
+              : "Loading T3 Connect approval state."
             : desktopConnectSecurityMode === "client-approval"
               ? "New T3 Connect clients must be approved here before they can connect."
               : "Any signed-in client on this T3 account can connect through T3 Connect."
         }
         control={
-          <Switch
-            checked={desktopConnectSecurityMode === "client-approval"}
-            disabled={
-              desktopConnectSecurityMode === null ||
-              isUpdatingConnectSecurityMode ||
-              isLoadingDesktopAccessManagement
-            }
-            onCheckedChange={(checked) => void handleUpdateConnectSecurityMode(checked)}
-            aria-label="Require T3 Connect client approval"
-          />
+          desktopConnectSecurityMode === null && desktopAccessManagementError ? (
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={isUpdatingConnectSecurityMode}
+                onClick={() => void handleUpdateConnectSecurityMode(false)}
+              >
+                Use account
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={isUpdatingConnectSecurityMode}
+                onClick={() => void handleUpdateConnectSecurityMode(true)}
+              >
+                Require approval
+              </Button>
+            </div>
+          ) : (
+            <Switch
+              checked={desktopConnectSecurityMode === "client-approval"}
+              disabled={
+                desktopConnectSecurityMode === null ||
+                isUpdatingConnectSecurityMode ||
+                isLoadingDesktopAccessManagement
+              }
+              onCheckedChange={(checked) => void handleUpdateConnectSecurityMode(checked)}
+              aria-label="Require T3 Connect client approval"
+            />
+          )
         }
       />
     ) : null;

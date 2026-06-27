@@ -863,6 +863,8 @@ const cloudMintCredentialHandler = Effect.fn("environment.cloud.mintCredential")
     }
     const proof = proofOption.value;
 
+    yield* dependencies.environmentAuth.getConnectSecurityMode();
+
     const jtiSecretName = `${CLOUD_MINT_JTI_PREFIX}${proof.jti}`;
     const nonceSecretName = `${CLOUD_MINT_NONCE_PREFIX}${proof.nonce}`;
     const consumedReplayGuards = yield* consumeCloudReplayGuards({

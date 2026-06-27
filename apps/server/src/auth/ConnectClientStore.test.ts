@@ -100,6 +100,7 @@ it.effect("fails closed when persisted security mode is invalid", () =>
     const error = yield* Effect.flip(store.getSecurityMode());
 
     expect(error._tag).toBe("ConnectSecurityModeLoadError");
+    expect(error.invalidValue).toBe("invalid-mode");
   }).pipe(Effect.provide(makeStoreOnlyLayer("invalid-mode"))),
 );
 

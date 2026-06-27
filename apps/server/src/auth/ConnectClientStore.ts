@@ -22,16 +22,20 @@ const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
 const connectClientInternalErrorContext = {
-  cause: Schema.Defect(),
+  cause: Schema.optional(Schema.Defect()),
 };
 
 export class ConnectSecurityModeLoadError extends Schema.TaggedErrorClass<ConnectSecurityModeLoadError>()(
   "ConnectSecurityModeLoadError",
   {
     ...connectClientInternalErrorContext,
+    invalidValue: Schema.optional(Schema.String),
   },
 ) {
   override get message(): string {
+    if (this.invalidValue !== undefined) {
+      return `Invalid Connect security mode: ${this.invalidValue}`;
+    }
     return "Failed to load Connect security mode.";
   }
 }
@@ -231,7 +235,7 @@ function decodeSecurityMode(
   }
   return Effect.fail(
     new ConnectSecurityModeLoadError({
-      cause: new Error(`Invalid Connect security mode: ${value}`),
+      invalidValue: value,
     }),
   );
 }
