@@ -333,7 +333,7 @@ export const make = Effect.gen(function* () {
       return { mode, status: "approved" as const, client: seenClient };
     }
 
-    return { mode, status: "approved" as const, client: visibleClient };
+    return { mode, status: "rejected" as const, client: visibleClient };
   });
 
   const updateDecision = <E extends ConnectClientApprovalError | ConnectClientRejectionError>(

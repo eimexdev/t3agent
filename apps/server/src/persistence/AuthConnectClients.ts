@@ -256,6 +256,10 @@ export const make = Effect.gen(function* () {
             WHEN auth_connect_clients.revoked_at IS NULL THEN auth_connect_clients.rejected_at
             ELSE NULL
           END,
+          last_seen_at = CASE
+            WHEN auth_connect_clients.revoked_at IS NULL THEN auth_connect_clients.last_seen_at
+            ELSE NULL
+          END,
           revoked_at = NULL
         RETURNING ${sql.unsafe(rowSelection)}
       `,
