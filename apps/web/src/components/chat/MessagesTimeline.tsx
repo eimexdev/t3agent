@@ -671,7 +671,7 @@ function TimelineMinimap({
   return (
     <div
       className={cn(
-        "group/minimap pointer-events-auto absolute top-0 left-0 z-40 hidden w-18 md:block",
+        "group/minimap pointer-events-auto absolute top-0 left-0 z-40 hidden w-18 [@media(pointer:fine)]:block",
         hasPersistentGutter
           ? "opacity-100"
           : "opacity-0 transition-opacity duration-150 hover:opacity-100 focus-within:opacity-100",
@@ -691,6 +691,7 @@ function TimelineMinimap({
             if (nextItem) {
               onSelect(nextItem);
             }
+            event.currentTarget.blur();
           }}
           onFocus={() => setActiveIndex((current) => current ?? 0)}
           onKeyDown={(event) => {
@@ -715,6 +716,9 @@ function TimelineMinimap({
           }}
           onMouseLeave={() => setActiveIndex(null)}
           onMouseMove={updateActiveIndexFromPointer}
+          onMouseDown={(event) => {
+            event.preventDefault();
+          }}
           style={{ height: resolveTimelineMinimapHeightStyle(items.length) }}
           type="button"
         >

@@ -252,8 +252,8 @@ describe("MessagesTimeline", () => {
       }),
     ).toBe(100);
     expect(resolveTimelineMinimapHasPersistentGutter(832)).toBe(false);
-    expect(resolveTimelineMinimapHasPersistentGutter(911)).toBe(false);
-    expect(resolveTimelineMinimapHasPersistentGutter(912)).toBe(true);
+    expect(resolveTimelineMinimapHasPersistentGutter(863)).toBe(false);
+    expect(resolveTimelineMinimapHasPersistentGutter(864)).toBe(true);
   });
 
   it("anchors a sent attachment message using its measured height", async () => {
