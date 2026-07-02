@@ -5,6 +5,7 @@ import { EnvironmentId, type ProjectScript } from "@t3tools/contracts";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { Pressable, ScrollView, Text as RNText, View } from "react-native";
 import { useWorkspaceState } from "../../state/workspace";
+import { useHeaderBlurEffect } from "../../lib/useHeaderBlurEffect";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { useEnvironmentQuery } from "../../state/query";
 import { dismissGitActionResult, useGitActionProgress } from "../../state/use-vcs-action-state";
@@ -104,6 +105,7 @@ export function ThreadRouteScreen() {
   const iconColor = String(useThemeColor("--color-icon"));
   const foregroundColor = String(useThemeColor("--color-foreground"));
   const secondaryFg = String(useThemeColor("--color-foreground-secondary"));
+  const headerBlurEffect = useHeaderBlurEffect();
 
   /* ─── Git status for native header trigger ───────────────────────── */
   const gitStatus = useEnvironmentQuery(
@@ -326,9 +328,7 @@ export function ThreadRouteScreen() {
           headerShown: true,
           headerTransparent: true,
           headerStyle: { backgroundColor: "transparent" },
-          // Recent iOS betas no longer draw an implicit blur behind
-          // transparent navigation bars, so request one explicitly.
-          headerBlurEffect: "systemChromeMaterial",
+          headerBlurEffect,
           headerShadowVisible: false,
           headerTintColor: iconColor,
           headerBackTitle: "",

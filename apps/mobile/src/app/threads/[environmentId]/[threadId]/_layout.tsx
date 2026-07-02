@@ -1,8 +1,16 @@
 import Stack from "expo-router/stack";
-import { StyleSheet } from "react-native";
+import { Platform, StyleSheet } from "react-native";
 import { useResolveClassNames } from "uniwind";
 
+import { useHeaderBlurEffect } from "../../../../lib/useHeaderBlurEffect";
+
+// iOS keeps the default push animation: forcing slide_from_right switches
+// react-native-screens to its custom swipe animator, which paints a black
+// void behind the outgoing screen during interactive swipe-back.
+const pushAnimation = Platform.OS === "ios" ? ("default" as const) : ("slide_from_right" as const);
+
 export default function ThreadLayout() {
+  const headerBlurEffect = useHeaderBlurEffect();
   const sheetStyle = StyleSheet.flatten(useResolveClassNames("bg-sheet"));
   const headerBg = {
     backgroundColor: (sheetStyle as { backgroundColor?: string })?.backgroundColor,
@@ -16,9 +24,7 @@ export default function ThreadLayout() {
           contentStyle: { backgroundColor: "transparent" },
           headerShown: true,
           headerTransparent: true,
-          // Recent iOS betas no longer draw an implicit blur behind
-          // transparent navigation bars, so request one explicitly.
-          headerBlurEffect: "systemChromeMaterial",
+          headerBlurEffect,
           headerShadowVisible: false,
           headerTitle: "",
         }}
@@ -48,7 +54,7 @@ export default function ThreadLayout() {
       <Stack.Screen
         name="review"
         options={{
-          animation: "slide_from_right",
+          animation: pushAnimation,
           contentStyle: sheetStyle,
           fullScreenGestureEnabled: true,
           headerBackButtonDisplayMode: "minimal",
@@ -62,7 +68,7 @@ export default function ThreadLayout() {
       <Stack.Screen
         name="files/index"
         options={{
-          animation: "slide_from_right",
+          animation: pushAnimation,
           contentStyle: sheetStyle,
           fullScreenGestureEnabled: true,
           headerBackButtonDisplayMode: "minimal",
@@ -76,7 +82,7 @@ export default function ThreadLayout() {
       <Stack.Screen
         name="files/[...path]"
         options={{
-          animation: "slide_from_right",
+          animation: pushAnimation,
           contentStyle: sheetStyle,
           fullScreenGestureEnabled: true,
           headerBackButtonDisplayMode: "minimal",
@@ -101,7 +107,7 @@ export default function ThreadLayout() {
       <Stack.Screen
         name="terminal"
         options={{
-          animation: "slide_from_right",
+          animation: pushAnimation,
           contentStyle: { backgroundColor: "#050505" },
           headerBackButtonDisplayMode: "minimal",
           headerShown: true,

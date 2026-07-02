@@ -11,6 +11,7 @@ import {
 import { Stack } from "expo-router";
 import { Text as RNText, View } from "react-native";
 
+import { useHeaderBlurEffect } from "../../lib/useHeaderBlurEffect";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { MOBILE_TYPOGRAPHY } from "../../lib/typography";
 import type { HomeProjectSortOrder } from "./homeThreadList";
@@ -72,6 +73,7 @@ export function HomeHeader(props: {
   readonly onOpenSettings: () => void;
   readonly onStartNewTask: () => void;
 }) {
+  const headerBlurEffect = useHeaderBlurEffect();
   const iconColor = useThemeColor("--color-icon");
   const mutedColor = useThemeColor("--color-foreground-muted");
   const subtleColor = useThemeColor("--color-subtle");
@@ -88,9 +90,7 @@ export function HomeHeader(props: {
           headerShown: true,
           headerTransparent: true,
           headerStyle: { backgroundColor: "transparent" },
-          // Recent iOS betas no longer draw an implicit blur behind
-          // transparent navigation bars, so request one explicitly.
-          headerBlurEffect: "systemChromeMaterial",
+          headerBlurEffect,
           headerShadowVisible: false,
           headerTintColor: iconColor,
           headerTitle: "",

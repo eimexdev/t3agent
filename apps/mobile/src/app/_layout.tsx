@@ -8,7 +8,7 @@ import {
 import { usePathname } from "expo-router";
 import Stack from "expo-router/stack";
 import { useCallback } from "react";
-import { StatusBar, useColorScheme } from "react-native";
+import { Platform, StatusBar, useColorScheme } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -26,6 +26,7 @@ import {
   useClerkSettingsSheetDetent,
 } from "../features/cloud/ClerkSettingsSheetDetent";
 import { useAgentNotificationNavigation } from "../features/agent-awareness/notificationNavigation";
+import { useHeaderBlurEffect } from "../lib/useHeaderBlurEffect";
 import { useThemeColor } from "../lib/useThemeColor";
 
 function AppNavigator() {
@@ -45,7 +46,9 @@ function AppNavigatorContent() {
   const { collapse, isExpanded } = useClerkSettingsSheetDetent();
   const colorScheme = useColorScheme();
   const statusBarBg = useThemeColor("--color-status-bar");
+  const screenColor = useThemeColor("--color-screen");
   const sheetStyle = useResolveClassNames("bg-sheet");
+  const headerBlurEffect = useHeaderBlurEffect();
   useAgentNotificationNavigation();
   useThreadOutboxDrain();
 
@@ -96,12 +99,10 @@ function AppNavigatorContent() {
         <Stack.Screen
           name="index"
           options={{
-            contentStyle: { backgroundColor: "transparent" },
+            contentStyle: { backgroundColor: String(screenColor) },
             headerShown: true,
             headerTransparent: true,
-            // Recent iOS betas no longer draw an implicit blur behind
-            // transparent navigation bars, so request one explicitly.
-            headerBlurEffect: "systemChromeMaterial",
+            headerBlurEffect,
             headerShadowVisible: false,
           }}
         />
@@ -115,8 +116,11 @@ function AppNavigatorContent() {
         <Stack.Screen
           name="threads/[environmentId]/[threadId]"
           options={{
-            animation: "slide_from_right",
-            contentStyle: { backgroundColor: "transparent" },
+            // iOS keeps the default push animation: forcing slide_from_right
+            // switches react-native-screens to its custom swipe animator,
+            // which leaves a black void behind the screen during swipe-back.
+            animation: Platform.OS === "ios" ? "default" : "slide_from_right",
+            contentStyle: { backgroundColor: String(screenColor) },
             gestureEnabled: true,
             fullScreenGestureEnabled: true,
             headerShown: false,
