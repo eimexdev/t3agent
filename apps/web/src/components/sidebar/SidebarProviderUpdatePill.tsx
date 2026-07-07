@@ -28,6 +28,12 @@ const PROVIDER_UPDATE_PILL_PROGRESS_STYLES = {
   error: "bg-destructive/14",
 } as const;
 
+function providerUpdatePillProgressStyle(
+  tone: ProviderUpdateSidebarPillView["tone"],
+): string | null {
+  return tone === "loading" ? null : PROVIDER_UPDATE_PILL_PROGRESS_STYLES[tone];
+}
+
 interface SidebarProviderUpdatePillContentProps {
   providers: ReadonlyArray<ServerProvider>;
   onOpenProviderSettings: () => void;
@@ -49,9 +55,12 @@ function useSidebarProviderUpdatePillTransition(
   const displayedView = renderedView ?? view;
   const dismissAfterVisibleMs = displayedView?.dismissAfterVisibleMs;
   const viewKey = displayedView?.key ?? null;
+  const dismissProgressStyle = displayedView
+    ? providerUpdatePillProgressStyle(displayedView.tone)
+    : null;
   const showDismissProgress =
     dismissAfterVisibleMs !== undefined &&
-    displayedView?.tone !== "loading" &&
+    dismissProgressStyle !== null &&
     exitingKey !== viewKey;
 
   const startExit = useCallback(
@@ -116,6 +125,7 @@ function useSidebarProviderUpdatePillTransition(
   return {
     displayedView,
     dismissAfterVisibleMs,
+    dismissProgressStyle,
     exitingKey,
     finishExit,
     showDismissProgress,
@@ -139,6 +149,7 @@ export function SidebarProviderUpdatePillContent({
   const {
     displayedView,
     dismissAfterVisibleMs,
+    dismissProgressStyle,
     exitingKey,
     finishExit,
     showDismissProgress,
@@ -168,12 +179,12 @@ export function SidebarProviderUpdatePillContent({
         finishExit(displayedView.key);
       }}
     >
-      {showDismissProgress ? (
+      {showDismissProgress && dismissProgressStyle ? (
         <div
           key={displayedView.key}
           aria-hidden="true"
           className={`provider-update-pill-progress pointer-events-none absolute inset-y-0 left-0 w-full origin-left border-r border-current/15 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.08)] ${
-            PROVIDER_UPDATE_PILL_PROGRESS_STYLES[displayedView.tone]
+            dismissProgressStyle
           }`}
           style={
             {
