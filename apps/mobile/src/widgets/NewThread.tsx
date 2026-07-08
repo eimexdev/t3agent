@@ -22,10 +22,10 @@ export interface NewThreadWidgetProps {
   /**
    * Candidate projects, most recently active first. The medium/large widgets
    * render a slice of these as one-tap shortcuts into the draft composer.
-   * More are synced than any family displays: pinned-project matching happens
-   * here in the widget (the configuration is per widget instance, so the app
-   * cannot precompute it), and a pin should resolve even when its project has
-   * fallen out of the top displayed rows.
+   * The full workspace set is synced (not just the visible rows): pinned-
+   * project matching happens here in the widget (the configuration is per
+   * widget instance, so the app cannot precompute it), and a pin should
+   * resolve even when its project has fallen out of the top displayed rows.
    * Optional because WidgetKit renders placeholder/gallery entries with no
    * props before the app has ever written a timeline.
    */
@@ -83,7 +83,9 @@ export function NewThread(
 
   // Pins are typed titles (see app.config.ts for why there is no picker).
   // Match case-insensitively, exact title first and then prefix, preserving
-  // the user's pin order. Unmatched pins (typo, deleted project) are skipped.
+  // the user's pin order. A query that matches more than one remaining project
+  // is skipped (no ambiguous deep link) rather than picking the first by
+  // activity order. Unmatched pins (typo, deleted project) are skipped.
   const pinnedQueries = (
     typeof configuration?.pinnedProjects === "string" ? configuration.pinnedProjects : ""
   )
@@ -92,13 +94,19 @@ export function NewThread(
     .filter((title) => title.length > 0);
   const pinned: NewThreadWidgetProject[] = [];
   for (const query of pinnedQueries) {
-    const match =
-      available.find(
-        (project) => !pinned.includes(project) && project.title.toLowerCase() === query,
-      ) ??
-      available.find(
-        (project) => !pinned.includes(project) && project.title.toLowerCase().startsWith(query),
+    const unused = available.filter((project) => !pinned.includes(project));
+    const exactMatches = unused.filter((project) => project.title.toLowerCase() === query);
+    let match: NewThreadWidgetProject | undefined;
+    if (exactMatches.length === 1) {
+      match = exactMatches[0];
+    } else if (exactMatches.length === 0) {
+      const prefixMatches = unused.filter((project) =>
+        project.title.toLowerCase().startsWith(query),
       );
+      if (prefixMatches.length === 1) {
+        match = prefixMatches[0];
+      }
+    }
     if (match) {
       pinned.push(match);
     }

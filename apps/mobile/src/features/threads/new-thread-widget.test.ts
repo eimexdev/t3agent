@@ -4,10 +4,7 @@ import type {
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
 
-import {
-  makeNewThreadWidgetProps,
-  NEW_THREAD_WIDGET_PROJECT_SYNC_LIMIT,
-} from "./new-thread-widget";
+import { makeNewThreadWidgetProps } from "./new-thread-widget";
 
 function makeProject(overrides: {
   readonly id: string;
@@ -81,9 +78,10 @@ describe("makeNewThreadWidgetProps", () => {
     expect(props.projects?.map((project) => project.title)).toEqual(["two", "one"]);
   });
 
-  it("caps the payload at the widget's sync limit", () => {
+  it("syncs every project so low-activity pins can still resolve", () => {
+    const count = 25;
     const props = makeNewThreadWidgetProps(
-      Array.from({ length: NEW_THREAD_WIDGET_PROJECT_SYNC_LIMIT + 5 }, (_, n) =>
+      Array.from({ length: count }, (_, n) =>
         makeProject({
           id: `p${n}`,
           updatedAt: `2026-06-${String(n + 1).padStart(2, "0")}T00:00:00.000Z`,
@@ -91,8 +89,54 @@ describe("makeNewThreadWidgetProps", () => {
       ),
       [],
     );
-    expect(props.projects).toHaveLength(NEW_THREAD_WIDGET_PROJECT_SYNC_LIMIT);
-    expect(props.projects?.[0]?.title).toBe(`p${NEW_THREAD_WIDGET_PROJECT_SYNC_LIMIT + 4}`);
+    expect(props.projects).toHaveLength(count);
+    expect(props.projects?.[0]?.title).toBe(`p${count - 1}`);
+    expect(props.projects?.[count - 1]?.title).toBe("p0");
+  });
+
+  it("disambiguates duplicate titles with environment labels", () => {
+    const props = makeNewThreadWidgetProps(
+      [
+        makeProject({
+          id: "proj-a",
+          environmentId: "env-1",
+          title: "t3code",
+          updatedAt: "2026-07-07T00:00:00.000Z",
+        }),
+        makeProject({
+          id: "proj-b",
+          environmentId: "env-2",
+          title: "t3code",
+          updatedAt: "2026-07-01T00:00:00.000Z",
+        }),
+      ],
+      [],
+      new Map([
+        ["env-1", "Laptop"],
+        ["env-2", "Desktop"],
+      ]),
+    );
+    expect(props.projects?.map((project) => project.title)).toEqual([
+      "t3code (Laptop)",
+      "t3code (Desktop)",
+    ]);
+    expect(props.projects?.[0]?.deepLink).toContain("environmentId=env-1");
+    expect(props.projects?.[0]?.deepLink).toContain("title=t3code");
+    expect(props.projects?.[1]?.deepLink).toContain("environmentId=env-2");
+  });
+
+  it("falls back to environment id when labels are missing for duplicates", () => {
+    const props = makeNewThreadWidgetProps(
+      [
+        makeProject({ id: "a", environmentId: "env-1", title: "shared" }),
+        makeProject({ id: "b", environmentId: "env-2", title: "shared" }),
+      ],
+      [],
+    );
+    expect(props.projects?.map((project) => project.title)).toEqual([
+      "shared (env-1)",
+      "shared (env-2)",
+    ]);
   });
 
   it("URL-encodes deep link parameters", () => {

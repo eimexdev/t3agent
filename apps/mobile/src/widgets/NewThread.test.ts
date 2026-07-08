@@ -174,6 +174,62 @@ describe("NewThread widget layout", () => {
     expect(layout).not.toContain("Project 3");
   });
 
+  it("skips ambiguous pin titles instead of linking the first match", () => {
+    const layout = JSON.stringify(
+      NewThread(
+        {
+          projects: [
+            makeProject({
+              title: "t3code (Laptop)",
+              deepLink: "/new/draft?environmentId=env-1&projectId=a&title=t3code",
+            }),
+            makeProject({
+              title: "t3code (Desktop)",
+              deepLink: "/new/draft?environmentId=env-2&projectId=b&title=t3code",
+            }),
+            makeProject({ title: "recent", deepLink: "/new/draft?projectId=recent" }),
+          ],
+        },
+        makeEnvironment({
+          widgetFamily: "systemMedium",
+          configuration: { pinnedProjects: "t3code", showRecent: false },
+        }),
+      ),
+    );
+    // Ambiguous bare title must not deep-link either duplicate.
+    expect(layout).not.toContain("environmentId=env-1");
+    expect(layout).not.toContain("environmentId=env-2");
+    expect(layout).toContain('"widgetURL":"t3code://new"');
+  });
+
+  it("pins a disambiguated title to the intended environment", () => {
+    const layout = JSON.stringify(
+      NewThread(
+        {
+          projects: [
+            makeProject({
+              title: "t3code (Laptop)",
+              deepLink: "/new/draft?environmentId=env-1&projectId=a&title=t3code",
+            }),
+            makeProject({
+              title: "t3code (Desktop)",
+              deepLink: "/new/draft?environmentId=env-2&projectId=b&title=t3code",
+            }),
+          ],
+        },
+        makeEnvironment({
+          widgetFamily: "systemMedium",
+          configuration: { pinnedProjects: "t3code (Desktop)", showRecent: false },
+        }),
+      ),
+    );
+    expect(layout).toContain("t3code (Desktop)");
+    expect(layout).toContain(
+      '"destination":"t3code://new/draft?environmentId=env-2&projectId=b&title=t3code"',
+    );
+    expect(layout).not.toContain("environmentId=env-1");
+  });
+
   it("hides recents when the fill toggle is off", () => {
     const layout = JSON.stringify(
       NewThread(
