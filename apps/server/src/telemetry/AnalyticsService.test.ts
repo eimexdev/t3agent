@@ -21,22 +21,22 @@ interface RecordedBatchRequest {
   readonly path: string;
   readonly body: {
     readonly batch?: ReadonlyArray<{
-      readonly event?: string;
+      readonly event?: string | undefined;
       readonly properties?: {
-        readonly index?: number;
-        readonly clientType?: string;
-      };
+        readonly index?: number | undefined;
+        readonly clientType?: string | undefined;
+      } | undefined;
     }>;
   } | null;
 }
 
 interface RecordedBatchBody {
   readonly batch: ReadonlyArray<{
-    readonly event?: string;
+    readonly event?: string | undefined;
     readonly properties?: {
-      readonly index?: number;
-      readonly clientType?: string;
-    };
+      readonly index?: number | undefined;
+      readonly clientType?: string | undefined;
+    } | undefined;
   }>;
 }
 

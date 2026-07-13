@@ -189,6 +189,9 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
         expect(error.cause).toBeInstanceOf(Error);
         const cause = error.cause as PlatformError.PlatformError;
         assert.equal(cause._tag, "PlatformError");
+        if (cause.reason._tag === "BadArgument") {
+          assert.fail("expected filesystem system error");
+        }
         assert.equal(cause.reason._tag, "NotFound");
         assert.equal(cause.reason.pathOrDescriptor, resolvedPath);
       }),
