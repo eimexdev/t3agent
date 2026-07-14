@@ -36,6 +36,8 @@ describe("isLoopbackHostHeader", () => {
     assert.isFalse(isLoopbackHostHeader("evil.example"));
     assert.isFalse(isLoopbackHostHeader("evil.example:13773"));
     assert.isFalse(isLoopbackHostHeader("localhost.evil.example"));
+    assert.isFalse(isLoopbackHostHeader("127.attacker.example"));
+    assert.isFalse(isLoopbackHostHeader("127.attacker.example:13773"));
     assert.isFalse(isLoopbackHostHeader("10.0.0.5:13773"));
     assert.isFalse(isLoopbackHostHeader("[::2]:13773"));
     assert.isFalse(isLoopbackHostHeader(undefined));
@@ -55,5 +57,15 @@ describe("isLoopbackHost", () => {
     assert.isTrue(isLoopbackHost("[::1]"));
     assert.isFalse(isLoopbackHost("0.0.0.0"));
     assert.isFalse(isLoopbackHost("192.168.1.10"));
+  });
+
+  it("only accepts real 127.0.0.0/8 addresses, not 127.* DNS names", () => {
+    assert.isFalse(isLoopbackHost("127.attacker.example"));
+    assert.isFalse(isLoopbackHost("127.0.0.999"));
+    assert.isFalse(isLoopbackHost("127.0.0"));
+    assert.isFalse(isLoopbackHost("127.0.0.0.1"));
+    assert.isFalse(isLoopbackHost("127.0.0.-1"));
+    assert.isTrue(isLoopbackHost("127.0.0.0"));
+    assert.isTrue(isLoopbackHost("127.255.255.255"));
   });
 });

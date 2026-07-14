@@ -7,18 +7,24 @@
  * @module netHost
  */
 
+// Strict 127.0.0.0/8 check: a prefix test would also accept DNS names like
+// "127.attacker.example", which must not count as loopback anywhere this is
+// used as a security boundary.
+const isLoopbackIpv4 = (host: string): boolean => {
+  const octets = host.split(".");
+  if (octets.length !== 4) {
+    return false;
+  }
+  const values = octets.map((octet) => (/^\d{1,3}$/.test(octet) ? Number(octet) : -1));
+  return values[0] === 127 && values.every((value) => value >= 0 && value <= 255);
+};
+
 export const isLoopbackHost = (host: string | undefined): boolean => {
   if (!host || host.length === 0) {
     return true;
   }
 
-  return (
-    host === "localhost" ||
-    host === "127.0.0.1" ||
-    host === "::1" ||
-    host === "[::1]" ||
-    host.startsWith("127.")
-  );
+  return host === "localhost" || host === "::1" || host === "[::1]" || isLoopbackIpv4(host);
 };
 
 export const isWildcardHost = (host: string | undefined): boolean =>
