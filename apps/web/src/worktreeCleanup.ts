@@ -1,3 +1,4 @@
+import type { VcsStatusResult } from "@t3tools/contracts";
 import type { ThreadShell } from "./types";
 
 function normalizeWorktreePath(path: string | null): string | null {
@@ -42,4 +43,10 @@ export function formatWorktreePathForDisplay(worktreePath: string): string {
   const parts = normalized.split("/");
   const lastPart = parts[parts.length - 1]?.trim() ?? "";
   return lastPart.length > 0 ? lastPart : trimmed;
+}
+
+export function canOfferWorktreeRemoval(
+  status: Pick<VcsStatusResult, "hasWorkingTreeChanges" | "aheadCount">,
+): boolean {
+  return !status.hasWorkingTreeChanges && status.aheadCount === 0;
 }

@@ -98,6 +98,7 @@ it.layer(NodeServices.layer)("settled thread decider", (it) => {
       expect(reEmitEvents[0]?.type).toBe("thread.settled");
       if (reEmitEvents[0]?.type === "thread.settled") {
         expect(reEmitEvents[0].payload.settledAt).toBe(SETTLED_AT);
+        expect(reEmitEvents[0].payload.updatedAt).toBe(SETTLED_AT);
       }
     }),
   );
@@ -199,10 +200,55 @@ it.layer(NodeServices.layer)("settled thread decider", (it) => {
         readModel: makeReadModel("active"),
       });
       const sessionEvents = Array.isArray(sessionResult) ? sessionResult : [sessionResult];
-      expect(sessionEvents.map((event) => event.type)).toEqual([
-        "thread.unsettled",
-        "thread.session-set",
+      expect(sessionEvents.map((event) => event.type)).toEqual(["thread.session-set"]);
+    }),
+  );
+
+  it.effect("preserves an explicit active override during activity", () =>
+    Effect.gen(function* () {
+      const turnResult = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-active-turn-start"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: MessageId.make("message-active"),
+            role: "user",
+            text: "Continue",
+            attachments: [],
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          createdAt: NOW,
+        },
+        readModel: makeReadModel("active"),
+      });
+      const turnEvents = Array.isArray(turnResult) ? turnResult : [turnResult];
+      expect(turnEvents.map((event) => event.type)).toEqual([
+        "thread.message-sent",
+        "thread.turn-start-requested",
       ]);
+
+      const activityResult = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.activity.append",
+          commandId: CommandId.make("cmd-active-approval"),
+          threadId: ThreadId.make("thread-1"),
+          activity: {
+            id: EventId.make("activity-active"),
+            tone: "approval",
+            kind: "approval.requested",
+            summary: "Command approval requested",
+            payload: null,
+            turnId: null,
+            createdAt: NOW,
+          },
+          createdAt: NOW,
+        },
+        readModel: makeReadModel("active"),
+      });
+      const activityEvents = Array.isArray(activityResult) ? activityResult : [activityResult];
+      expect(activityEvents.map((event) => event.type)).toEqual(["thread.activity-appended"]);
     }),
   );
 

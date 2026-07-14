@@ -16,6 +16,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { useParams, useRouter } from "@tanstack/react-router";
@@ -47,6 +48,7 @@ import { useOpenAddProjectCommandPalette } from "../commandPaletteContext";
 import { onOpenNewThreadPicker } from "../newThreadPickerBus";
 import { Dialog, DialogHeader, DialogPopup, DialogTitle } from "./ui/dialog";
 import {
+  resolveThreadActionProjectRef,
   startNewThreadFromContext,
   startNewThreadInProjectFromContext,
 } from "../lib/chatThreadActions";
@@ -55,7 +57,9 @@ import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments"
 import { useProjects, useThreadShells } from "../state/entities";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import { vcsEnvironment } from "../state/vcs";
+import { threadEnvironment } from "../state/threads";
 import { useEnvironmentQuery } from "../state/query";
+import { useAtomCommand } from "../state/use-atom-command";
 import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
 import { formatElapsedDurationLabel, formatRelativeTimeLabel } from "../timestampFormat";
 import type { SidebarThreadSummary } from "../types";
@@ -128,8 +132,10 @@ function threadTimeLabel(thread: SidebarThreadSummary, status: SidebarV2Status):
     return formatElapsedDurationLabel(thread.latestTurn.startedAt);
   }
   if (status === "approval") {
-    const waitingSince = thread.latestTurn?.startedAt ?? thread.updatedAt;
-    return `waiting ${formatElapsedDurationLabel(waitingSince)}`;
+    // Approval activities bump shell.updatedAt in the projection pipeline.
+    // The shell has no dedicated request timestamp, so this is the closest
+    // accurate wait-start signal shared by the label and approval ordering.
+    return `waiting ${formatElapsedDurationLabel(thread.updatedAt)}`;
   }
   const timestamp = thread.latestUserMessageAt ?? thread.updatedAt;
   return formatRelativeTimeLabel(timestamp);
@@ -152,17 +158,31 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   projectCwd: string | null;
   providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
   onThreadClick: (event: ReactMouseEvent, threadRef: ScopedThreadRef) => void;
+  onThreadActivate: (threadRef: ScopedThreadRef) => void;
+  onStartRename: (threadRef: ScopedThreadRef, title: string) => void;
+  onRenameTitleChange: (title: string) => void;
+  onCommitRename: (threadRef: ScopedThreadRef, title: string, originalTitle: string) => void;
+  onCancelRename: () => void;
+  isRenaming: boolean;
+  renamingTitle: string;
   onContextMenu: (threadRef: ScopedThreadRef, position: { x: number; y: number }) => void;
   onSettle: (threadRef: ScopedThreadRef) => void;
   onUnsettle: (threadRef: ScopedThreadRef) => void;
   onChangeRequestState: (threadKey: string, state: "open" | "closed" | "merged" | null) => void;
 }) {
   const {
+    isRenaming,
     onChangeRequestState,
+    onCancelRename,
+    onCommitRename,
     onContextMenu,
+    onRenameTitleChange,
     onSettle,
+    onStartRename,
+    onThreadActivate,
     onThreadClick,
     onUnsettle,
+    renamingTitle,
     thread,
     variant,
     variantAction,
@@ -221,6 +241,50 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
     },
     [onContextMenu, threadRef],
   );
+  const handleKeyDown = useCallback(
+    (event: ReactKeyboardEvent) => {
+      if (event.target !== event.currentTarget) return;
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      onThreadActivate(threadRef);
+    },
+    [onThreadActivate, threadRef],
+  );
+  const handleDoubleClick = useCallback(
+    (event: ReactMouseEvent) => {
+      if (isRenaming || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+      if ((event.target as HTMLElement).closest("button, a, input")) return;
+      event.preventDefault();
+      onStartRename(threadRef, thread.title);
+    },
+    [isRenaming, onStartRename, thread.title, threadRef],
+  );
+  const renameCommittedRef = useRef(false);
+  useEffect(() => {
+    if (isRenaming) renameCommittedRef.current = false;
+  }, [isRenaming]);
+  const handleRenameKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLInputElement>) => {
+      event.stopPropagation();
+      if (event.key === "Enter") {
+        event.preventDefault();
+        renameCommittedRef.current = true;
+        onCommitRename(threadRef, renamingTitle, thread.title);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        renameCommittedRef.current = true;
+        onCancelRename();
+      }
+    },
+    [onCancelRename, onCommitRename, renamingTitle, thread.title, threadRef],
+  );
+  const handleRenameBlur = useCallback(() => {
+    if (!renameCommittedRef.current) {
+      onCommitRename(threadRef, renamingTitle, thread.title);
+    }
+  }, [onCommitRename, renamingTitle, thread.title, threadRef]);
   const handleSettleClick = useCallback(
     (event: ReactMouseEvent) => {
       event.preventDefault();
@@ -261,6 +325,36 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
     />
   );
 
+  const title = isRenaming ? (
+    <input
+      autoFocus
+      value={renamingTitle}
+      aria-label="Thread title"
+      onChange={(event) => onRenameTitleChange(event.target.value)}
+      onFocus={(event) => event.currentTarget.select()}
+      onKeyDown={handleRenameKeyDown}
+      onBlur={handleRenameBlur}
+      onClick={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+      className="min-w-0 flex-1 rounded border border-border bg-background px-1 text-[13px] text-foreground outline-none focus:border-ring"
+    />
+  ) : (
+    <span
+      className={cn(
+        "min-w-0 flex-1 truncate text-[13px]",
+        variant === "card"
+          ? isUnread
+            ? "font-semibold text-foreground"
+            : "font-medium text-foreground/85"
+          : isUnread
+            ? "font-medium text-foreground"
+            : "text-muted-foreground",
+      )}
+    >
+      {thread.title}
+    </span>
+  );
+
   const prBadge =
     prStatus && pr ? (
       <button
@@ -288,17 +382,12 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
           data-testid="sidebar-v2-row-slim"
           className={cn(rowClassName, "flex h-[34px] items-center gap-2.5 rounded-lg px-2.5")}
           onClick={handleClick}
+          onDoubleClick={handleDoubleClick}
+          onKeyDown={handleKeyDown}
           onContextMenu={handleContextMenu}
         >
           {favicon}
-          <span
-            className={cn(
-              "min-w-0 flex-1 truncate text-[13px]",
-              isUnread ? "font-medium text-foreground" : "text-muted-foreground",
-            )}
-          >
-            {thread.title}
-          </span>
+          {title}
           {prBadge}
           <span className="relative flex h-6 w-14 shrink-0 items-center justify-end">
             <span className="text-[11px] tabular-nums text-muted-foreground/40 transition-opacity group-hover/v2-row:opacity-0">
@@ -357,6 +446,8 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
               : "hover:bg-accent/50 dark:hover:bg-accent/30",
         )}
         onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
+        onKeyDown={handleKeyDown}
         onContextMenu={handleContextMenu}
       >
         <div className="flex items-center gap-2.5">
@@ -365,14 +456,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
           ) : (
             favicon
           )}
-          <span
-            className={cn(
-              "min-w-0 flex-1 truncate text-[13px]",
-              isUnread ? "font-semibold text-foreground" : "font-medium text-foreground/85",
-            )}
-          >
-            {thread.title}
-          </span>
+          {title}
           {diff ? (
             <span className="shrink-0 font-mono text-[11px]">
               <span className="text-emerald-600 dark:text-emerald-400">+{diff.insertions}</span>{" "}
@@ -475,6 +559,9 @@ export default function SidebarV2() {
   const autoSettleAfterDays = useClientSettings((s) => s.sidebarAutoSettleAfterDays);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const { settleThread, unsettleThread, archiveThread, deleteThread } = useThreadActions();
+  const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
+    reportFailure: false,
+  });
   const newThreadContext = useHandleNewThread();
   const openAddProjectCommandPalette = useOpenAddProjectCommandPalette();
   const { environments } = useEnvironments();
@@ -563,6 +650,14 @@ export default function SidebarV2() {
           ) ?? null),
     [projectScopeKey, projects],
   );
+  useEffect(() => {
+    if (
+      projectScopeKey !== null &&
+      !projects.some((project) => `${project.environmentId}:${project.id}` === projectScopeKey)
+    ) {
+      setProjectScopeKey(null);
+    }
+  }, [projectScopeKey, projects]);
 
   const { activeThreads, settledThreads } = useMemo(() => {
     const now = `${nowMinute}:00.000Z`;
@@ -665,6 +760,42 @@ export default function SidebarV2() {
       });
     },
     [clearSelection, isMobile, router, setOpenMobile, setSelectionAnchor],
+  );
+
+  const [renamingThreadKey, setRenamingThreadKey] = useState<string | null>(null);
+  const [renamingTitle, setRenamingTitle] = useState("");
+  const startThreadRename = useCallback((threadRef: ScopedThreadRef, title: string) => {
+    setRenamingThreadKey(scopedThreadKey(threadRef));
+    setRenamingTitle(title);
+  }, []);
+  const cancelThreadRename = useCallback(() => setRenamingThreadKey(null), []);
+  const commitThreadRename = useCallback(
+    (threadRef: ScopedThreadRef, title: string, originalTitle: string) => {
+      void (async () => {
+        const trimmed = title.trim();
+        setRenamingThreadKey(null);
+        if (trimmed.length === 0) {
+          toastManager.add({ type: "warning", title: "Thread title cannot be empty" });
+          return;
+        }
+        if (trimmed === originalTitle) return;
+        const result = await updateThreadMetadata({
+          environmentId: threadRef.environmentId,
+          input: { threadId: threadRef.threadId, title: trimmed },
+        });
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Failed to rename thread",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        }
+      })();
+    },
+    [updateThreadMetadata],
   );
 
   const handleThreadClick = useCallback(
@@ -830,6 +961,7 @@ export default function SidebarV2() {
               isSettled
                 ? { id: "unsettle", label: "Un-settle thread" }
                 : { id: "settle", label: "Settle thread" },
+              { id: "rename", label: "Rename thread" },
               { id: "mark-unread", label: "Mark unread" },
               { id: "archive", label: "Archive" },
               { id: "delete", label: "Delete", destructive: true, icon: "trash" },
@@ -844,6 +976,9 @@ export default function SidebarV2() {
             return;
           case "unsettle":
             attemptUnsettle(threadRef);
+            return;
+          case "rename":
+            startThreadRename(threadRef, thread.title);
             return;
           case "mark-unread":
             markThreadUnread(threadKey, thread.latestTurn?.completedAt);
@@ -900,6 +1035,7 @@ export default function SidebarV2() {
       deleteThread,
       handleMultiSelectContextMenu,
       markThreadUnread,
+      startThreadRename,
     ],
   );
 
@@ -1016,15 +1152,15 @@ export default function SidebarV2() {
     },
     [isMobile, newThreadContext, projects, setOpenMobile],
   );
-  const activeProjectRef = (() => {
-    const activeThread = routeThreadKey ? threadByKey.get(routeThreadKey) : null;
-    return activeThread
-      ? scopeProjectRef(activeThread.environmentId, activeThread.projectId)
-      : null;
-  })();
+  const contextualProjectRef = resolveThreadActionProjectRef({
+    activeDraftThread: newThreadContext.activeDraftThread,
+    activeThread: newThreadContext.activeThread ?? undefined,
+    defaultProjectRef: newThreadContext.defaultProjectRef,
+    handleNewThread: newThreadContext.handleNewThread,
+  });
   const newThreadTargetRef = scopedProject
     ? scopeProjectRef(scopedProject.environmentId, scopedProject.id)
-    : (activeProjectRef ?? newThreadContext.defaultProjectRef);
+    : contextualProjectRef;
   const newThreadTargetProject = newThreadTargetRef
     ? (projects.find(
         (project) =>
@@ -1192,6 +1328,13 @@ export default function SidebarV2() {
                   }
                   providerEntryByInstanceId={providerEntryByInstanceId}
                   onThreadClick={handleThreadClick}
+                  onThreadActivate={navigateToThread}
+                  onStartRename={startThreadRename}
+                  onRenameTitleChange={setRenamingTitle}
+                  onCommitRename={commitThreadRename}
+                  onCancelRename={cancelThreadRename}
+                  isRenaming={renamingThreadKey === threadKey}
+                  renamingTitle={renamingThreadKey === threadKey ? renamingTitle : ""}
                   onContextMenu={handleThreadContextMenu}
                   onSettle={attemptSettle}
                   onUnsettle={attemptUnsettle}

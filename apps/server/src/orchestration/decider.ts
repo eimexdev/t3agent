@@ -337,7 +337,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           settledAt,
-          updatedAt: occurredAt,
+          updatedAt: settledAt,
         },
       };
     }
@@ -519,7 +519,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           createdAt: command.createdAt,
         },
       };
-      if (targetThread.settledOverride === null) {
+      if (targetThread.settledOverride !== "settled") {
         return [userMessageEvent, turnStartRequestedEvent];
       }
       const unsettledEvent: Omit<OrchestrationEvent, "sequence"> = {
@@ -681,7 +681,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       // must not fight a user's explicit settle.
       const isSessionActivity =
         command.session.status === "starting" || command.session.status === "running";
-      if (thread.settledOverride === null || !isSessionActivity) {
+      if (thread.settledOverride !== "settled" || !isSessionActivity) {
         return sessionSetEvent;
       }
       const unsettledEvent: Omit<OrchestrationEvent, "sequence"> = {
@@ -857,7 +857,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const wakesSettledThread =
         command.activity.kind === "approval.requested" ||
         command.activity.kind === "user-input.requested";
-      if (thread.settledOverride === null || !wakesSettledThread) {
+      if (thread.settledOverride !== "settled" || !wakesSettledThread) {
         return activityAppendedEvent;
       }
       const unsettledEvent: Omit<OrchestrationEvent, "sequence"> = {

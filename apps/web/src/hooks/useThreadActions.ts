@@ -22,7 +22,11 @@ import { readLocalApi } from "../localApi";
 import { readEnvironmentThreadRefs, readProject, readThreadShell } from "../state/entities";
 import { useTerminalUiStateStore } from "../terminalUiStateStore";
 import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
-import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
+import {
+  canOfferWorktreeRemoval,
+  formatWorktreePathForDisplay,
+  getOrphanedWorktreePathForThread,
+} from "../worktreeCleanup";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useClientSettings } from "./useSettings";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -381,6 +385,14 @@ export function useThreadActions() {
       if (orphanedWorktreePath === null || threadProject === null) {
         return settleResult;
       }
+      const statusResult = await refreshVcsStatus({
+        environmentId: threadRef.environmentId,
+        input: { cwd: orphanedWorktreePath },
+      });
+      // If status cannot be verified, keep the worktree and skip the prompt.
+      if (statusResult._tag === "Failure" || !canOfferWorktreeRemoval(statusResult.value)) {
+        return settleResult;
+      }
       const displayWorktreePath = formatWorktreePathForDisplay(orphanedWorktreePath);
       toastManager.add(
         stackedThreadToast({
@@ -415,9 +427,26 @@ export function useThreadActions() {
                   );
                   return;
                 }
-                // force stays false: git refuses to remove a worktree with
-                // uncommitted changes, which is the backstop for work created
-                // after the settle. Branch commits survive worktree removal.
+                const currentStatusResult = await refreshVcsStatus({
+                  environmentId: threadRef.environmentId,
+                  input: { cwd: orphanedWorktreePath },
+                });
+                if (
+                  currentStatusResult._tag === "Failure" ||
+                  !canOfferWorktreeRemoval(currentStatusResult.value)
+                ) {
+                  toastManager.add(
+                    stackedThreadToast({
+                      type: "warning",
+                      title: "Worktree kept",
+                      description:
+                        "This worktree has uncommitted or unpushed changes, or its status could not be verified.",
+                    }),
+                  );
+                  return;
+                }
+                // force stays false as an additional guard against changes
+                // created between the status check and the removal request.
                 const removeResult = await removeWorktree({
                   environmentId: threadRef.environmentId,
                   input: {

@@ -21,6 +21,7 @@ function makeShell(input: {
   readonly settledOverride: OrchestrationThreadShell["settledOverride"];
   readonly activityAt: string | null;
   readonly sessionStatus?: "starting" | "running";
+  readonly pending?: "approval" | "user-input";
 }): OrchestrationThreadShell {
   const threadId = ThreadId.make("thread-1");
   return {
@@ -61,8 +62,8 @@ function makeShell(input: {
             updatedAt: NOW,
           },
     latestUserMessageAt: null,
-    hasPendingApprovals: false,
-    hasPendingUserInput: false,
+    hasPendingApprovals: input.pending === "approval",
+    hasPendingUserInput: input.pending === "user-input",
     hasActionableProposedPlan: false,
   };
 }
@@ -97,32 +98,38 @@ describe("effectiveSettled", () => {
     ["no-activity", null],
   ] as const;
   const runningCases = [false, true] as const;
+  const pendingCases = [undefined, "approval", "user-input"] as const;
   const truthTable = overrides.flatMap((settledOverride) =>
     changeRequestStates.flatMap((changeRequestState) =>
       inactivityCases.flatMap(([inactivity, activityAt]) =>
-        runningCases.map((running) => ({
-          settledOverride,
-          changeRequestState,
-          inactivity,
-          activityAt,
-          running,
-          expected:
-            settledOverride === "settled" ||
-            (settledOverride === null &&
-              !running &&
-              (changeRequestState === "merged" || inactivity === "stale")),
-        })),
+        runningCases.flatMap((running) =>
+          pendingCases.map((pending) => ({
+            settledOverride,
+            changeRequestState,
+            inactivity,
+            activityAt,
+            running,
+            pending,
+            expected:
+              pending === undefined &&
+              (settledOverride === "settled" ||
+                (settledOverride === null &&
+                  !running &&
+                  (changeRequestState === "merged" || inactivity === "stale"))),
+          })),
+        ),
       ),
     ),
   );
 
   it.each(truthTable)(
-    "override=$settledOverride pr=$changeRequestState inactivity=$inactivity running=$running",
-    ({ settledOverride, changeRequestState, activityAt, running, expected }) => {
+    "override=$settledOverride pr=$changeRequestState inactivity=$inactivity running=$running pending=$pending",
+    ({ settledOverride, changeRequestState, activityAt, running, pending, expected }) => {
       const shell = makeShell({
         settledOverride,
         activityAt,
         ...(running ? { sessionStatus: "running" as const } : {}),
+        ...(pending === undefined ? {} : { pending }),
       });
       const changeRequestOptions =
         changeRequestState === undefined

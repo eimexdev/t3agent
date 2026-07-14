@@ -34,6 +34,8 @@ export function effectiveSettled(
     readonly changeRequestState?: ChangeRequestStateLike | null;
   },
 ): boolean {
+  // Blocked work must remain visible even when a user explicitly settled it.
+  if (shell.hasPendingApprovals || shell.hasPendingUserInput) return false;
   if (shell.settledOverride === "settled") return true;
   if (shell.settledOverride === "active") return false;
   if (shell.session?.status === "starting" || shell.session?.status === "running") return false;

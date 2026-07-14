@@ -373,7 +373,7 @@ export function resolveSidebarV2Status(thread: SidebarV2StatusInput): SidebarV2S
   if (thread.session?.status === "running" || thread.session?.status === "starting") {
     return "working";
   }
-  if (thread.session != null && thread.session.lastError !== null) {
+  if (thread.session?.status === "error") {
     return "failed";
   }
   return "ready";
@@ -390,13 +390,16 @@ export function sortThreadsForSidebarV2<
     if (leftApproval !== rightApproval) {
       return leftApproval ? -1 : 1;
     }
+    // Approval activities update the shell's updatedAt in the projection
+    // pipeline, making it the best available request-time proxy. Oldest waits
+    // pin first. (The shell does not expose the approval request timestamp.)
+    if (leftApproval && rightApproval) {
+      return (
+        Date.parse(left.updatedAt) - Date.parse(right.updatedAt) || left.id.localeCompare(right.id)
+      );
+    }
     const byRecency =
       getThreadSortTimestamp(right, "updated_at") - getThreadSortTimestamp(left, "updated_at");
-    // Approval wait time is "how long you've been the bottleneck", which is
-    // oldest-activity-first — the inverse of recency.
-    if (leftApproval && rightApproval) {
-      return -byRecency || left.id.localeCompare(right.id);
-    }
     return byRecency || left.id.localeCompare(right.id);
   });
 }

@@ -592,17 +592,23 @@ describe("resolveSidebarV2Status", () => {
     ).toBe("working");
   });
 
-  it("reports failed only for stopped sessions with an error", () => {
+  it("reports failed only while the session status is error", () => {
     expect(
       resolveSidebarV2Status({
         hasPendingApprovals: false,
-        session: { ...session, status: "stopped" as const, lastError: "boom" },
+        session: { ...session, status: "error" as const, lastError: "boom" },
       }),
     ).toBe("failed");
     expect(
       resolveSidebarV2Status({
         hasPendingApprovals: false,
-        session: { ...session, status: "stopped" as const },
+        session: { ...session, status: "stopped" as const, lastError: "persisted" },
+      }),
+    ).toBe("ready");
+    expect(
+      resolveSidebarV2Status({
+        hasPendingApprovals: false,
+        session: { ...session, status: "ready" as const, lastError: "persisted" },
       }),
     ).toBe("ready");
   });
@@ -617,12 +623,13 @@ describe("sortThreadsForSidebarV2", () => {
     id: string;
     hasPendingApprovals?: boolean;
     latestUserMessageAt: string;
+    updatedAt?: string;
   }) => ({
     id: input.id,
     hasPendingApprovals: input.hasPendingApprovals ?? false,
     session: null,
     createdAt: "2026-03-09T10:00:00.000Z",
-    updatedAt: input.latestUserMessageAt,
+    updatedAt: input.updatedAt ?? input.latestUserMessageAt,
     latestUserMessageAt: input.latestUserMessageAt,
   });
 
@@ -632,12 +639,14 @@ describe("sortThreadsForSidebarV2", () => {
       sortable({
         id: "approval-new",
         hasPendingApprovals: true,
-        latestUserMessageAt: "2026-03-09T11:00:00.000Z",
+        latestUserMessageAt: "2026-03-09T08:00:00.000Z",
+        updatedAt: "2026-03-09T11:00:00.000Z",
       }),
       sortable({
         id: "approval-old",
         hasPendingApprovals: true,
-        latestUserMessageAt: "2026-03-09T09:00:00.000Z",
+        latestUserMessageAt: "2026-03-09T11:30:00.000Z",
+        updatedAt: "2026-03-09T09:00:00.000Z",
       }),
       sortable({ id: "stale", latestUserMessageAt: "2026-03-09T08:00:00.000Z" }),
     ]);
