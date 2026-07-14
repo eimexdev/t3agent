@@ -16,8 +16,10 @@ import {
   resolveSidebarNewThreadEnvMode,
   resolveSidebarStageBadgeLabel,
   resolveThreadRowClassName,
+  resolveSidebarV2Status,
   resolveThreadStatusPill,
   shouldClearThreadSelectionOnMouseDown,
+  sortThreadsForSidebarV2,
   sortProjectsForSidebar,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
 } from "./Sidebar.logic";
@@ -564,6 +566,91 @@ describe("isContextMenuPointerDown", () => {
   });
 });
 
+describe("resolveSidebarV2Status", () => {
+  const session = {
+    threadId: ThreadId.make("thread-1"),
+    status: "running" as const,
+    providerName: "Codex",
+    providerInstanceId: ProviderInstanceId.make("codex"),
+    runtimeMode: DEFAULT_RUNTIME_MODE,
+    activeTurnId: "turn-1" as never,
+    lastError: null,
+    updatedAt: "2026-03-09T10:00:00.000Z",
+  };
+
+  it("prioritizes approval over a running session", () => {
+    expect(resolveSidebarV2Status({ hasPendingApprovals: true, session })).toBe("approval");
+  });
+
+  it("reports working for running and starting sessions", () => {
+    expect(resolveSidebarV2Status({ hasPendingApprovals: false, session })).toBe("working");
+    expect(
+      resolveSidebarV2Status({
+        hasPendingApprovals: false,
+        session: { ...session, status: "starting" as const },
+      }),
+    ).toBe("working");
+  });
+
+  it("reports failed only for stopped sessions with an error", () => {
+    expect(
+      resolveSidebarV2Status({
+        hasPendingApprovals: false,
+        session: { ...session, status: "stopped" as const, lastError: "boom" },
+      }),
+    ).toBe("failed");
+    expect(
+      resolveSidebarV2Status({
+        hasPendingApprovals: false,
+        session: { ...session, status: "stopped" as const },
+      }),
+    ).toBe("ready");
+  });
+
+  it("defaults to ready with no session", () => {
+    expect(resolveSidebarV2Status({ hasPendingApprovals: false, session: null })).toBe("ready");
+  });
+});
+
+describe("sortThreadsForSidebarV2", () => {
+  const sortable = (input: {
+    id: string;
+    hasPendingApprovals?: boolean;
+    latestUserMessageAt: string;
+  }) => ({
+    id: input.id,
+    hasPendingApprovals: input.hasPendingApprovals ?? false,
+    session: null,
+    createdAt: "2026-03-09T10:00:00.000Z",
+    updatedAt: input.latestUserMessageAt,
+    latestUserMessageAt: input.latestUserMessageAt,
+  });
+
+  it("pins approval-blocked threads above the recency flow, longest wait first", () => {
+    const sorted = sortThreadsForSidebarV2([
+      sortable({ id: "fresh", latestUserMessageAt: "2026-03-09T12:00:00.000Z" }),
+      sortable({
+        id: "approval-new",
+        hasPendingApprovals: true,
+        latestUserMessageAt: "2026-03-09T11:00:00.000Z",
+      }),
+      sortable({
+        id: "approval-old",
+        hasPendingApprovals: true,
+        latestUserMessageAt: "2026-03-09T09:00:00.000Z",
+      }),
+      sortable({ id: "stale", latestUserMessageAt: "2026-03-09T08:00:00.000Z" }),
+    ]);
+
+    expect(sorted.map((thread) => thread.id)).toEqual([
+      "approval-old",
+      "approval-new",
+      "fresh",
+      "stale",
+    ]);
+  });
+});
+
 describe("resolveThreadStatusPill", () => {
   const baseThread = {
     hasActionableProposedPlan: false,
@@ -830,6 +917,8 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     proposedPlans: [],
     createdAt: "2026-03-09T10:00:00.000Z",
     archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
     deletedAt: null,
     updatedAt: "2026-03-09T10:00:00.000Z",
     latestTurn: null,

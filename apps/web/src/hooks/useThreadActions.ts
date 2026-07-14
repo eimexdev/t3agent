@@ -50,6 +50,12 @@ export function useThreadActions() {
   const deleteThreadMutation = useAtomCommand(threadEnvironment.delete, {
     reportFailure: false,
   });
+  const settleThreadMutation = useAtomCommand(threadEnvironment.settle, {
+    reportFailure: false,
+  });
+  const unsettleThreadMutation = useAtomCommand(threadEnvironment.unsettle, {
+    reportFailure: false,
+  });
   const stopThreadSession = useAtomCommand(threadEnvironment.stopSession);
   const removeWorktree = useAtomCommand(vcsEnvironment.removeWorktree, {
     reportFailure: false,
@@ -345,6 +351,116 @@ export function useThreadActions() {
     ],
   );
 
+  const settleThread = useCallback(
+    async (target: ScopedThreadRef) => {
+      const resolved = resolveThreadTarget(target);
+      const settleResult = await settleThreadMutation({
+        environmentId: target.environmentId,
+        input: { threadId: target.threadId },
+      });
+      if (settleResult._tag === "Failure" || !resolved) {
+        return settleResult;
+      }
+
+      // Settling is the natural moment to reclaim disk: offer (never force) a
+      // worktree removal when this thread is the only one using it and there is
+      // no unsaved or unpushed work at stake.
+      const { thread, threadRef } = resolved;
+      if (thread.worktreePath === null) {
+        return settleResult;
+      }
+      const threads = readEnvironmentThreadRefs(threadRef.environmentId).flatMap((ref) => {
+        const shell = readThreadShell(ref);
+        return shell === null ? [] : [shell];
+      });
+      const orphanedWorktreePath = getOrphanedWorktreePathForThread(threads, threadRef.threadId);
+      const threadProject = readProject({
+        environmentId: threadRef.environmentId,
+        projectId: thread.projectId,
+      });
+      if (orphanedWorktreePath === null || threadProject === null) {
+        return settleResult;
+      }
+      const displayWorktreePath = formatWorktreePathForDisplay(orphanedWorktreePath);
+      toastManager.add(
+        stackedThreadToast({
+          type: "info",
+          title: "Thread settled",
+          description: `Worktree ${displayWorktreePath} is no longer used by any thread.`,
+          actionProps: {
+            children: "Remove worktree",
+            onClick: () => {
+              void (async () => {
+                // Re-validate at click time: the toast may be stale — the
+                // thread can have woken up or another thread adopted the
+                // worktree since the settle happened.
+                const currentShell = readThreadShell(threadRef);
+                const currentThreads = readEnvironmentThreadRefs(threadRef.environmentId).flatMap(
+                  (ref) => {
+                    const shell = readThreadShell(ref);
+                    return shell === null ? [] : [shell];
+                  },
+                );
+                const stillOrphaned =
+                  getOrphanedWorktreePathForThread(currentThreads, threadRef.threadId) ===
+                  orphanedWorktreePath;
+                const stillSettled = currentShell?.settledOverride === "settled";
+                if (!stillOrphaned || !stillSettled) {
+                  toastManager.add(
+                    stackedThreadToast({
+                      type: "warning",
+                      title: "Worktree kept",
+                      description: "This worktree is in use again and was not removed.",
+                    }),
+                  );
+                  return;
+                }
+                // force stays false: git refuses to remove a worktree with
+                // uncommitted changes, which is the backstop for work created
+                // after the settle. Branch commits survive worktree removal.
+                const removeResult = await removeWorktree({
+                  environmentId: threadRef.environmentId,
+                  input: {
+                    cwd: threadProject.workspaceRoot,
+                    path: orphanedWorktreePath,
+                    force: false,
+                  },
+                });
+                if (removeResult._tag === "Failure") {
+                  const error = squashAtomCommandFailure(removeResult);
+                  toastManager.add(
+                    stackedThreadToast({
+                      type: "error",
+                      title: "Worktree removal failed",
+                      description:
+                        error instanceof Error ? error.message : "Could not remove the worktree.",
+                    }),
+                  );
+                  return;
+                }
+                await refreshVcsStatus({
+                  environmentId: threadRef.environmentId,
+                  input: { cwd: threadProject.workspaceRoot },
+                });
+              })();
+            },
+          },
+        }),
+      );
+      return settleResult;
+    },
+    [refreshVcsStatus, removeWorktree, resolveThreadTarget, settleThreadMutation],
+  );
+
+  const unsettleThread = useCallback(
+    (target: ScopedThreadRef) =>
+      unsettleThreadMutation({
+        environmentId: target.environmentId,
+        input: { threadId: target.threadId, reason: "user" },
+      }),
+    [unsettleThreadMutation],
+  );
+
   const confirmAndDeleteThread = useCallback(
     async (target: ScopedThreadRef) => {
       const localApi = readLocalApi();
@@ -379,7 +495,16 @@ export function useThreadActions() {
       unarchiveThread,
       deleteThread,
       confirmAndDeleteThread,
+      settleThread,
+      unsettleThread,
     }),
-    [archiveThread, confirmAndDeleteThread, deleteThread, unarchiveThread],
+    [
+      archiveThread,
+      confirmAndDeleteThread,
+      deleteThread,
+      settleThread,
+      unarchiveThread,
+      unsettleThread,
+    ],
   );
 }

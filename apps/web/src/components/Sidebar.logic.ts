@@ -357,6 +357,50 @@ export function resolveThreadRowClassName(input: {
   return cn(baseClassName, "text-muted-foreground hover:bg-accent hover:text-foreground");
 }
 
+// ── Sidebar v2 status model ─────────────────────────────────────────
+// Four visual states, three colors: color is reserved for "act now"
+// (approval), "in motion" (working), and "broken" (failed). Ready is the
+// unlabeled resting state — the agent stopped and is waiting on the user,
+// whether it finished, asked a question, or proposed a plan.
+export type SidebarV2Status = "approval" | "working" | "failed" | "ready";
+
+type SidebarV2StatusInput = Pick<SidebarThreadSummary, "hasPendingApprovals" | "session">;
+
+export function resolveSidebarV2Status(thread: SidebarV2StatusInput): SidebarV2Status {
+  if (thread.hasPendingApprovals) {
+    return "approval";
+  }
+  if (thread.session?.status === "running" || thread.session?.status === "starting") {
+    return "working";
+  }
+  if (thread.session != null && thread.session.lastError !== null) {
+    return "failed";
+  }
+  return "ready";
+}
+
+// v2 sort: approval-blocked threads pin above the recency flow, longest wait
+// first, so nothing actionable can scroll away. Everything else is recency.
+export function sortThreadsForSidebarV2<
+  T extends SidebarV2StatusInput & ThreadSortInput & { readonly id: string },
+>(threads: readonly T[]): T[] {
+  return [...threads].toSorted((left, right) => {
+    const leftApproval = resolveSidebarV2Status(left) === "approval";
+    const rightApproval = resolveSidebarV2Status(right) === "approval";
+    if (leftApproval !== rightApproval) {
+      return leftApproval ? -1 : 1;
+    }
+    const byRecency =
+      getThreadSortTimestamp(right, "updated_at") - getThreadSortTimestamp(left, "updated_at");
+    // Approval wait time is "how long you've been the bottleneck", which is
+    // oldest-activity-first — the inverse of recency.
+    if (leftApproval && rightApproval) {
+      return -byRecency || left.id.localeCompare(right.id);
+    }
+    return byRecency || left.id.localeCompare(right.id);
+  });
+}
+
 export function resolveThreadStatusPill(input: {
   thread: ThreadStatusInput;
 }): ThreadStatusPill | null {
