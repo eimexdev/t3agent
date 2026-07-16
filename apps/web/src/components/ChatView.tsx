@@ -1904,7 +1904,6 @@ function ChatViewContent(props: ChatViewProps) {
     loadPage: loadOlderActivitiesPage,
   });
 
-
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
   const pendingApprovals = useMemo(
     () => derivePendingApprovals(threadActivities),

@@ -1472,7 +1472,6 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     }
   }, [hasMoreOlder, loadingOlder, onLoadOlder]);
 
-
   useEffect(() => {
     const previous = previousLatestTurnRef.current;
     previousLatestTurnRef.current = props.latestTurn;
@@ -1798,9 +1797,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             </View>
           </View>
         ) : null}
-        {props.feed.length === 0 &&
-        !hasMoreOlder &&
-        props.contentPresentation.kind === "ready" ? (
+        {props.feed.length === 0 && !hasMoreOlder && props.contentPresentation.kind === "ready" ? (
           <View pointerEvents="none" style={StyleSheet.absoluteFill}>
             <ThreadFeedPlaceholder
               title="No conversation yet"
