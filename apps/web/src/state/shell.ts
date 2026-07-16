@@ -5,7 +5,7 @@ import {
   createShellEnvironmentAtoms,
 } from "@t3tools/client-runtime/state/shell";
 import * as Option from "effect/Option";
-import { Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
 import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";
@@ -19,7 +19,11 @@ export const environmentShellSummaryAtom = createEnvironmentShellSummaryAtom({
 });
 
 export const allEnvironmentShellsBootstrappedAtom = Atom.make((get) => {
-  for (const environmentId of get(environmentCatalog.catalogValueAtom).entries.keys()) {
+  const catalog = AsyncResult.value(get(environmentCatalog.catalogAtom));
+  if (Option.isNone(catalog)) {
+    return false;
+  }
+  for (const environmentId of catalog.value.entries.keys()) {
     if (Option.isNone(get(environmentShell.stateValueAtom(environmentId)).snapshot)) {
       return false;
     }
