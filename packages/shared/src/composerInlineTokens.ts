@@ -30,15 +30,20 @@ export interface CollectComposerInlineTokensOptions {
   readonly preserveTrailingFrom?: ReadonlyArray<ComposerInlineToken>;
 }
 
+type ComposerThreadInlineToken = Extract<ComposerInlineToken, { type: "thread" }>;
+
 const SKILL_TOKEN_REGEX = /(^|\s)\$([a-zA-Z][a-zA-Z0-9:_-]*)(?=\s)/g;
 const MENTION_TOKEN_REGEX = /(^|\s)@(?:"((?:\\.|[^"\\])*)"|([^\s@"]+))(?=\s)/g;
 const FILE_LINK_TOKEN_REGEX = /(^|\s)\[((?:\\.|[^\]\\])*)\]\(([^)\s]+)\)(?=\s)/g;
-const THREAD_LINK_TOKEN_REGEX = /(^|\s)\[((?:\\.|[^\]\\])*)\]\((t3-thread:\/\/\/[^)\s]+)\)(?=\s)/g;
+const THREAD_LINK_TOKEN_REGEX =
+  /(^|\s)\[((?:\\.|[^\]\\])*)\]\((t3-thread:\/\/\/[^)\s]+)\)(?=\s|$)/g;
 const URI_SCHEME_REGEX = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 const WINDOWS_DRIVE_PATH_REGEX = /^[A-Za-z]:[\\/]/;
 
-function collectThreadTokens(text: string): ComposerInlineToken[] {
-  const matches: ComposerInlineToken[] = [];
+export function collectComposerThreadReferences(
+  text: string,
+): ReadonlyArray<ComposerThreadInlineToken> {
+  const matches: ComposerThreadInlineToken[] = [];
 
   for (const match of text.matchAll(THREAD_LINK_TOKEN_REGEX)) {
     const fullMatch = match[0];
@@ -122,7 +127,7 @@ export function collectComposerInlineTokens(
   text: string,
   options: CollectComposerInlineTokensOptions = {},
 ): ReadonlyArray<ComposerInlineToken> {
-  const matches = [...collectMentionTokens(text), ...collectThreadTokens(text)];
+  const matches = [...collectMentionTokens(text), ...collectComposerThreadReferences(text)];
 
   for (const match of text.matchAll(SKILL_TOKEN_REGEX)) {
     const fullMatch = match[0];
