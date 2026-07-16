@@ -52,6 +52,12 @@ export interface ThreadListV2Item {
   readonly isLast: boolean;
 }
 
+export interface ThreadListV2Layout {
+  readonly items: ThreadListV2Item[];
+  /** Settled threads beyond the render limit (behind "Show more"). */
+  readonly hiddenSettledCount: number;
+}
+
 /**
  * Partitions visible threads into the active card block (creation order) and
  * the settled recency tail, matching the web v2 list. `autoSettleAfterDays`
@@ -65,9 +71,11 @@ export function buildThreadListV2Items(input: {
   /** Per-row PR state reported up by visible rows ("env:threadId" keys). */
   readonly changeRequestStateByKey?: ReadonlyMap<string, "open" | "closed" | "merged">;
   readonly autoSettleAfterDays?: number;
+  /** Max settled rows to render; the rest are counted, not built. */
+  readonly settledLimit?: number;
   /** Injectable for tests; defaults to now. */
   readonly now?: string;
-}): ThreadListV2Item[] {
+}): ThreadListV2Layout {
   const now = input.now ?? new Date().toISOString();
   const autoSettleAfterDays = input.autoSettleAfterDays ?? 3;
   const query = input.searchQuery.trim().toLocaleLowerCase();
@@ -94,12 +102,15 @@ export function buildThreadListV2Items(input: {
       Date.parse(right.latestUserMessageAt ?? right.updatedAt) -
       Date.parse(left.latestUserMessageAt ?? left.updatedAt),
   );
+  const settledLimit = input.settledLimit ?? Number.POSITIVE_INFINITY;
+  const visibleSettled =
+    orderedSettled.length > settledLimit ? orderedSettled.slice(0, settledLimit) : orderedSettled;
 
   const items: ThreadListV2Item[] = [];
   for (const thread of orderedActive) {
     items.push({ thread, variant: "card", showSettledDivider: false, isLast: false });
   }
-  for (const [index, thread] of orderedSettled.entries()) {
+  for (const [index, thread] of visibleSettled.entries()) {
     items.push({
       thread,
       variant: "slim",
@@ -111,5 +122,5 @@ export function buildThreadListV2Items(input: {
   if (last) {
     items[items.length - 1] = { ...last, isLast: true };
   }
-  return items;
+  return { items, hiddenSettledCount: orderedSettled.length - visibleSettled.length };
 }

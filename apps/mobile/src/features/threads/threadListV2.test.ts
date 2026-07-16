@@ -76,7 +76,7 @@ describe("sortThreadsForListV2", () => {
 
 describe("buildThreadListV2Items", () => {
   it("partitions archived (settled) threads into a slim tail with one divider", () => {
-    const items = buildThreadListV2Items({
+    const { items } = buildThreadListV2Items({
       threads: [
         makeThread({ id: ThreadId.make("active"), title: "Active" }),
         makeThread({
@@ -105,7 +105,7 @@ describe("buildThreadListV2Items", () => {
   });
 
   it("keeps cards in creation order while settled sorts by recency", () => {
-    const items = buildThreadListV2Items({
+    const { items } = buildThreadListV2Items({
       threads: [
         makeThread({
           id: ThreadId.make("older-created"),
@@ -128,7 +128,7 @@ describe("buildThreadListV2Items", () => {
   });
 
   it("keeps archived threads in the tail and filters by search query", () => {
-    const items = buildThreadListV2Items({
+    const { items } = buildThreadListV2Items({
       threads: [
         makeThread({ id: ThreadId.make("match"), title: "Fix login bug" }),
         makeThread({ id: ThreadId.make("miss"), title: "Greeting" }),
@@ -146,6 +146,39 @@ describe("buildThreadListV2Items", () => {
     expect(items.map((item) => [item.thread.id, item.variant])).toEqual([
       ["match", "card"],
       ["archived", "slim"],
+    ]);
+  });
+});
+
+describe("buildThreadListV2Items settled paging", () => {
+  it("caps the settled tail at settledLimit and reports the hidden count", () => {
+    const threads = [
+      makeThread({ id: ThreadId.make("active"), title: "Active" }),
+      ...Array.from({ length: 4 }, (_, index) =>
+        makeThread({
+          id: ThreadId.make(`settled-${index}`),
+          title: `Settled ${index}`,
+          archivedAt: NOW,
+          latestUserMessageAt: `2026-06-01T0${index}:00:00.000Z`,
+        }),
+      ),
+    ];
+
+    const layout = buildThreadListV2Items({
+      threads,
+      environmentId: null,
+      searchQuery: "",
+      settledLimit: 2,
+      now: NOW,
+    });
+
+    expect(layout.hiddenSettledCount).toBe(2);
+    expect(layout.items.filter((item) => item.variant === "slim")).toHaveLength(2);
+    // Most recent settled first — the hidden ones are the oldest.
+    expect(layout.items.map((item) => item.thread.id)).toEqual([
+      "active",
+      "settled-3",
+      "settled-2",
     ]);
   });
 });

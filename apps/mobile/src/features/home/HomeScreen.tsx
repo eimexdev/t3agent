@@ -15,11 +15,12 @@ import type {
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Platform, View } from "react-native";
+import { ActivityIndicator, Platform, Pressable, View } from "react-native";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useThemeColor } from "../../lib/useThemeColor";
 
+import { AppText as Text } from "../../components/AppText";
 import { EmptyState } from "../../components/EmptyState";
 import type { WorkspaceState } from "../../state/workspaceModel";
 import type { SavedRemoteConnection } from "../../lib/connection";
@@ -87,6 +88,10 @@ interface HomeScreenProps {
 /* ─── Layout constants ───────────────────────────────────────────────── */
 
 const ESTIMATED_THREAD_ROW_HEIGHT = 72;
+// v2 settled-tail paging: recent history is the common lookup; the deep
+// tail stays behind an explicit Show more.
+const THREAD_LIST_V2_SETTLED_INITIAL_COUNT = 10;
+const THREAD_LIST_V2_SETTLED_PAGE_COUNT = 25;
 /**
  * Top spacing between the list and the Android custom header. The Android
  * header (AndroidHomeHeader) is rendered in-flow above this screen and
@@ -386,8 +391,23 @@ export function HomeScreen(props: HomeScreenProps) {
       });
     }
   }, [archivedSnapshots, settledHolds]);
-  const threadListV2Items = useMemo(() => {
-    if (!threadListV2Enabled) return [];
+  // The settled tail renders in pages; expansion resets when the filter
+  // context changes so environment/search flips never inherit a deep page.
+  const [settledVisibleCount, setSettledVisibleCount] = useState(
+    THREAD_LIST_V2_SETTLED_INITIAL_COUNT,
+  );
+  const settledResetKey = `${props.selectedEnvironmentId ?? "all"}:${props.searchQuery.trim()}`;
+  const lastSettledResetKeyRef = useRef(settledResetKey);
+  if (lastSettledResetKeyRef.current !== settledResetKey) {
+    lastSettledResetKeyRef.current = settledResetKey;
+    setSettledVisibleCount(THREAD_LIST_V2_SETTLED_INITIAL_COUNT);
+  }
+  const showMoreSettled = useCallback(
+    () => setSettledVisibleCount((count) => count + THREAD_LIST_V2_SETTLED_PAGE_COUNT),
+    [],
+  );
+  const threadListV2Layout = useMemo(() => {
+    if (!threadListV2Enabled) return { items: [], hiddenSettledCount: 0 };
     const merged = new Map<string, EnvironmentThreadShell>();
     for (const { environmentId, snapshot } of archivedSnapshots) {
       for (const thread of snapshot.threads) {
@@ -406,16 +426,19 @@ export function HomeScreen(props: HomeScreenProps) {
       environmentId: props.selectedEnvironmentId,
       searchQuery: props.searchQuery,
       changeRequestStateByKey,
+      settledLimit: settledVisibleCount,
     });
   }, [
     changeRequestStateByKey,
     settledHolds,
+    settledVisibleCount,
     archivedSnapshots,
     props.searchQuery,
     props.selectedEnvironmentId,
     props.threads,
     threadListV2Enabled,
   ]);
+  const threadListV2Items = threadListV2Layout.items;
 
   const renderV2Item = useCallback(
     ({ item }: LegendListRenderItemProps<ThreadListV2Item>) => (
@@ -670,6 +693,21 @@ export function HomeScreen(props: HomeScreenProps) {
             estimatedItemSize={ESTIMATED_THREAD_ROW_HEIGHT}
             extraData={projectByKey}
             ListHeaderComponent={v2ListHeader}
+            ListFooterComponent={
+              threadListV2Layout.hiddenSettledCount > 0 ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Show ${Math.min(threadListV2Layout.hiddenSettledCount, THREAD_LIST_V2_SETTLED_PAGE_COUNT)} more settled threads`}
+                  onPress={showMoreSettled}
+                  className="mx-5 mt-1 items-center rounded-full bg-subtle py-2"
+                  style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+                >
+                  <Text className="text-sm font-t3-medium text-foreground-muted">
+                    Show more ({threadListV2Layout.hiddenSettledCount} settled hidden)
+                  </Text>
+                </Pressable>
+              ) : null
+            }
             ListEmptyComponent={listEmpty}
             style={{ flex: 1 }}
             automaticallyAdjustsScrollIndicatorInsets={Platform.OS === "ios"}

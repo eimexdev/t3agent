@@ -105,6 +105,11 @@ const CARD_EDGE_BY_STATUS: Partial<Record<SidebarV2Status, string>> = {
   failed: "bg-red-500",
 };
 
+// Settled-tail paging: recent history is the common lookup; the deep tail
+// stays behind an explicit Show more.
+const SETTLED_TAIL_INITIAL_COUNT = 10;
+const SETTLED_TAIL_PAGE_COUNT = 25;
+
 const STATUS_WORD_BY_STATUS: Partial<
   Record<SidebarV2Status, { label: string; className: string }>
 > = {
@@ -792,9 +797,30 @@ export default function SidebarV2() {
     };
   }, [allThreads, autoSettleAfterDays, changeRequestStateByKey, nowMinute, scopedProject]);
 
+  // The settled tail renders in pages: history shouldn't dominate the
+  // sidebar, and the common lookups are recent. Expansion resets when the
+  // filter context changes so a scope/search flip never inherits a deep
+  // page state.
+  const [settledVisibleCount, setSettledVisibleCount] = useState(SETTLED_TAIL_INITIAL_COUNT);
+  const settledResetKey = `${projectScopeKey ?? "all"}`;
+  const lastSettledResetKeyRef = useRef(settledResetKey);
+  if (lastSettledResetKeyRef.current !== settledResetKey) {
+    lastSettledResetKeyRef.current = settledResetKey;
+    setSettledVisibleCount(SETTLED_TAIL_INITIAL_COUNT);
+  }
+  const hiddenSettledCount = Math.max(0, settledThreads.length - settledVisibleCount);
+  const visibleSettledThreads = useMemo(
+    () => (hiddenSettledCount > 0 ? settledThreads.slice(0, settledVisibleCount) : settledThreads),
+    [hiddenSettledCount, settledThreads, settledVisibleCount],
+  );
+  const showMoreSettled = useCallback(
+    () => setSettledVisibleCount((count) => count + SETTLED_TAIL_PAGE_COUNT),
+    [],
+  );
+
   const orderedThreads = useMemo(
-    () => [...activeThreads, ...settledThreads],
-    [activeThreads, settledThreads],
+    () => [...activeThreads, ...visibleSettledThreads],
+    [activeThreads, visibleSettledThreads],
   );
   const orderedThreadKeys = useMemo(
     () =>
@@ -940,6 +966,27 @@ export default function SidebarV2() {
             }),
           );
         }
+        // Settling the thread you're looking at moves you forward: the next
+        // remaining card (never a settled row), or the new-thread screen
+        // when this was the last active one. Snapshot the target before the
+        // settle mutates the partition. Background settles never navigate.
+        let navigateAfterSettle: (() => void) | null = null;
+        if (routeThreadKey === threadKey) {
+          const orderedKeys = orderedThreadKeysRef.current;
+          const settledKeys = settledThreadKeysRef.current;
+          const currentIndex = orderedKeys.indexOf(threadKey);
+          const nextCardKey =
+            currentIndex === -1
+              ? null
+              : ([
+                  ...orderedKeys.slice(currentIndex + 1),
+                  ...orderedKeys.slice(0, currentIndex),
+                ].find((key) => !settledKeys.has(key)) ?? null);
+          const nextThread = nextCardKey ? threadByKeyRef.current.get(nextCardKey) : null;
+          navigateAfterSettle = nextThread
+            ? () => navigateToThread(scopeThreadRef(nextThread.environmentId, nextThread.id))
+            : () => void router.navigate({ to: "/" });
+        }
         const result = await settleThread(threadRef);
         if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
           setSettledHolds((current) => {
@@ -960,9 +1007,10 @@ export default function SidebarV2() {
         // Settle = archive: the shell stream drops the thread, so pull the
         // archived snapshot immediately to keep it visible as a settled row.
         refreshArchivedThreadsForEnvironment(threadRef.environmentId);
+        navigateAfterSettle?.();
       })();
     },
-    [settleThread],
+    [navigateToThread, routeThreadKey, router, settleThread],
   );
   const attemptUnsettle = useCallback(
     (threadRef: ScopedThreadRef) => {
@@ -1503,6 +1551,20 @@ export default function SidebarV2() {
                 />
               );
             })}
+            {hiddenSettledCount > 0 ? (
+              <li className="list-none">
+                <button
+                  type="button"
+                  onClick={showMoreSettled}
+                  className="mt-1 flex h-[30px] w-full items-center justify-center gap-1.5 border border-dashed border-black/15 font-mono text-[11px] text-muted-foreground transition-colors hover:border-solid hover:border-black/30 hover:text-foreground dark:border-white/15 dark:hover:border-white/30"
+                >
+                  Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
+                  <span className="text-muted-foreground/50">
+                    ({hiddenSettledCount} settled hidden)
+                  </span>
+                </button>
+              </li>
+            ) : null}
           </ul>
           {orderedThreads.length === 0 ? (
             <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
