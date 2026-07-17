@@ -4,7 +4,13 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import type { VcsStatusResult } from "@t3tools/contracts";
-import { CloudIcon, FolderGit2Icon, GitPullRequestIcon, TerminalIcon } from "lucide-react";
+import {
+  CloudIcon,
+  FolderGit2Icon,
+  GitPullRequestIcon,
+  TerminalIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import { useMemo } from "react";
 import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
 import { useProject } from "../state/entities";
@@ -32,6 +38,29 @@ export interface TerminalStatusIndicator {
 }
 
 export type ThreadPr = VcsStatusResult["pr"];
+
+export function changeRequestLookupWarning(
+  threadBranch: string | null,
+  gitStatus: VcsStatusResult | null,
+): string | null {
+  if (
+    threadBranch === null ||
+    gitStatus === null ||
+    gitStatus.refName !== threadBranch ||
+    gitStatus.changeRequestLookup._tag !== "failed"
+  ) {
+    return null;
+  }
+  const presentation = resolveChangeRequestPresentation(gitStatus.sourceControlProvider);
+  switch (gitStatus.changeRequestLookup.reason) {
+    case "authentication_required":
+      return `${presentation.shortName} status unavailable: authentication required.`;
+    case "provider_unavailable":
+      return `${presentation.shortName} status unavailable: provider integration unavailable.`;
+    case "lookup_failed":
+      return `${presentation.shortName} status unavailable: lookup failed.`;
+  }
+}
 
 export function prStatusIndicator(
   pr: ThreadPr,
@@ -208,6 +237,7 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
   );
   const pr = resolveThreadPr(thread.branch, gitStatus.data);
   const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
+  const lookupWarning = changeRequestLookupWarning(thread.branch, gitStatus.data);
   const threadStatus = resolveThreadStatusPill({
     thread: {
       ...thread,
@@ -215,7 +245,7 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
     },
   });
 
-  if (!prStatus && !threadStatus) {
+  if (!prStatus && !lookupWarning && !threadStatus) {
     return null;
   }
 
@@ -234,6 +264,21 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
             <ChangeRequestStatusIcon className="size-3" />
           </TooltipTrigger>
           <TooltipPopup side="top">{prStatus.tooltip}</TooltipPopup>
+        </Tooltip>
+      ) : null}
+      {lookupWarning ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span
+                aria-label={lookupWarning}
+                className="inline-flex items-center justify-center text-amber-600/70 dark:text-amber-300/70"
+              />
+            }
+          >
+            <TriangleAlertIcon className="size-3" />
+          </TooltipTrigger>
+          <TooltipPopup side="top">{lookupWarning}</TooltipPopup>
         </Tooltip>
       ) : null}
       {threadStatus ? <ThreadStatusLabel status={threadStatus} /> : null}

@@ -1,8 +1,40 @@
-import { ThreadId } from "@t3tools/contracts";
+import { ThreadId, type VcsStatusResult } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
-import { ThreadWorktreeIndicator } from "./ThreadStatusIndicators";
+import { changeRequestLookupWarning, ThreadWorktreeIndicator } from "./ThreadStatusIndicators";
+
+const failedStatus: VcsStatusResult = {
+  isRepo: true,
+  sourceControlProvider: { kind: "github", name: "GitHub", baseUrl: "https://github.com" },
+  hasPrimaryRemote: true,
+  isDefaultRef: false,
+  refName: "feature/sidebar-indicator",
+  hasWorkingTreeChanges: false,
+  workingTree: { files: [], insertions: 0, deletions: 0 },
+  statusRefName: "feature/sidebar-indicator",
+  hasUpstream: true,
+  aheadCount: 0,
+  behindCount: 0,
+  pr: null,
+  changeRequestLookup: {
+    _tag: "failed",
+    provider: "github",
+    reason: "authentication_required",
+  },
+};
+
+describe("changeRequestLookupWarning", () => {
+  it("returns actionable provider copy for the matching thread branch", () => {
+    expect(changeRequestLookupWarning("feature/sidebar-indicator", failedStatus)).toBe(
+      "PR status unavailable: authentication required.",
+    );
+  });
+
+  it("does not leak warnings across branches", () => {
+    expect(changeRequestLookupWarning("feature/other", failedStatus)).toBeNull();
+  });
+});
 
 describe("ThreadWorktreeIndicator", () => {
   it("renders the worktree folder and branch in an accessible label", () => {

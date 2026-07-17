@@ -4823,10 +4823,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               }),
             remoteStatus: () =>
               Effect.succeed({
+                statusRefName: "main",
                 hasUpstream: true,
                 aheadCount: 0,
                 behindCount: 0,
                 pr: null,
+                changeRequestLookup: { _tag: "succeeded" },
               }),
             status: () =>
               Effect.succeed({
@@ -4836,10 +4838,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 refName: "main",
                 hasWorkingTreeChanges: false,
                 workingTree: { files: [], insertions: 0, deletions: 0 },
+                statusRefName: "main",
                 hasUpstream: true,
                 aheadCount: 0,
                 behindCount: 0,
                 pr: null,
+                changeRequestLookup: { _tag: "succeeded" },
               }),
             runStackedAction: (input, options) =>
               Effect.gen(function* () {
@@ -4953,10 +4957,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 refName: "main",
                 hasWorkingTreeChanges: false,
                 workingTree: { files: [], insertions: 0, deletions: 0 },
+                statusRefName: "main",
                 hasUpstream: true,
                 aheadCount: 0,
                 behindCount: 0,
                 pr: null,
+                changeRequestLookup: { _tag: "succeeded" },
               }),
           },
           reviewService: {
@@ -5145,10 +5151,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               Effect.sync(() => {
                 statusCalls += 1;
                 return {
+                  statusRefName: "main",
                   hasUpstream: true,
                   aheadCount: 0,
                   behindCount: 0,
                   pr: null,
+                  changeRequestLookup: { _tag: "succeeded" as const },
                 };
               }),
             status: () =>
@@ -5161,10 +5169,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   refName: "main",
                   hasWorkingTreeChanges: true,
                   workingTree: { files: [], insertions: 0, deletions: 0 },
+                  statusRefName: "main",
                   hasUpstream: true,
                   aheadCount: 0,
                   behindCount: 0,
                   pr: null,
+                  changeRequestLookup: { _tag: "succeeded" as const },
                 };
               }),
           },
@@ -5222,10 +5232,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               Effect.sync(() => {
                 statusCalls += 1;
                 return {
+                  statusRefName: "feature/demo",
                   hasUpstream: true,
                   aheadCount: 0,
                   behindCount: 0,
                   pr: null,
+                  changeRequestLookup: { _tag: "succeeded" as const },
                 };
               }),
             status: () =>
@@ -5238,10 +5250,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   refName: "feature/demo",
                   hasWorkingTreeChanges: true,
                   workingTree: { files: [], insertions: 0, deletions: 0 },
+                  statusRefName: "feature/demo",
                   hasUpstream: true,
                   aheadCount: 0,
                   behindCount: 0,
                   pr: null,
+                  changeRequestLookup: { _tag: "succeeded" as const },
                 };
               }),
             runStackedAction: () => Effect.fail(gitError),
@@ -5293,10 +5307,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             remoteStatus: () =>
               Effect.sleep(Duration.seconds(2)).pipe(
                 Effect.as({
+                  statusRefName: "main",
                   hasUpstream: true,
                   aheadCount: 0,
                   behindCount: 0,
                   pr: null,
+                  changeRequestLookup: { _tag: "succeeded" as const },
                 }),
               ),
           },
@@ -5339,10 +5355,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               remoteStatus: () =>
                 Effect.sleep(Duration.seconds(2)).pipe(
                   Effect.as({
+                    statusRefName: "feature/demo",
                     hasUpstream: true,
                     aheadCount: 0,
                     behindCount: 0,
                     pr: null,
+                    changeRequestLookup: { _tag: "succeeded" as const },
                   }),
                 ),
               runStackedAction: () =>
@@ -5420,10 +5438,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               remoteStatus: () =>
                 Effect.sleep(Duration.seconds(2)).pipe(
                   Effect.as({
+                    statusRefName: "feature/demo",
                     hasUpstream: true,
                     aheadCount: 0,
                     behindCount: 0,
                     pr: null,
+                    changeRequestLookup: { _tag: "succeeded" as const },
                   }),
                 ),
               runStackedAction: () =>
@@ -6744,10 +6764,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               insertions: 0,
               deletions: 0,
             },
+            statusRefName: "t3code/bootstrap-refName",
             hasUpstream: true,
             aheadCount: 0,
             behindCount: 0,
             pr: null,
+            changeRequestLookup: { _tag: "succeeded" as const },
           }),
         );
         const fetchRemote = vi.fn(
