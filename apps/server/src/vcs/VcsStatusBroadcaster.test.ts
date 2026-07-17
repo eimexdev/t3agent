@@ -652,6 +652,62 @@ describe("VcsStatusBroadcaster", () => {
     }).pipe(Effect.provide(Layer.merge(makeTestLayer(state), TestClock.layer())));
   });
 
+  it.effect("retries a failed upstream refresh after the failure backoff", () => {
+    const refreshUpstreamValues: Array<boolean | undefined> = [];
+    let failedUpstreamRefresh = false;
+    const testLayer = VcsStatusBroadcaster.layer.pipe(
+      Layer.provideMerge(NodeServices.layer),
+      Layer.provide(
+        Layer.mock(GitWorkflowService.GitWorkflowService)({
+          localStatus: () => Effect.succeed(baseLocalStatus),
+          remoteStatus: (_input, options) => {
+            refreshUpstreamValues.push(options?.refreshUpstream);
+            if (options?.refreshUpstream && !failedUpstreamRefresh) {
+              failedUpstreamRefresh = true;
+              return Effect.fail(
+                new GitManagerError({
+                  operation: "VcsStatusBroadcaster.test",
+                  cwd: "/repo",
+                  detail: "upstream refresh failure",
+                }),
+              );
+            }
+            return Effect.succeed(baseRemoteStatus);
+          },
+          invalidateRemoteStatus: () => Effect.void,
+        }),
+      ),
+    );
+
+    return Effect.gen(function* () {
+      const broadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
+      yield* broadcaster.getStatus({ cwd: "/repo" });
+      const scope = yield* Scope.make();
+      const snapshotDeferred = yield* Deferred.make<void>();
+      yield* Stream.runForEach(
+        broadcaster.streamStatus(
+          { cwd: "/repo" },
+          { automaticRemoteRefreshInterval: Effect.succeed(Duration.minutes(5)) },
+        ),
+        (event) =>
+          event._tag === "snapshot"
+            ? Deferred.succeed(snapshotDeferred, undefined).pipe(Effect.ignore)
+            : Effect.void,
+      ).pipe(Effect.forkIn(scope));
+      yield* Deferred.await(snapshotDeferred);
+      yield* Effect.yieldNow;
+
+      yield* TestClock.adjust(Duration.minutes(5));
+      assert.isTrue(failedUpstreamRefresh);
+      assert.equal(refreshUpstreamValues.at(-1), true);
+
+      yield* TestClock.adjust(Duration.seconds(30));
+      assert.deepStrictEqual(refreshUpstreamValues.slice(-2), [true, true]);
+
+      yield* Scope.close(scope, Exit.void);
+    }).pipe(Effect.provide(Layer.merge(testLayer, TestClock.layer())));
+  });
+
   it("backs off remote refresh failures exponentially and honors larger configured intervals", () => {
     assert.equal(
       Duration.toMillis(VcsStatusBroadcaster.remoteRefreshFailureDelay(1, Duration.seconds(1))),

@@ -509,8 +509,8 @@ export const make = Effect.gen(function* () {
           refreshUpstream,
         }).pipe(Effect.exit);
         yield* Ref.set(lastLightweightRefreshRef, refreshTime);
-        if (refreshUpstream) yield* Ref.set(lastUpstreamRefreshRef, refreshTime);
         if (Exit.isSuccess(exit)) {
+          if (refreshUpstream) yield* Ref.set(lastUpstreamRefreshRef, refreshTime);
           yield* Ref.set(needsInitialRefreshRef, false);
           yield* Ref.set(consecutiveFailuresRef, 0);
           return;
