@@ -211,10 +211,7 @@ it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
           modelSelection: DEFAULT_TEST_MODEL_SELECTION,
         });
 
-        assert.deepStrictEqual(runtimeMock.state.startCalls, [
-          "fake-opencode",
-          "fake-opencode",
-        ]);
+        assert.deepStrictEqual(runtimeMock.state.startCalls, ["fake-opencode", "fake-opencode"]);
         assert.deepStrictEqual(runtimeMock.state.promptUrls, [
           "http://127.0.0.1:4301",
           "http://127.0.0.1:4302",
@@ -237,10 +234,7 @@ it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
         assert.instanceOf(error, TextGenerationError);
         assert.include(error.message, "OpenCode session.create request failed.");
         const cause = error.cause;
-        assert.instanceOf(
-          cause,
-          OpenCodeTextGeneration.OpenCodeTextGenerationSessionRequestError,
-        );
+        assert.instanceOf(cause, OpenCodeTextGeneration.OpenCodeTextGenerationSessionRequestError);
         assert.strictEqual(cause.operation, "generateCommitMessage");
         assert.strictEqual(cause.cwd, process.cwd());
         assert.strictEqual(cause.cause, sdkCause);
@@ -259,10 +253,7 @@ it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
 
         assert.include(error.message, "OpenCode session.create returned no session payload.");
         const cause = error.cause;
-        assert.instanceOf(
-          cause,
-          OpenCodeTextGeneration.OpenCodeTextGenerationSessionPayloadError,
-        );
+        assert.instanceOf(cause, OpenCodeTextGeneration.OpenCodeTextGenerationSessionPayloadError);
         assert.strictEqual(cause.operation, "generateCommitMessage");
         assert.strictEqual(cause.cwd, process.cwd());
         assert.notProperty(cause, "cause");
@@ -282,10 +273,7 @@ it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
 
         assert.include(error.message, "OpenCode session.prompt request failed.");
         const cause = error.cause;
-        assert.instanceOf(
-          cause,
-          OpenCodeTextGeneration.OpenCodeTextGenerationPromptRequestError,
-        );
+        assert.instanceOf(cause, OpenCodeTextGeneration.OpenCodeTextGenerationPromptRequestError);
         assert.strictEqual(cause.operation, "generateCommitMessage");
         assert.strictEqual(cause.cwd, process.cwd());
         assert.strictEqual(cause.sessionId, "http://127.0.0.1:4301/session");
@@ -311,10 +299,7 @@ it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
 
         assert.include(error.message, "OpenCode returned empty output.");
         const cause = error.cause;
-        assert.instanceOf(
-          cause,
-          OpenCodeTextGeneration.OpenCodeTextGenerationEmptyOutputError,
-        );
+        assert.instanceOf(cause, OpenCodeTextGeneration.OpenCodeTextGenerationEmptyOutputError);
         assert.strictEqual(cause.operation, "generateCommitMessage");
         assert.strictEqual(cause.cwd, process.cwd());
         assert.strictEqual(cause.sessionId, "http://127.0.0.1:4301/session");
@@ -380,10 +365,7 @@ it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
 
         assert.include(error.message, "Model did not produce structured output");
         const cause = error.cause;
-        assert.instanceOf(
-          cause,
-          OpenCodeTextGeneration.OpenCodeTextGenerationPromptResponseError,
-        );
+        assert.instanceOf(cause, OpenCodeTextGeneration.OpenCodeTextGenerationPromptResponseError);
         assert.strictEqual(cause.operation, "generateCommitMessage");
         assert.strictEqual(cause.cwd, process.cwd());
         assert.strictEqual(cause.sessionId, "http://127.0.0.1:4301/session");
