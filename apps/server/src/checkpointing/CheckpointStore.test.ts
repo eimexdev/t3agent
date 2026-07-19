@@ -162,10 +162,14 @@ it.layer(TestLayer)("CheckpointStore.layer", (it) => {
           0,
         );
         const createdPath = NodePath.join(tmp, "created.txt");
+        const postCheckpointIgnorePath = NodePath.join(tmp, ".gitignore");
+        const ignoredCreatedPath = NodePath.join(tmp, "state.cache");
 
         yield* git(tmp, ["init"]);
         yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef: baselineRef });
         yield* writeTextFile(createdPath, "created after baseline\n");
+        yield* writeTextFile(postCheckpointIgnorePath, "*.cache\n");
+        yield* writeTextFile(ignoredCreatedPath, "ignored after baseline\n");
 
         expect(
           yield* checkpointStore.restoreCheckpoint({
@@ -174,6 +178,36 @@ it.layer(TestLayer)("CheckpointStore.layer", (it) => {
           }),
         ).toBe(true);
         expect(yield* fileSystem.exists(createdPath)).toBe(false);
+        expect(yield* fileSystem.exists(postCheckpointIgnorePath)).toBe(false);
+        expect(yield* fileSystem.exists(ignoredCreatedPath)).toBe(false);
+      }),
+    );
+
+    it.effect("preserves files ignored by the restored checkpoint", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir("checkpoint-store-unborn-ignored-test-");
+        const fileSystem = yield* FileSystem.FileSystem;
+        const checkpointStore = yield* CheckpointStore.CheckpointStore;
+        const baselineRef = checkpointRefForThreadTurn(
+          ThreadId.make("thread-unborn-ignored-checkpoint-store"),
+          0,
+        );
+        const ignorePath = NodePath.join(tmp, ".gitignore");
+        const ignoredPath = NodePath.join(tmp, "local.cache");
+
+        yield* git(tmp, ["init"]);
+        yield* writeTextFile(ignorePath, "*.cache\n");
+        yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef: baselineRef });
+        yield* writeTextFile(ignoredPath, "local-only data\n");
+
+        expect(
+          yield* checkpointStore.restoreCheckpoint({
+            cwd: tmp,
+            checkpointRef: baselineRef,
+          }),
+        ).toBe(true);
+        expect(yield* fileSystem.readFileString(ignorePath)).toBe("*.cache\n");
+        expect(yield* fileSystem.readFileString(ignoredPath)).toBe("local-only data\n");
       }),
     );
 

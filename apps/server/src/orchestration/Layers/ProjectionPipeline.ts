@@ -207,41 +207,21 @@ function retainProjectionMessagesAfterRevert(
   messages: ReadonlyArray<ProjectionThreadMessage>,
   turnCount: number,
 ): ReadonlyArray<ProjectionThreadMessage> {
-  const compareMessages = (left: ProjectionThreadMessage, right: ProjectionThreadMessage): number =>
-    left.createdAt.localeCompare(right.createdAt) || left.messageId.localeCompare(right.messageId);
-  const retainedMessageIds = new Set(
-    messages
-      .filter((message) => message.role === "user")
-      .toSorted(compareMessages)
-      .slice(0, turnCount + 1)
-      .map((message) => message.messageId),
-  );
-  const assistantTurnIndexes = new Map<string, number>();
-  let nextAssistantTurnIndex = 0;
-  for (const message of messages
-    .filter((entry) => entry.role === "assistant")
-    .toSorted(compareMessages)) {
-    if (message.turnId === null) {
-      if (nextAssistantTurnIndex < turnCount) {
-        retainedMessageIds.add(message.messageId);
-      }
-      nextAssistantTurnIndex += 1;
-      continue;
+  let userMessageIndex = 0;
+  let reachedTargetUser = false;
+  return messages.filter((message) => {
+    if (message.role === "system") {
+      return true;
     }
-    let assistantTurnIndex = assistantTurnIndexes.get(message.turnId);
-    if (assistantTurnIndex === undefined) {
-      assistantTurnIndex = nextAssistantTurnIndex;
-      assistantTurnIndexes.set(message.turnId, assistantTurnIndex);
-      nextAssistantTurnIndex += 1;
+    if (reachedTargetUser) {
+      return false;
     }
-    if (assistantTurnIndex < turnCount) {
-      retainedMessageIds.add(message.messageId);
+    if (message.role === "user") {
+      reachedTargetUser = userMessageIndex === turnCount;
+      userMessageIndex += 1;
     }
-  }
-
-  return messages.filter(
-    (message) => message.role === "system" || retainedMessageIds.has(message.messageId),
-  );
+    return true;
+  });
 }
 
 function retainProjectionTurnsAfterRevert(

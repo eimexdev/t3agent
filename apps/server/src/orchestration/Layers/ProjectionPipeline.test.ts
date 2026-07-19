@@ -789,6 +789,28 @@ it.layer(
       });
 
       yield* appendAndProject({
+        type: "thread.message-sent",
+        eventId: EventId.make("evt-revert-files-user-keep"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-01-01T00:00:00.100Z",
+        commandId: CommandId.make("cmd-revert-files-user-keep"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-revert-files-user-keep"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId: MessageId.make("message-user-keep"),
+          role: "user",
+          text: "Keep this turn",
+          turnId: null,
+          streaming: false,
+          createdAt: "2026-01-01T00:00:00.100Z",
+          updatedAt: "2026-01-01T00:00:00.100Z",
+        },
+      });
+
+      yield* appendAndProject({
         type: "thread.turn-diff-completed",
         eventId: EventId.make("evt-revert-files-3"),
         aggregateKind: "thread",
@@ -836,8 +858,8 @@ it.layer(
           ],
           turnId: TurnId.make("turn-keep"),
           streaming: false,
-          createdAt: now,
-          updatedAt: now,
+          createdAt: "2026-01-01T00:00:00.200Z",
+          updatedAt: "2026-01-01T00:00:00.200Z",
         },
       });
 
@@ -860,6 +882,28 @@ it.layer(
           files: [],
           assistantMessageId: MessageId.make("message-remove"),
           completedAt: now,
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.message-sent",
+        eventId: EventId.make("evt-revert-files-user-remove"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-01-01T00:00:00.300Z",
+        commandId: CommandId.make("cmd-revert-files-user-remove"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-revert-files-user-remove"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId: MessageId.make("message-user-remove"),
+          role: "user",
+          text: "Revert here",
+          turnId: null,
+          streaming: false,
+          createdAt: "2026-01-01T00:00:00.300Z",
+          updatedAt: "2026-01-01T00:00:00.300Z",
         },
       });
 
@@ -889,8 +933,8 @@ it.layer(
           ],
           turnId: TurnId.make("turn-remove"),
           streaming: false,
-          createdAt: now,
-          updatedAt: now,
+          createdAt: "2026-01-01T00:00:00.400Z",
+          updatedAt: "2026-01-01T00:00:00.400Z",
         },
       });
 
@@ -2252,6 +2296,28 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
 
       yield* appendAndProject({
         type: "thread.message-sent",
+        eventId: EventId.make("evt-revert-user-keep"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-revert"),
+        occurredAt: "2026-02-26T12:00:02.050Z",
+        commandId: CommandId.make("cmd-revert-user-keep"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-revert-user-keep"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-revert"),
+          messageId: MessageId.make("user-keep"),
+          role: "user",
+          text: "start",
+          turnId: null,
+          streaming: false,
+          createdAt: "2026-02-26T12:00:02.050Z",
+          updatedAt: "2026-02-26T12:00:02.050Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.message-sent",
         eventId: EventId.make("evt-revert-4"),
         aggregateKind: "thread",
         aggregateId: ThreadId.make("thread-revert"),
@@ -2289,7 +2355,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           checkpointRef: CheckpointRef.make("refs/t3/checkpoints/thread-revert/turn/2"),
           status: "ready",
           files: [],
-          assistantMessageId: MessageId.make("assistant-remove"),
+          assistantMessageId: null,
           completedAt: "2026-02-26T12:00:03.000Z",
         },
       });
@@ -2309,7 +2375,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           messageId: MessageId.make("user-remove"),
           role: "user",
           text: "removed",
-          turnId: TurnId.make("turn-2"),
+          turnId: null,
           streaming: false,
           createdAt: "2026-02-26T12:00:03.050Z",
           updatedAt: "2026-02-26T12:00:03.050Z",
@@ -2331,7 +2397,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           messageId: MessageId.make("assistant-remove"),
           role: "assistant",
           text: "removed",
-          turnId: TurnId.make("turn-2"),
+          turnId: TurnId.make("turn-1"),
           streaming: false,
           createdAt: "2026-02-26T12:00:03.100Z",
           updatedAt: "2026-02-26T12:00:03.100Z",
@@ -2369,13 +2435,18 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       `;
       assert.deepEqual(messageRows, [
         {
+          messageId: "user-keep",
+          turnId: null,
+          role: "user",
+        },
+        {
           messageId: "assistant-keep",
           turnId: "turn-1",
           role: "assistant",
         },
         {
           messageId: "user-remove",
-          turnId: "turn-2",
+          turnId: null,
           role: "user",
         },
       ]);

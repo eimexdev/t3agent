@@ -682,7 +682,7 @@ describe("orchestration projector", () => {
     expect(thread?.latestTurn).toBeNull();
   });
 
-  it("retains the selected user prompt even when it is tied to the reverted turn", async () => {
+  it("removes assistant output produced after the selected steering message", async () => {
     const createdAt = "2026-02-26T12:00:00.000Z";
     const model = createEmptyReadModel(createdAt);
 
@@ -717,6 +717,24 @@ describe("orchestration projector", () => {
     const events: ReadonlyArray<OrchestrationEvent> = [
       makeEvent({
         sequence: 2,
+        type: "thread.message-sent",
+        aggregateKind: "thread",
+        aggregateId: "thread-revert",
+        occurredAt: "2026-02-26T12:00:00.500Z",
+        commandId: "cmd-user-keep",
+        payload: {
+          threadId: "thread-revert",
+          messageId: "user-keep",
+          role: "user",
+          text: "start",
+          turnId: null,
+          streaming: false,
+          createdAt: "2026-02-26T12:00:00.500Z",
+          updatedAt: "2026-02-26T12:00:00.500Z",
+        },
+      }),
+      makeEvent({
+        sequence: 3,
         type: "thread.turn-diff-completed",
         aggregateKind: "thread",
         aggregateId: "thread-revert",
@@ -724,17 +742,17 @@ describe("orchestration projector", () => {
         commandId: "cmd-turn-1",
         payload: {
           threadId: "thread-revert",
-          turnId: "turn-1",
+          turnId: "checkpoint-only-turn",
           checkpointTurnCount: 1,
           checkpointRef: "refs/t3/checkpoints/thread-revert/turn/1",
           status: "ready",
           files: [],
-          assistantMessageId: "assistant-keep",
+          assistantMessageId: null,
           completedAt: "2026-02-26T12:00:01.000Z",
         },
       }),
       makeEvent({
-        sequence: 3,
+        sequence: 4,
         type: "thread.message-sent",
         aggregateKind: "thread",
         aggregateId: "thread-revert",
@@ -752,7 +770,47 @@ describe("orchestration projector", () => {
         },
       }),
       makeEvent({
-        sequence: 4,
+        sequence: 5,
+        type: "thread.activity-appended",
+        aggregateKind: "thread",
+        aggregateId: "thread-revert",
+        occurredAt: "2026-02-26T12:00:01.200Z",
+        commandId: "cmd-checkpoint-only-activity",
+        payload: {
+          threadId: "thread-revert",
+          activity: {
+            id: "checkpoint-only-activity",
+            tone: "tool",
+            kind: "command",
+            summary: "Retained activity",
+            payload: {},
+            turnId: "checkpoint-only-turn",
+            createdAt: "2026-02-26T12:00:01.200Z",
+          },
+        },
+      }),
+      makeEvent({
+        sequence: 6,
+        type: "thread.proposed-plan-upserted",
+        aggregateKind: "thread",
+        aggregateId: "thread-revert",
+        occurredAt: "2026-02-26T12:00:01.300Z",
+        commandId: "cmd-checkpoint-only-plan",
+        payload: {
+          threadId: "thread-revert",
+          proposedPlan: {
+            id: "checkpoint-only-plan",
+            turnId: "checkpoint-only-turn",
+            planMarkdown: "## Retained plan",
+            implementedAt: null,
+            implementationThreadId: null,
+            createdAt: "2026-02-26T12:00:01.300Z",
+            updatedAt: "2026-02-26T12:00:01.300Z",
+          },
+        },
+      }),
+      makeEvent({
+        sequence: 7,
         type: "thread.turn-diff-completed",
         aggregateKind: "thread",
         aggregateId: "thread-revert",
@@ -765,12 +823,12 @@ describe("orchestration projector", () => {
           checkpointRef: "refs/t3/checkpoints/thread-revert/turn/2",
           status: "ready",
           files: [],
-          assistantMessageId: "assistant-remove",
+          assistantMessageId: null,
           completedAt: "2026-02-26T12:00:02.000Z",
         },
       }),
       makeEvent({
-        sequence: 5,
+        sequence: 8,
         type: "thread.message-sent",
         aggregateKind: "thread",
         aggregateId: "thread-revert",
@@ -781,14 +839,14 @@ describe("orchestration projector", () => {
           messageId: "user-remove",
           role: "user",
           text: "removed",
-          turnId: "turn-2",
+          turnId: null,
           streaming: false,
           createdAt: "2026-02-26T12:00:02.050Z",
           updatedAt: "2026-02-26T12:00:02.050Z",
         },
       }),
       makeEvent({
-        sequence: 6,
+        sequence: 9,
         type: "thread.message-sent",
         aggregateKind: "thread",
         aggregateId: "thread-revert",
@@ -799,14 +857,14 @@ describe("orchestration projector", () => {
           messageId: "assistant-remove",
           role: "assistant",
           text: "removed",
-          turnId: "turn-2",
+          turnId: "turn-1",
           streaming: false,
           createdAt: "2026-02-26T12:00:02.100Z",
           updatedAt: "2026-02-26T12:00:02.100Z",
         },
       }),
       makeEvent({
-        sequence: 7,
+        sequence: 10,
         type: "thread.reverted",
         aggregateKind: "thread",
         aggregateId: "thread-revert",
@@ -833,9 +891,12 @@ describe("orchestration projector", () => {
         turnId: message.turnId,
       })),
     ).toEqual([
+      { id: "user-keep", role: "user", turnId: null },
       { id: "assistant-keep", role: "assistant", turnId: "turn-1" },
-      { id: "user-remove", role: "user", turnId: "turn-2" },
+      { id: "user-remove", role: "user", turnId: null },
     ]);
+    expect(thread?.activities.map((activity) => activity.id)).toEqual(["checkpoint-only-activity"]);
+    expect(thread?.proposedPlans.map((plan) => plan.id)).toEqual(["checkpoint-only-plan"]);
   });
 
   it("caps message and checkpoint retention for long-lived threads", async () => {

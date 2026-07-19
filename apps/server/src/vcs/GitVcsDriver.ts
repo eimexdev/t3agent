@@ -748,50 +748,76 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       }
 
       const headExists = yield* hasHeadCommit(input.cwd);
-      let snapshotHasEntries = true;
       if (!headExists) {
-        // In an unborn repository every restored path is still untracked from
-        // Git's perspective. Clean first so we remove post-checkpoint files
-        // without immediately deleting the files restored from the snapshot.
-        yield* execute({
-          operation,
-          cwd: input.cwd,
-          args: ["clean", "-fd", "--", "."],
-        });
-        const snapshotEntries = yield* execute({
-          operation,
-          cwd: input.cwd,
-          args: ["ls-tree", "-r", "--name-only", commitOid],
-        });
-        snapshotHasEntries = snapshotEntries.stdout.trim().length > 0;
+        const gitCommonDir = yield* resolveGitCommonDir(input.cwd);
+        const tempIndexPath = path.join(
+          gitCommonDir,
+          `t3-checkpoint-restore-index-${NodeCrypto.randomUUID()}`,
+        );
+        const restoreEnv: NodeJS.ProcessEnv = {
+          ...process.env,
+          GIT_INDEX_FILE: tempIndexPath,
+        };
+        const cleanupTempIndex = fileSystem
+          .remove(tempIndexPath, { force: true })
+          .pipe(Effect.ignore);
+
+        yield* Effect.gen(function* () {
+          // The real index is empty in an unborn repository. Clean before
+          // restoring so untracked paths cannot block the checkout.
+          yield* execute({
+            operation,
+            cwd: input.cwd,
+            args: ["clean", "-fd", "--", "."],
+          });
+          const snapshotEntries = yield* execute({
+            operation,
+            cwd: input.cwd,
+            args: ["ls-tree", "-r", "--name-only", commitOid],
+          });
+          if (snapshotEntries.stdout.trim().length > 0) {
+            yield* execute({
+              operation,
+              cwd: input.cwd,
+              args: ["restore", "--source", commitOid, "--worktree", "--", "."],
+            });
+          }
+
+          // Load the checkpoint tree into a temporary index before the final
+          // clean. Snapshot files are then protected as tracked, while paths
+          // ignored only by post-checkpoint rules are removed safely without -x.
+          yield* execute({
+            operation,
+            cwd: input.cwd,
+            args: ["read-tree", commitOid],
+            env: restoreEnv,
+          });
+          yield* execute({
+            operation,
+            cwd: input.cwd,
+            args: ["clean", "-fd", "--", "."],
+            env: restoreEnv,
+          });
+        }).pipe(Effect.ensuring(cleanupTempIndex));
+
+        return true;
       }
-      if (headExists || snapshotHasEntries) {
-        yield* execute({
-          operation,
-          cwd: input.cwd,
-          args: [
-            "restore",
-            "--source",
-            commitOid,
-            "--worktree",
-            ...(headExists ? ["--staged"] : []),
-            "--",
-            ".",
-          ],
-        });
-      }
-      if (headExists) {
-        yield* execute({
-          operation,
-          cwd: input.cwd,
-          args: ["clean", "-fd", "--", "."],
-        });
-        yield* execute({
-          operation,
-          cwd: input.cwd,
-          args: ["reset", "--quiet", "--", "."],
-        });
-      }
+
+      yield* execute({
+        operation,
+        cwd: input.cwd,
+        args: ["restore", "--source", commitOid, "--worktree", "--staged", "--", "."],
+      });
+      yield* execute({
+        operation,
+        cwd: input.cwd,
+        args: ["clean", "-fd", "--", "."],
+      });
+      yield* execute({
+        operation,
+        cwd: input.cwd,
+        args: ["reset", "--quiet", "--", "."],
+      });
 
       return true;
     }),

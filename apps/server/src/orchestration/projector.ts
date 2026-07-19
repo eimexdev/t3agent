@@ -84,41 +84,21 @@ function retainThreadMessagesAfterRevert(
   messages: ReadonlyArray<OrchestrationMessage>,
   turnCount: number,
 ): ReadonlyArray<OrchestrationMessage> {
-  const compareMessages = (left: OrchestrationMessage, right: OrchestrationMessage): number =>
-    left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
-  const retainedMessageIds = new Set(
-    messages
-      .filter((message) => message.role === "user")
-      .toSorted(compareMessages)
-      .slice(0, turnCount + 1)
-      .map((message) => message.id),
-  );
-  const assistantTurnIndexes = new Map<string, number>();
-  let nextAssistantTurnIndex = 0;
-  for (const message of messages
-    .filter((entry) => entry.role === "assistant")
-    .toSorted(compareMessages)) {
-    if (message.turnId === null) {
-      if (nextAssistantTurnIndex < turnCount) {
-        retainedMessageIds.add(message.id);
-      }
-      nextAssistantTurnIndex += 1;
-      continue;
+  let userMessageIndex = 0;
+  let reachedTargetUser = false;
+  return messages.filter((message) => {
+    if (message.role === "system") {
+      return true;
     }
-    let assistantTurnIndex = assistantTurnIndexes.get(message.turnId);
-    if (assistantTurnIndex === undefined) {
-      assistantTurnIndex = nextAssistantTurnIndex;
-      assistantTurnIndexes.set(message.turnId, assistantTurnIndex);
-      nextAssistantTurnIndex += 1;
+    if (reachedTargetUser) {
+      return false;
     }
-    if (assistantTurnIndex < turnCount) {
-      retainedMessageIds.add(message.id);
+    if (message.role === "user") {
+      reachedTargetUser = userMessageIndex === turnCount;
+      userMessageIndex += 1;
     }
-  }
-
-  return messages.filter(
-    (message) => message.role === "system" || retainedMessageIds.has(message.id),
-  );
+    return true;
+  });
 }
 
 function retainThreadActivitiesAfterRevert(
@@ -605,9 +585,10 @@ export function projectEvent(
             thread.messages,
             payload.turnCount,
           ).slice(-MAX_THREAD_MESSAGES);
-          const retainedTurnIds = new Set(
-            messages.flatMap((message) => (message.turnId === null ? [] : [message.turnId])),
-          );
+          const retainedTurnIds = new Set([
+            ...checkpoints.map((checkpoint) => checkpoint.turnId),
+            ...messages.flatMap((message) => (message.turnId === null ? [] : [message.turnId])),
+          ]);
           const proposedPlans = retainThreadProposedPlansAfterRevert(
             thread.proposedPlans,
             retainedTurnIds,
