@@ -80,6 +80,10 @@ export class DesktopWindow extends Context.Service<
     readonly handleBackendNotReady: Effect.Effect<void>;
     readonly flushMainWindowBounds: Effect.Effect<void>;
     readonly dispatchMenuAction: (action: string) => Effect.Effect<void, DesktopWindowError>;
+    readonly dispatchMenuActionToMainWindow: (
+      window: Electron.BaseWindow,
+      action: string,
+    ) => Effect.Effect<boolean, DesktopWindowError>;
     readonly syncAppearance: Effect.Effect<void>;
   }
 >()("@t3tools/desktop/window/DesktopWindow") {}
@@ -285,6 +289,24 @@ export const make = Effect.gen(function* () {
 
   const currentMainWindow = electronWindow.currentMainOrFirst.pipe(Effect.flatMap(withoutSplash));
   const focusedMainWindow = electronWindow.focusedMainOrFirst.pipe(Effect.flatMap(withoutSplash));
+
+  const sendMenuAction = Effect.fn("desktop.window.sendMenuAction")(
+    (targetWindow: Electron.BrowserWindow, action: string, reveal: boolean) =>
+      Effect.sync(() => {
+        const send = () => {
+          if (targetWindow.isDestroyed()) return;
+          targetWindow.webContents.send(MENU_ACTION_CHANNEL, action);
+          if (reveal) void runPromise(electronWindow.reveal(targetWindow));
+        };
+
+        if (targetWindow.webContents.isLoadingMainFrame()) {
+          targetWindow.webContents.once("did-finish-load", send);
+          return;
+        }
+
+        send();
+      }),
+  );
 
   const createWindow = Effect.fn("desktop.window.createWindow")(function* (): Effect.fn.Return<
     Electron.BrowserWindow,
@@ -772,20 +794,16 @@ export const make = Effect.gen(function* () {
         return;
       }
       const targetWindow = Option.isSome(existingWindow) ? existingWindow.value : yield* ensureMain;
-
-      const send = () => {
-        if (targetWindow.isDestroyed()) return;
-        targetWindow.webContents.send(MENU_ACTION_CHANNEL, action);
-        void runPromise(electronWindow.reveal(targetWindow));
-      };
-
-      if (targetWindow.webContents.isLoadingMainFrame()) {
-        targetWindow.webContents.once("did-finish-load", send);
-        return;
-      }
-
-      send();
+      yield* sendMenuAction(targetWindow, action, true);
     }),
+    dispatchMenuActionToMainWindow: Effect.fn("desktop.window.dispatchMenuActionToMainWindow")(
+      function* (window, action) {
+        const mainWindow = yield* electronWindow.main;
+        if (Option.isNone(mainWindow) || mainWindow.value !== window) return false;
+        yield* sendMenuAction(mainWindow.value, action, false);
+        return true;
+      },
+    ),
     syncAppearance: Effect.gen(function* () {
       const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;
       yield* electronWindow.syncAllAppearance((window) =>

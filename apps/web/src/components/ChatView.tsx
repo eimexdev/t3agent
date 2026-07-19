@@ -48,6 +48,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -155,6 +156,21 @@ import { getProviderModelCapabilities, resolveSelectableProvider } from "../prov
 import { useEnvironmentSettings } from "../hooks/useSettings";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
+import {
+  clearNativeCloseFocusOwner,
+  finishNativeClosePointer,
+  getNativeCloseFocusOwner,
+  recordNativeCloseFocus,
+  recordNativeCloseFocusOut,
+  recordNativeClosePointer,
+} from "../lib/nativeCloseFocus";
+import { isRightPanelFocused } from "../lib/rightPanelFocus";
+import {
+  CLOSE_ACTIVE_RIGHT_PANEL_SURFACE_EVENT,
+  resolveNativeCloseTarget,
+  resolveRightPanelCloseTarget,
+  shouldDeferCloseCommandToDesktopMenu,
+} from "../lib/rightPanelCloseRequest";
 import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
 import {
   deriveLogicalProjectKeyFromSettings,
@@ -208,7 +224,11 @@ import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
-import { PanelLayoutControls, RightPanelMaximizeControl } from "./chat/PanelLayoutControls";
+import {
+  PanelLayoutControls,
+  RightPanelCloseControl,
+  RightPanelMaximizeControl,
+} from "./chat/PanelLayoutControls";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
 import { NoActiveThreadState } from "./NoActiveThreadState";
 import { resolveEffectiveEnvMode } from "./BranchToolbar.logic";
@@ -1458,6 +1478,13 @@ function ChatViewContent(props: ChatViewProps) {
   const rightPanelMaximized =
     canMaximizeRightPanel && maximizedRightPanelThreadKey === routeThreadKey;
   const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUsePlanSidebarSheet;
+
+  useEffect(() => {
+    if (rightPanelOpen) return;
+    setMaximizedRightPanelThreadKey((threadKey) =>
+      threadKey === routeThreadKey ? null : threadKey,
+    );
+  }, [rightPanelOpen, routeThreadKey]);
 
   useEffect(() => {
     if (!activeThreadRef) return;
@@ -3146,6 +3173,97 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activeThreadRef, cleanupRightPanelSurfaces, syncActivePreviewSurface],
   );
+  const closeActiveRightPanelTarget = useCallback(
+    (terminalFocusOwner = getTerminalFocusOwner()) => {
+      const target = resolveRightPanelCloseTarget({
+        isOpen: rightPanelOpen,
+        hasActiveSurface: activeRightPanelSurface !== null,
+        hasFocusedTerminal:
+          activeRightPanelSurface?.kind === "terminal" && terminalFocusOwner === "right-panel",
+      });
+      if (target === "terminal" && activeRightPanelSurface?.kind === "terminal") {
+        closePanelTerminal(activeRightPanelSurface.activeTerminalId);
+      } else if (target === "surface" && activeRightPanelSurface) {
+        closeRightPanelSurface(activeRightPanelSurface);
+      } else if (target === "panel" && activeThreadRef) {
+        setMaximizedRightPanelThreadKey(null);
+        useRightPanelStore.getState().close(activeThreadRef);
+      }
+      return target !== null;
+    },
+    [
+      activeRightPanelSurface,
+      activeThreadRef,
+      closePanelTerminal,
+      closeRightPanelSurface,
+      rightPanelOpen,
+    ],
+  );
+  const handleCloseRequest = useEffectEvent((event: Event) => {
+    const target = resolveNativeCloseTarget({
+      focusOwner: getNativeCloseFocusOwner(),
+      drawerTerminalOpen: terminalUiState.terminalOpen,
+      rightPanelOpen,
+      hasActiveRightPanelSurface: activeRightPanelSurface !== null,
+      activeRightPanelSurfaceIsTerminal: activeRightPanelSurface?.kind === "terminal",
+    });
+    if (target === "drawer-terminal") {
+      closeTerminal(terminalUiState.activeTerminalId);
+    } else if (target === "right-panel-terminal" && activeRightPanelSurface?.kind === "terminal") {
+      closePanelTerminal(activeRightPanelSurface.activeTerminalId);
+    } else if (target === "right-panel-surface" && activeRightPanelSurface) {
+      closeRightPanelSurface(activeRightPanelSurface);
+    } else if (target === "right-panel" && activeThreadRef) {
+      setMaximizedRightPanelThreadKey(null);
+      useRightPanelStore.getState().close(activeThreadRef);
+    } else {
+      return;
+    }
+    event.preventDefault();
+  });
+  useEffect(() => {
+    const listener = (event: Event) => handleCloseRequest(event);
+
+    window.addEventListener(CLOSE_ACTIVE_RIGHT_PANEL_SURFACE_EVENT, listener);
+    return () => {
+      window.removeEventListener(CLOSE_ACTIVE_RIGHT_PANEL_SURFACE_EVENT, listener);
+    };
+  }, []);
+  useEffect(() => {
+    const recordFocus = (event: FocusEvent | PointerEvent) => {
+      recordNativeCloseFocus(event.target);
+    };
+    const recordFocusOut = (event: FocusEvent) => {
+      recordNativeCloseFocusOut(event.relatedTarget, document.hasFocus());
+    };
+    const recordPointer = (event: PointerEvent) => {
+      recordNativeClosePointer(event.target);
+    };
+
+    recordNativeCloseFocus(document.activeElement);
+    window.addEventListener("focusin", recordFocus, true);
+    window.addEventListener("focusout", recordFocusOut, true);
+    window.addEventListener("pointerdown", recordPointer, true);
+    window.addEventListener("pointerup", finishNativeClosePointer, true);
+    window.addEventListener("pointercancel", finishNativeClosePointer, true);
+    window.addEventListener("blur", finishNativeClosePointer);
+    return () => {
+      window.removeEventListener("focusin", recordFocus, true);
+      window.removeEventListener("focusout", recordFocusOut, true);
+      window.removeEventListener("pointerdown", recordPointer, true);
+      window.removeEventListener("pointerup", finishNativeClosePointer, true);
+      window.removeEventListener("pointercancel", finishNativeClosePointer, true);
+      window.removeEventListener("blur", finishNativeClosePointer);
+      clearNativeCloseFocusOwner();
+    };
+  }, [routeThreadKey]);
+  useEffect(() => {
+    if (!terminalUiState.terminalOpen) clearNativeCloseFocusOwner("drawer-terminal");
+    if (!rightPanelOpen) {
+      clearNativeCloseFocusOwner("right-panel-terminal");
+      clearNativeCloseFocusOwner("right-panel");
+    }
+  }, [rightPanelOpen, terminalUiState.terminalOpen]);
   const closeOtherRightPanelSurfaces = useCallback(
     (surface: RightPanelSurface) => {
       if (!activeThreadRef) return;
@@ -3832,6 +3950,13 @@ function ChatViewContent(props: ChatViewProps) {
         terminalFocus: terminalFocusOwner !== null,
         terminalOpen: Boolean(terminalUiState.terminalOpen),
         modelPickerOpen: composerRef.current?.isModelPickerOpen() ?? false,
+        rightPanelFocus: isRightPanelFocused({
+          rightPanelOpen,
+          activePreviewTabId:
+            activeRightPanelSurface?.kind === "preview"
+              ? (activeRightPanelSurface.resourceId ?? null)
+              : null,
+        }),
       };
 
       if (
@@ -3851,6 +3976,18 @@ function ChatViewContent(props: ChatViewProps) {
       });
       if (!command) return;
 
+      if (
+        shouldDeferCloseCommandToDesktopMenu({
+          command,
+          desktop: isElectron,
+          platform: navigator.platform,
+          event,
+          terminalFocused: terminalFocusOwner !== null,
+        })
+      ) {
+        return;
+      }
+
       if (command === "terminal.toggle") {
         event.preventDefault();
         event.stopPropagation();
@@ -3862,6 +3999,13 @@ function ChatViewContent(props: ChatViewProps) {
         event.preventDefault();
         event.stopPropagation();
         toggleRightPanel();
+        return;
+      }
+
+      if (command === "rightPanel.closeActiveSurface") {
+        if (!closeActiveRightPanelTarget()) return;
+        event.preventDefault();
+        event.stopPropagation();
         return;
       }
 
@@ -3952,6 +4096,7 @@ function ChatViewContent(props: ChatViewProps) {
     activeThreadId,
     closeTerminal,
     closePanelTerminal,
+    closeActiveRightPanelTarget,
     createNewTerminal,
     setTerminalOpen,
     runProjectScript,
@@ -5110,6 +5255,9 @@ function ChatViewContent(props: ChatViewProps) {
         />
       ) : null}
       {panelToggleControls}
+      {rightPanelOpen && !shouldUsePlanSidebarSheet ? (
+        <RightPanelCloseControl onClose={toggleRightPanel} />
+      ) : null}
     </div>
   );
   const rightPanelContent = activeThreadRef ? (

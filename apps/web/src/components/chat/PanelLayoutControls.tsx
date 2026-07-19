@@ -1,6 +1,7 @@
-import { Maximize2Icon, Minimize2Icon, PanelBottomIcon, PanelRightIcon } from "lucide-react";
+import { Maximize2Icon, Minimize2Icon, PanelBottomIcon, PanelRightIcon, XIcon } from "lucide-react";
 import { memo } from "react";
 
+import { Button } from "../ui/button";
 import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
@@ -57,6 +58,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
           render={
             <Toggle
               className="shrink-0 [-webkit-app-region:no-drag]"
+              data-right-panel-control
               pressed={rightPanelOpen}
               onPressedChange={onToggleRightPanel}
               aria-label="Toggle right panel"
@@ -92,6 +94,7 @@ export const RightPanelMaximizeControl = memo(function RightPanelMaximizeControl
         render={
           <Toggle
             className="shrink-0 [-webkit-app-region:no-drag]"
+            data-right-panel-control
             pressed={maximized}
             onPressedChange={onToggle}
             aria-label={label}
@@ -107,6 +110,32 @@ export const RightPanelMaximizeControl = memo(function RightPanelMaximizeControl
         }
       />
       <TooltipPopup side="bottom">{label}</TooltipPopup>
+    </Tooltip>
+  );
+});
+
+export const RightPanelCloseControl = memo(function RightPanelCloseControl({
+  onClose,
+}: {
+  onClose: () => void;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            className="[-webkit-app-region:no-drag]"
+            data-right-panel-control
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Close right panel"
+            onClick={onClose}
+          >
+            <XIcon className="size-4" />
+          </Button>
+        }
+      />
+      <TooltipPopup side="bottom">Close right panel</TooltipPopup>
     </Tooltip>
   );
 });

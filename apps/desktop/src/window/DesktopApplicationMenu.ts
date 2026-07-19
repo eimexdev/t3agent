@@ -127,6 +127,31 @@ export const make = Effect.gen(function* () {
     const settingsClick = () => {
       runMenuEffect("open-settings", dispatchMenuAction("open-settings"));
     };
+    const closeWindowClick: NonNullable<Electron.MenuItemConstructorOptions["click"]> = (
+      _menuItem,
+      browserWindow,
+    ) => {
+      if (!browserWindow) {
+        runMenuEffect(
+          "close-focused-native-window",
+          electronMenu.sendActionToFirstResponder("performClose:"),
+        );
+        return;
+      }
+      runMenuEffect(
+        "close-window-or-right-panel",
+        Effect.gen(function* () {
+          const desktopWindow = yield* DesktopWindow.DesktopWindow;
+          const handled = yield* desktopWindow.dispatchMenuActionToMainWindow(
+            browserWindow,
+            "close-window-or-right-panel",
+          );
+          if (!handled) {
+            yield* electronMenu.sendActionToFirstResponder("performClose:");
+          }
+        }),
+      );
+    };
     const template: Electron.MenuItemConstructorOptions[] = [];
 
     if (environment.platform === "darwin") {
@@ -170,7 +195,15 @@ export const make = Effect.gen(function* () {
                 },
                 { type: "separator" as const },
               ]),
-          { role: environment.platform === "darwin" ? "close" : "quit" },
+          ...(environment.platform === "darwin"
+            ? [
+                {
+                  label: "Close Window",
+                  accelerator: "Cmd+W",
+                  click: closeWindowClick,
+                },
+              ]
+            : [{ role: "quit" as const }]),
         ],
       },
       { role: "editMenu" },

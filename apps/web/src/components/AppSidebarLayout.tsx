@@ -6,6 +6,7 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 import { isElectron } from "../env";
 import { getLocalStorageItem } from "../hooks/useLocalStorage";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
+import { requestCloseActiveRightPanelSurface } from "../lib/rightPanelCloseRequest";
 import { cn, isMacPlatform } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import ThreadSidebar from "./Sidebar";
@@ -143,6 +144,13 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         const isSettingsRoute = /^\/settings(\/|$)/.test(pathname);
         if (!isSettingsRoute) {
           void navigate({ to: "/settings" });
+        }
+        return;
+      }
+
+      if (action === "close-window-or-right-panel") {
+        if (!requestCloseActiveRightPanelSurface()) {
+          window.close();
         }
       }
     });

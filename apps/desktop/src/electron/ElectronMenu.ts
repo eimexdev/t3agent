@@ -26,6 +26,7 @@ export interface ElectronMenuTemplateInput {
 
 const ElectronMenuOperation = Schema.Literals([
   "set-application-menu",
+  "send-action-to-first-responder",
   "popup-template",
   "show-context-menu",
 ]);
@@ -52,6 +53,7 @@ export class ElectronMenu extends Context.Service<
     readonly setApplicationMenu: (
       template: readonly Electron.MenuItemConstructorOptions[],
     ) => Effect.Effect<void>;
+    readonly sendActionToFirstResponder: (action: string) => Effect.Effect<void>;
     readonly showContextMenu: (
       input: ElectronMenuContextInput,
     ) => Effect.Effect<Option.Option<string>>;
@@ -182,6 +184,18 @@ export const make = Effect.gen(function* () {
             platform,
             windowId: null,
             itemCount: template.length,
+            cause,
+          }),
+      }).pipe(Effect.orDie),
+    sendActionToFirstResponder: (action) =>
+      Effect.try({
+        try: () => Electron.Menu.sendActionToFirstResponder(action),
+        catch: (cause) =>
+          new ElectronMenuOperationError({
+            operation: "send-action-to-first-responder",
+            platform,
+            windowId: null,
+            itemCount: 0,
             cause,
           }),
       }).pipe(Effect.orDie),

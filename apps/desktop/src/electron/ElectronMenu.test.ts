@@ -7,17 +7,22 @@ import * as Option from "effect/Option";
 import type * as Electron from "electron";
 import { beforeEach, vi } from "vite-plus/test";
 
-const { buildFromTemplateMock, createFromNamedImageMock, setApplicationMenuMock } = vi.hoisted(
-  () => ({
-    buildFromTemplateMock: vi.fn(),
-    createFromNamedImageMock: vi.fn(),
-    setApplicationMenuMock: vi.fn(),
-  }),
-);
+const {
+  buildFromTemplateMock,
+  createFromNamedImageMock,
+  sendActionToFirstResponderMock,
+  setApplicationMenuMock,
+} = vi.hoisted(() => ({
+  buildFromTemplateMock: vi.fn(),
+  createFromNamedImageMock: vi.fn(),
+  sendActionToFirstResponderMock: vi.fn(),
+  setApplicationMenuMock: vi.fn(),
+}));
 
 vi.mock("electron", () => ({
   Menu: {
     buildFromTemplate: buildFromTemplateMock,
+    sendActionToFirstResponder: sendActionToFirstResponderMock,
     setApplicationMenu: setApplicationMenuMock,
   },
   nativeImage: {
@@ -41,6 +46,7 @@ describe("ElectronMenu", () => {
   beforeEach(() => {
     buildFromTemplateMock.mockReset();
     createFromNamedImageMock.mockReset();
+    sendActionToFirstResponderMock.mockReset();
     setApplicationMenuMock.mockReset();
   });
 
@@ -156,6 +162,38 @@ describe("ElectronMenu", () => {
         assert.equal(error.itemCount, 2);
         assert.strictEqual(error.cause, cause);
         assert.notInclude(error.message, cause.message);
+      }
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect("sends native actions to the first responder", () =>
+    Effect.gen(function* () {
+      const electronMenu = yield* ElectronMenu.ElectronMenu;
+      yield* electronMenu.sendActionToFirstResponder("performClose:");
+
+      assert.deepEqual(sendActionToFirstResponderMock.mock.calls, [["performClose:"]]);
+    }).pipe(Effect.provide(TestLayer)),
+  );
+
+  it.effect("preserves first-responder failures as structured defects", () =>
+    Effect.gen(function* () {
+      const cause = new Error("native action failed");
+      sendActionToFirstResponderMock.mockImplementationOnce(() => {
+        throw cause;
+      });
+
+      const electronMenu = yield* ElectronMenu.ElectronMenu;
+      const exit = yield* Effect.exit(electronMenu.sendActionToFirstResponder("performClose:"));
+
+      assert.equal(exit._tag, "Failure");
+      if (exit._tag === "Failure") {
+        const error = Cause.squash(exit.cause);
+        assert.instanceOf(error, ElectronMenu.ElectronMenuOperationError);
+        assert.equal(error.operation, "send-action-to-first-responder");
+        assert.equal(error.platform, "linux");
+        assert.isNull(error.windowId);
+        assert.equal(error.itemCount, 0);
+        assert.strictEqual(error.cause, cause);
       }
     }).pipe(Effect.provide(TestLayer)),
   );

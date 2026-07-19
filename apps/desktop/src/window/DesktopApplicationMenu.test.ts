@@ -66,7 +66,10 @@ const desktopUpdatesLayer = Layer.succeed(DesktopUpdates.DesktopUpdates, {
   install: Effect.die("unexpected install"),
 } satisfies DesktopUpdates.DesktopUpdates["Service"]);
 
-const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
+const makeDesktopWindowLayer = (
+  selectedAction: Deferred.Deferred<string>,
+  mainWindowActionsHandled: boolean,
+) =>
   Layer.succeed(DesktopWindow.DesktopWindow, {
     createMain: Effect.die("unexpected createMain"),
     ensureMain: Effect.die("unexpected ensureMain"),
@@ -78,18 +81,54 @@ const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
     handleBackendNotReady: Effect.void,
     flushMainWindowBounds: Effect.void,
     dispatchMenuAction: (action) => Deferred.succeed(selectedAction, action).pipe(Effect.asVoid),
+    dispatchMenuActionToMainWindow: (_window, action) =>
+      mainWindowActionsHandled
+        ? Deferred.succeed(selectedAction, action).pipe(Effect.as(true))
+        : Effect.succeed(false),
     syncAppearance: Effect.void,
   } satisfies DesktopWindow.DesktopWindow["Service"]);
 
 const makeElectronMenuLayer = (
   applicationMenuTemplate: Deferred.Deferred<readonly Electron.MenuItemConstructorOptions[]>,
+  nativeActions: string[] = [],
 ) =>
   Layer.succeed(ElectronMenu.ElectronMenu, {
     setApplicationMenu: (template) =>
       Deferred.succeed(applicationMenuTemplate, template).pipe(Effect.asVoid),
+    sendActionToFirstResponder: (action) =>
+      Effect.sync(() => {
+        nativeActions.push(action);
+      }),
     popupTemplate: () => Effect.void,
     showContextMenu: () => Effect.succeed(Option.none()),
   } satisfies ElectronMenu.ElectronMenu["Service"]);
+
+const configureMenu = (
+  platform: "darwin" | "linux",
+  selectedAction: Deferred.Deferred<string>,
+  applicationMenuTemplate: Deferred.Deferred<readonly Electron.MenuItemConstructorOptions[]>,
+  nativeActions: string[] = [],
+  mainWindowActionsHandled = true,
+) =>
+  Effect.gen(function* () {
+    const menu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
+    yield* menu.configure;
+  }).pipe(
+    Effect.provide(
+      DesktopApplicationMenu.layer.pipe(
+        Layer.provideMerge(makeElectronMenuLayer(applicationMenuTemplate, nativeActions)),
+        Layer.provideMerge(makeDesktopWindowLayer(selectedAction, mainWindowActionsHandled)),
+        Layer.provideMerge(desktopUpdatesLayer),
+        Layer.provideMerge(electronDialogLayer),
+        Layer.provideMerge(electronAppLayer),
+        Layer.provideMerge(
+          DesktopEnvironment.layer({ ...environmentInput, platform }).pipe(
+            Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))),
+          ),
+        ),
+      ),
+    ),
+  );
 
 describe("DesktopApplicationMenu", () => {
   it.effect("installs the native menu and routes Settings through DesktopWindow", () =>
@@ -98,25 +137,7 @@ describe("DesktopApplicationMenu", () => {
       const applicationMenuTemplate =
         yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
 
-      yield* Effect.gen(function* () {
-        const menu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
-        yield* menu.configure;
-      }).pipe(
-        Effect.provide(
-          DesktopApplicationMenu.layer.pipe(
-            Layer.provideMerge(makeElectronMenuLayer(applicationMenuTemplate)),
-            Layer.provideMerge(makeDesktopWindowLayer(selectedAction)),
-            Layer.provideMerge(desktopUpdatesLayer),
-            Layer.provideMerge(electronDialogLayer),
-            Layer.provideMerge(electronAppLayer),
-            Layer.provideMerge(
-              DesktopEnvironment.layer(environmentInput).pipe(
-                Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))),
-              ),
-            ),
-          ),
-        ),
-      );
+      yield* configureMenu("linux", selectedAction, applicationMenuTemplate);
 
       const template = yield* Deferred.await(applicationMenuTemplate);
       const fileMenu = template.find((item) => item.label === "File");
@@ -133,6 +154,88 @@ describe("DesktopApplicationMenu", () => {
 
       settingsClick({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
       assert.equal(yield* Deferred.await(selectedAction), "open-settings");
+    }),
+  );
+
+  it.effect("routes the macOS close shortcut through the renderer", () =>
+    Effect.gen(function* () {
+      const selectedAction = yield* Deferred.make<string>();
+      const applicationMenuTemplate =
+        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+
+      yield* configureMenu("darwin", selectedAction, applicationMenuTemplate);
+
+      const template = yield* Deferred.await(applicationMenuTemplate);
+      const fileMenu = template.find((item) => item.label === "File");
+      assert.isDefined(fileMenu);
+      if (!Array.isArray(fileMenu.submenu)) {
+        throw new Error("Expected File menu submenu to be an array.");
+      }
+      const closeItem = fileMenu.submenu.find((item) => item.label === "Close Window");
+      assert.isDefined(closeItem);
+      assert.equal(closeItem.accelerator, "Cmd+W");
+      const closeClick = closeItem.click;
+      if (typeof closeClick !== "function") {
+        throw new Error("Expected Close Window menu item to have a click handler.");
+      }
+
+      closeClick({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
+      assert.equal(yield* Deferred.await(selectedAction), "close-window-or-right-panel");
+    }),
+  );
+
+  it.effect("preserves native close behavior when system UI owns focus", () =>
+    Effect.gen(function* () {
+      const selectedAction = yield* Deferred.make<string>();
+      const applicationMenuTemplate =
+        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+      const nativeActions: string[] = [];
+
+      yield* configureMenu("darwin", selectedAction, applicationMenuTemplate, nativeActions);
+
+      const template = yield* Deferred.await(applicationMenuTemplate);
+      const fileMenu = template.find((item) => item.label === "File");
+      assert.isDefined(fileMenu);
+      if (!Array.isArray(fileMenu.submenu)) {
+        throw new Error("Expected File menu submenu to be an array.");
+      }
+      const closeItem = fileMenu.submenu.find((item) => item.label === "Close Window");
+      assert.isDefined(closeItem);
+      const closeClick = closeItem.click;
+      if (typeof closeClick !== "function") {
+        throw new Error("Expected Close Window menu item to have a click handler.");
+      }
+
+      closeClick({} as Electron.MenuItem, undefined, {} as KeyboardEvent);
+      assert.deepEqual(nativeActions, ["performClose:"]);
+    }),
+  );
+
+  it.effect("preserves native close behavior for a non-main browser window", () =>
+    Effect.gen(function* () {
+      const selectedAction = yield* Deferred.make<string>();
+      const applicationMenuTemplate =
+        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+      const nativeActions: string[] = [];
+
+      yield* configureMenu("darwin", selectedAction, applicationMenuTemplate, nativeActions, false);
+
+      const template = yield* Deferred.await(applicationMenuTemplate);
+      const fileMenu = template.find((item) => item.label === "File");
+      assert.isDefined(fileMenu);
+      if (!Array.isArray(fileMenu.submenu)) {
+        throw new Error("Expected File menu submenu to be an array.");
+      }
+      const closeItem = fileMenu.submenu.find((item) => item.label === "Close Window");
+      assert.isDefined(closeItem);
+      const closeClick = closeItem.click;
+      if (typeof closeClick !== "function") {
+        throw new Error("Expected Close Window menu item to have a click handler.");
+      }
+
+      closeClick({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
+      yield* Effect.yieldNow;
+      assert.deepEqual(nativeActions, ["performClose:"]);
     }),
   );
 });

@@ -148,6 +148,7 @@ const desktopServerExposureLayer = Layer.succeed(DesktopServerExposure.DesktopSe
 
 const electronMenuLayer = Layer.succeed(ElectronMenu.ElectronMenu, {
   setApplicationMenu: () => Effect.void,
+  sendActionToFirstResponder: () => Effect.void,
   popupTemplate: () => Effect.void,
   showContextMenu: () => Effect.succeed(Option.none()),
 } satisfies ElectronMenu.ElectronMenu["Service"]);
@@ -1093,6 +1094,29 @@ describe("DesktopWindow", () => {
 
         assert.equal(yield* Ref.get(scenario.createCalls), 3);
         assert.deepEqual(main.send.mock.calls, [[MENU_ACTION_CHANNEL, "open-settings"]]);
+      }).pipe(Effect.provide(scenario.layer));
+    }),
+  );
+
+  it.effect("dispatches targeted menu actions only to the registered main window", () =>
+    Effect.gen(function* () {
+      const splash = makeFakeBrowserWindow();
+      const main = makeFakeBrowserWindow();
+      const scenario = yield* makeSplashScenario([splash.window]);
+      yield* Ref.set(scenario.mainWindow, Option.some(main.window));
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+
+        assert.isTrue(
+          yield* desktopWindow.dispatchMenuActionToMainWindow(main.window, "close-window"),
+        );
+        assert.isFalse(
+          yield* desktopWindow.dispatchMenuActionToMainWindow(splash.window, "close-window"),
+        );
+        assert.deepEqual(main.send.mock.calls, [[MENU_ACTION_CHANNEL, "close-window"]]);
+        assert.equal(splash.send.mock.calls.length, 0);
+        assert.deepEqual(yield* Ref.get(scenario.revealedWindows), []);
       }).pipe(Effect.provide(scenario.layer));
     }),
   );

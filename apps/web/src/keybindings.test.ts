@@ -109,6 +109,11 @@ const DEFAULT_BINDINGS = compile([
     whenAst: whenIdentifier("terminalFocus"),
   },
   {
+    shortcut: modShortcut("w"),
+    command: "rightPanel.closeActiveSurface",
+    whenAst: whenAnd(whenIdentifier("rightPanelFocus"), whenNot(whenIdentifier("terminalFocus"))),
+  },
+  {
     shortcut: modShortcut("d"),
     command: "diff.toggle",
     whenAst: whenNot(whenIdentifier("terminalFocus")),
@@ -285,6 +290,34 @@ describe("split/new/close terminal shortcuts", () => {
       isTerminalNewShortcut(event({ key: "m", ctrlKey: true }), keybindings, {
         platform: "Linux",
       }),
+    );
+  });
+});
+
+describe("right panel close shortcut", () => {
+  it("matches Cmd+W only while the right panel owns focus", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "w", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { rightPanelFocus: true },
+      }),
+      "rightPanel.closeActiveSurface",
+    );
+    assert.isNull(
+      resolveShortcutCommand(event({ key: "w", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { rightPanelFocus: false },
+      }),
+    );
+  });
+
+  it("keeps terminal close active for a focused right-panel terminal", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "w", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { rightPanelFocus: true, terminalFocus: true },
+      }),
+      "terminal.close",
     );
   });
 });
