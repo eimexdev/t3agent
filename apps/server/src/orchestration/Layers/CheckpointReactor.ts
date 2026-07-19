@@ -219,21 +219,6 @@ const make = Effect.gen(function* () {
     return cwd;
   });
 
-  const hasCheckpointRefForCapture = Effect.fn("hasCheckpointRefForCapture")(function* (input: {
-    readonly cwd: string;
-    readonly checkpointRef: CheckpointRef;
-  }) {
-    return yield* checkpointStore.hasCheckpointRef(input).pipe(
-      Effect.catchTag("VcsProcessExitError", (error) =>
-        Effect.logWarning("checkpoint ref probe failed; attempting recapture", {
-          checkpointRef: input.checkpointRef,
-          cwd: input.cwd,
-          detail: error.message,
-        }).pipe(Effect.as(false)),
-      ),
-    );
-  });
-
   // Shared tail for both capture paths: creates the git checkpoint ref, diffs
   // it against the previous turn, then dispatches the domain events to update
   // the orchestration read model.
@@ -257,10 +242,21 @@ const make = Effect.gen(function* () {
     const fromCheckpointRef = checkpointRefForThreadTurn(input.threadId, fromTurnCount);
     const targetCheckpointRef = checkpointRefForThreadTurn(input.threadId, input.turnCount);
 
-    const fromCheckpointExists = yield* hasCheckpointRefForCapture({
-      cwd: input.cwd,
-      checkpointRef: fromCheckpointRef,
-    });
+    const fromCheckpointExists = yield* checkpointStore
+      .hasCheckpointRef({
+        cwd: input.cwd,
+        checkpointRef: fromCheckpointRef,
+      })
+      .pipe(
+        Effect.catchTags({
+          VcsProcessExitError: (error) =>
+            Effect.logWarning("previous checkpoint ref probe failed", {
+              checkpointRef: fromCheckpointRef,
+              cwd: input.cwd,
+              detail: error.message,
+            }).pipe(Effect.as(false)),
+        }),
+      );
     if (!fromCheckpointExists) {
       yield* Effect.logWarning("checkpoint capture missing pre-turn baseline", {
         threadId: input.threadId,
@@ -524,7 +520,7 @@ const make = Effect.gen(function* () {
         Math.max(0, countConversationTurns(thread.messages) - 1),
       );
       const baselineCheckpointRef = checkpointRefForThreadTurn(thread.id, currentTurnCount);
-      const baselineExists = yield* hasCheckpointRefForCapture({
+      const baselineExists = yield* checkpointStore.hasCheckpointRef({
         cwd: checkpointCwd,
         checkpointRef: baselineCheckpointRef,
       });
@@ -610,7 +606,7 @@ const make = Effect.gen(function* () {
         : projectedConversationTurnCount,
     );
     const baselineCheckpointRef = checkpointRefForThreadTurn(threadId, currentTurnCount);
-    const baselineExists = yield* hasCheckpointRefForCapture({
+    const baselineExists = yield* checkpointStore.hasCheckpointRef({
       cwd: checkpointCwd,
       checkpointRef: baselineCheckpointRef,
     });
