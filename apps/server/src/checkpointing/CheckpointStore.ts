@@ -152,11 +152,21 @@ export const make = Effect.gen(function* () {
       args: ["rev-parse", "--verify", "--quiet", `${input.checkpointRef}^{commit}`],
       allowNonZeroExit: true,
     });
-    if (result.exitCode !== 0) {
+    const stdout = result.stdout.trim();
+    const stderr = result.stderr.trim();
+    if (result.exitCode === 1 && stdout.length === 0 && stderr.length === 0) {
       return null;
     }
-    const commit = result.stdout.trim();
-    return commit.length > 0 ? commit : null;
+    if (result.exitCode !== 0) {
+      return yield* new VcsProcessExitError({
+        operation: "CheckpointStore.shadow.resolveCheckpointCommit",
+        command: "git rev-parse",
+        cwd: input.cwd,
+        exitCode: result.exitCode,
+        detail: stderr || "Failed to resolve shadow checkpoint commit.",
+      });
+    }
+    return stdout.length > 0 ? stdout : null;
   });
 
   const shadowCheckpoints: VcsCheckpointOps = {

@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
+import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -297,6 +298,36 @@ it.layer(TestLayer)("CheckpointStore.layer", (it) => {
 
         expect(error._tag).toBe("VcsProcessExitError");
         expect(error.message).toContain("git diff");
+      }),
+    );
+
+    it.effect("surfaces corrupted shadow checkpoint refs instead of treating them as missing", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir("checkpoint-store-shadow-corrupt-ref-test-");
+        const checkpointStore = yield* CheckpointStore.CheckpointStore;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const config = yield* ServerConfig.ServerConfig;
+        const checkpointRef = checkpointRefForThreadTurn(
+          ThreadId.make("thread-shadow-corrupt-ref-checkpoint-store"),
+          0,
+        );
+
+        yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef });
+        const shadowRepositoryPath = NodePath.join(
+          config.stateDir,
+          "checkpoints",
+          NodeCrypto.createHash("sha256").update(NodePath.resolve(tmp)).digest("hex"),
+        );
+        yield* fileSystem.writeFileString(
+          NodePath.join(shadowRepositoryPath, checkpointRef),
+          "not-a-commit\n",
+        );
+
+        const error = yield* Effect.flip(
+          checkpointStore.hasCheckpointRef({ cwd: tmp, checkpointRef }),
+        );
+        expect(error._tag).toBe("VcsProcessExitError");
+        expect(error.message).toContain("git rev-parse");
       }),
     );
 
