@@ -14,6 +14,7 @@ class MockElement extends EventTarget {
   owner: "drawer" | "right-panel" | null = null;
   inRightPanel = false;
   inPreviewViewport = false;
+  previewTabId: string | null = null;
   tagName = "div";
 
   closest(selector: string): MockElement | null {
@@ -26,6 +27,13 @@ class MockElement extends EventTarget {
 
   get dataset(): DOMStringMap {
     return { terminalOwner: this.owner ?? undefined } as DOMStringMap;
+  }
+
+  getAttribute(name: string): string | null {
+    if (name === "data-preview-tab" || name === "data-preview-viewport") {
+      return this.previewTabId;
+    }
+    return null;
   }
 }
 
@@ -56,17 +64,17 @@ describe("native close focus", () => {
     const drawer = new MockElement();
     drawer.owner = "drawer";
     installDom(drawer);
-    expect(getNativeCloseFocusOwner()).toBe("drawer-terminal");
+    expect(getNativeCloseFocusOwner(null)).toBe("drawer-terminal");
 
     const panelTerminal = new MockElement();
     panelTerminal.owner = "right-panel";
     installDom(panelTerminal);
-    expect(getNativeCloseFocusOwner()).toBe("right-panel-terminal");
+    expect(getNativeCloseFocusOwner(null)).toBe("right-panel-terminal");
 
     const panelControl = new MockElement();
     panelControl.inRightPanel = true;
     installDom(panelControl);
-    expect(getNativeCloseFocusOwner()).toBe("right-panel");
+    expect(getNativeCloseFocusOwner(null)).toBe("right-panel");
   });
 
   it("retains ownership only while focus is obscured by native UI", () => {
@@ -74,13 +82,13 @@ describe("native close focus", () => {
     terminal.owner = "drawer";
     const body = new MockElement();
     installDom(body, body);
-    recordNativeCloseFocus(terminal);
-    recordNativeCloseFocusOut(null, false);
+    recordNativeCloseFocus(terminal, null);
+    recordNativeCloseFocusOut(null, false, null);
 
-    expect(getNativeCloseFocusOwner()).toBe("drawer-terminal");
+    expect(getNativeCloseFocusOwner(null)).toBe("drawer-terminal");
 
-    recordNativeCloseFocusOut(null, true);
-    expect(getNativeCloseFocusOwner()).toBeNull();
+    recordNativeCloseFocusOut(null, true, null);
+    expect(getNativeCloseFocusOwner(null)).toBeNull();
   });
 
   it("preserves pointer ownership until the pointer gesture finishes", async () => {
@@ -89,12 +97,12 @@ describe("native close focus", () => {
     const body = new MockElement();
     installDom(body, body);
 
-    recordNativeClosePointer(panelChrome);
+    recordNativeClosePointer(panelChrome, null);
     await Promise.resolve();
-    recordNativeCloseFocusOut(null, true);
+    recordNativeCloseFocusOut(null, true, null);
     finishNativeClosePointer();
 
-    expect(getNativeCloseFocusOwner()).toBe("right-panel");
+    expect(getNativeCloseFocusOwner(null)).toBe("right-panel");
   });
 
   it("clears retained ownership on focus or pointer movement outside the panel", () => {
@@ -102,10 +110,10 @@ describe("native close focus", () => {
     panel.inRightPanel = true;
     const outside = new MockElement();
     installDom(outside);
-    recordNativeCloseFocus(panel);
-    recordNativeCloseFocus(outside);
+    recordNativeCloseFocus(panel, null);
+    recordNativeCloseFocus(outside, null);
 
-    expect(getNativeCloseFocusOwner()).toBeNull();
+    expect(getNativeCloseFocusOwner(null)).toBeNull();
   });
 
   it("updates ownership directly from a focusout related target", () => {
@@ -114,22 +122,35 @@ describe("native close focus", () => {
     const panel = new MockElement();
     panel.inRightPanel = true;
     installDom(panel);
-    recordNativeCloseFocus(drawer);
-    recordNativeCloseFocusOut(panel, true);
+    recordNativeCloseFocus(drawer, null);
+    recordNativeCloseFocusOut(panel, true, null);
 
-    expect(getNativeCloseFocusOwner()).toBe("right-panel");
+    expect(getNativeCloseFocusOwner(null)).toBe("right-panel");
   });
 
   it("treats hosted preview webviews and viewport chrome as right-panel focus", () => {
     const webview = new MockElement();
     webview.tagName = "webview";
+    webview.previewTabId = "active-preview";
     installDom(webview);
-    expect(getNativeCloseFocusOwner()).toBe("right-panel");
+    expect(getNativeCloseFocusOwner("active-preview")).toBe("right-panel");
 
     const viewport = new MockElement();
     viewport.inPreviewViewport = true;
+    viewport.previewTabId = "active-preview";
     installDom(viewport);
-    expect(getNativeCloseFocusOwner()).toBe("right-panel");
+    expect(getNativeCloseFocusOwner("active-preview")).toBe("right-panel");
+  });
+
+  it("ignores previews that are not the active right-panel preview", () => {
+    const webview = new MockElement();
+    webview.tagName = "webview";
+    webview.previewTabId = "standalone-preview";
+    installDom(webview);
+
+    recordNativeClosePointer(webview, "right-panel-preview");
+
+    expect(getNativeCloseFocusOwner("right-panel-preview")).toBeNull();
   });
 
   it("ignores detached retained targets", () => {
@@ -138,8 +159,8 @@ describe("native close focus", () => {
     terminal.isConnected = false;
     const body = new MockElement();
     installDom(body, body);
-    recordNativeCloseFocus(terminal);
+    recordNativeCloseFocus(terminal, null);
 
-    expect(getNativeCloseFocusOwner()).toBeNull();
+    expect(getNativeCloseFocusOwner(null)).toBeNull();
   });
 });

@@ -6,29 +6,45 @@ const RIGHT_PANEL_SELECTOR =
 let retainedOwner: NativeCloseFocusOwner | null = null;
 let pointerTransitionActive = false;
 
-function ownerForElement(element: Element): NativeCloseFocusOwner | null {
+function ownerForElement(
+  element: Element,
+  activePreviewTabId: string | null,
+): NativeCloseFocusOwner | null {
   if (!element.isConnected) return null;
 
   const terminalOwner =
     element.closest<HTMLElement>("[data-terminal-owner]")?.dataset.terminalOwner;
   if (terminalOwner === "drawer") return "drawer-terminal";
   if (terminalOwner === "right-panel") return "right-panel-terminal";
-  if (element.closest(RIGHT_PANEL_SELECTOR)) return "right-panel";
-  if (element.tagName.toLowerCase() === "webview" || element.closest("[data-preview-viewport]")) {
-    return "right-panel";
+
+  const previewViewport = element.closest<HTMLElement>("[data-preview-viewport]");
+  const focusedPreviewTabId =
+    element.tagName.toLowerCase() === "webview"
+      ? element.getAttribute("data-preview-tab")
+      : (previewViewport?.getAttribute("data-preview-viewport") ?? null);
+  if (focusedPreviewTabId !== null) {
+    return focusedPreviewTabId === activePreviewTabId ? "right-panel" : null;
   }
+
+  if (element.closest(RIGHT_PANEL_SELECTOR)) return "right-panel";
   return null;
 }
 
 /** Records an in-document focus or pointer transition before native UI can obscure DOM focus. */
-export function recordNativeCloseFocus(target: EventTarget | null): void {
-  retainedOwner = target instanceof Element ? ownerForElement(target) : null;
+export function recordNativeCloseFocus(
+  target: EventTarget | null,
+  activePreviewTabId: string | null,
+): void {
+  retainedOwner = target instanceof Element ? ownerForElement(target, activePreviewTabId) : null;
 }
 
 /** Records pointer intent before a non-focusable target can blur the previous owner to body. */
-export function recordNativeClosePointer(target: EventTarget | null): void {
+export function recordNativeClosePointer(
+  target: EventTarget | null,
+  activePreviewTabId: string | null,
+): void {
   pointerTransitionActive = true;
-  recordNativeCloseFocus(target);
+  recordNativeCloseFocus(target, activePreviewTabId);
 }
 
 export function finishNativeClosePointer(): void {
@@ -42,18 +58,21 @@ export function finishNativeClosePointer(): void {
 export function recordNativeCloseFocusOut(
   relatedTarget: EventTarget | null,
   documentHasFocus: boolean,
+  activePreviewTabId: string | null,
 ): void {
   if (relatedTarget instanceof Element) {
-    retainedOwner = ownerForElement(relatedTarget);
+    retainedOwner = ownerForElement(relatedTarget, activePreviewTabId);
     return;
   }
   if (documentHasFocus && !pointerTransitionActive) retainedOwner = null;
 }
 
-export function getNativeCloseFocusOwner(): NativeCloseFocusOwner | null {
+export function getNativeCloseFocusOwner(
+  activePreviewTabId: string | null,
+): NativeCloseFocusOwner | null {
   const activeElement = document.activeElement;
   if (activeElement instanceof Element && activeElement.isConnected) {
-    const liveOwner = ownerForElement(activeElement);
+    const liveOwner = ownerForElement(activeElement, activePreviewTabId);
     if (liveOwner !== null) {
       retainedOwner = liveOwner;
       return liveOwner;

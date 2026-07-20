@@ -3173,6 +3173,10 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activeThreadRef, cleanupRightPanelSurfaces, syncActivePreviewSurface],
   );
+  const activeRightPanelPreviewTabId =
+    activeRightPanelSurface?.kind === "preview"
+      ? (activeRightPanelSurface.resourceId ?? null)
+      : null;
   const closeActiveRightPanelTarget = useCallback(
     (terminalFocusOwner = getTerminalFocusOwner()) => {
       const target = resolveRightPanelCloseTarget({
@@ -3201,7 +3205,7 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const handleCloseRequest = useEffectEvent((event: Event) => {
     const target = resolveNativeCloseTarget({
-      focusOwner: getNativeCloseFocusOwner(),
+      focusOwner: getNativeCloseFocusOwner(activeRightPanelPreviewTabId),
       drawerTerminalOpen: terminalUiState.terminalOpen,
       rightPanelOpen,
       hasActiveRightPanelSurface: activeRightPanelSurface !== null,
@@ -3231,32 +3235,34 @@ function ChatViewContent(props: ChatViewProps) {
   }, []);
   useEffect(() => {
     const recordFocus = (event: FocusEvent | PointerEvent) => {
-      recordNativeCloseFocus(event.target);
+      recordNativeCloseFocus(event.target, activeRightPanelPreviewTabId);
     };
     const recordFocusOut = (event: FocusEvent) => {
-      recordNativeCloseFocusOut(event.relatedTarget, document.hasFocus());
+      recordNativeCloseFocusOut(
+        event.relatedTarget,
+        document.hasFocus(),
+        activeRightPanelPreviewTabId,
+      );
     };
     const recordPointer = (event: PointerEvent) => {
-      recordNativeClosePointer(event.target);
+      recordNativeClosePointer(event.target, activeRightPanelPreviewTabId);
     };
 
-    recordNativeCloseFocus(document.activeElement);
+    recordNativeCloseFocus(document.activeElement, activeRightPanelPreviewTabId);
     window.addEventListener("focusin", recordFocus, true);
     window.addEventListener("focusout", recordFocusOut, true);
     window.addEventListener("pointerdown", recordPointer, true);
     window.addEventListener("pointerup", finishNativeClosePointer, true);
     window.addEventListener("pointercancel", finishNativeClosePointer, true);
-    window.addEventListener("blur", finishNativeClosePointer);
     return () => {
       window.removeEventListener("focusin", recordFocus, true);
       window.removeEventListener("focusout", recordFocusOut, true);
       window.removeEventListener("pointerdown", recordPointer, true);
       window.removeEventListener("pointerup", finishNativeClosePointer, true);
       window.removeEventListener("pointercancel", finishNativeClosePointer, true);
-      window.removeEventListener("blur", finishNativeClosePointer);
       clearNativeCloseFocusOwner();
     };
-  }, [routeThreadKey]);
+  }, [activeRightPanelPreviewTabId, routeThreadKey]);
   useEffect(() => {
     if (!terminalUiState.terminalOpen) clearNativeCloseFocusOwner("drawer-terminal");
     if (!rightPanelOpen) {
@@ -3952,10 +3958,7 @@ function ChatViewContent(props: ChatViewProps) {
         modelPickerOpen: composerRef.current?.isModelPickerOpen() ?? false,
         rightPanelFocus: isRightPanelFocused({
           rightPanelOpen,
-          activePreviewTabId:
-            activeRightPanelSurface?.kind === "preview"
-              ? (activeRightPanelSurface.resourceId ?? null)
-              : null,
+          activePreviewTabId: activeRightPanelPreviewTabId,
         }),
       };
 
