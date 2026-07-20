@@ -346,6 +346,7 @@ function permissionRequestOptionsFromFrame(
     ...(options.description === undefined ? {} : { description: options.description }),
     toolUseID: options.toolUseID,
     ...(options.agentID === undefined ? {} : { agentID: options.agentID }),
+    requestId: options.toolUseID,
   };
 }
 
