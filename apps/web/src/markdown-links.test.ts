@@ -12,6 +12,12 @@ describe("normalizeMarkdownLinkDestination", () => {
       resolveMarkdownFileLinkTarget("apps/web/src/routes/\\(chat\\)/\\[id\\].tsx", "/repo"),
     ).toBe("/repo/apps/web/src/routes/(chat)/[id].tsx");
   });
+
+  it("preserves windows path separators before punctuation", () => {
+    expect(resolveMarkdownFileLinkTarget(String.raw`C:\src\(group)\page.tsx`)).toBe(
+      String.raw`C:\src\(group)\page.tsx`,
+    );
+  });
 });
 
 describe("rewriteMarkdownFileUriHref", () => {
@@ -74,6 +80,16 @@ describe("resolveMarkdownFileLinkTarget", () => {
         "/repo/project",
       ),
     ).toBe("/repo/project/apps/web/src/routes/(chat)/[threadId].tsx");
+  });
+
+  it("preserves support for conservative extensionless relative file paths", () => {
+    expect(resolveMarkdownFileLinkTarget("scripts/release", "/repo/project")).toBe(
+      "/repo/project/scripts/release",
+    );
+  });
+
+  it("does not treat ambiguous encoded relative web links as file paths", () => {
+    expect(resolveMarkdownFileLinkTarget("docs/user%20guide", "/repo/project")).toBeNull();
   });
 
   it("maps #L line anchors to editor line suffixes", () => {
