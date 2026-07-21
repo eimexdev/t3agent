@@ -9,13 +9,35 @@
 import {
   THREAD_AGENT_TERMINAL_STATUSES,
   THREAD_AGENTS_ACTIVITY_KIND,
-  ThreadAgentsActivityPayload,
+  ThreadAgentSnapshot,
   type OrchestrationThreadActivity,
-  type ThreadAgentSnapshot,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
-const decodePayload = Schema.decodeUnknownOption(ThreadAgentsActivityPayload);
+const decodeAgent = Schema.decodeUnknownOption(ThreadAgentSnapshot);
+
+/**
+ * Rows decode per-element: one malformed or forward-incompatible agent entry
+ * is skipped without discarding the rest of the roster. Only a payload with
+ * no decodable agents at all falls through to an older snapshot.
+ */
+function decodeRoster(payload: unknown): ReadonlyArray<ThreadAgentSnapshot> | undefined {
+  if (payload === null || typeof payload !== "object") {
+    return undefined;
+  }
+  const agents = (payload as { agents?: unknown }).agents;
+  if (!Array.isArray(agents)) {
+    return undefined;
+  }
+  const decoded: ThreadAgentSnapshot[] = [];
+  for (const candidate of agents) {
+    const result = decodeAgent(candidate);
+    if (result._tag === "Some") {
+      decoded.push(result.value);
+    }
+  }
+  return agents.length === 0 || decoded.length > 0 ? decoded : undefined;
+}
 
 export function deriveLatestAgentSnapshot(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
@@ -25,9 +47,9 @@ export function deriveLatestAgentSnapshot(
     if (!activity || activity.kind !== THREAD_AGENTS_ACTIVITY_KIND) {
       continue;
     }
-    const decoded = decodePayload(activity.payload);
-    if (decoded._tag === "Some") {
-      return decoded.value.agents;
+    const roster = decodeRoster(activity.payload);
+    if (roster !== undefined) {
+      return roster;
     }
   }
   return [];
@@ -60,9 +82,15 @@ export interface AgentPanelState {
   readonly totalTokens: number;
 }
 
+function isSettledAgentStatus(status: ThreadAgentSnapshot["status"]): boolean {
+  // idle counts as settled for phase/summary purposes: the run finished even
+  // though the agent identity could be resumed.
+  return status === "idle" || isTerminalAgentStatus(status);
+}
+
 function phaseStatus(agents: ReadonlyArray<ThreadAgentSnapshot>): "pending" | "running" | "done" {
   if (agents.length === 0) return "pending";
-  if (agents.every((agent) => isTerminalAgentStatus(agent.status))) return "done";
+  if (agents.every((agent) => isSettledAgentStatus(agent.status))) return "done";
   return "running";
 }
 
@@ -119,7 +147,7 @@ export function deriveAgentPanelState(agents: ReadonlyArray<ThreadAgentSnapshot>
   for (const agent of agents) {
     if (agent.status === "running" || agent.status === "pending") runningCount += 1;
     else if (agent.status === "waiting") waitingCount += 1;
-    else if (isTerminalAgentStatus(agent.status)) settledCount += 1;
+    else settledCount += 1; // idle + terminal
     totalTokens += agent.usage?.totalTokens ?? 0;
   }
 

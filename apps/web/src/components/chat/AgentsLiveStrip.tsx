@@ -48,8 +48,13 @@ const AgentsLiveStrip = memo(function AgentsLiveStrip({
       ) : null}
       {runningPhase ? (
         <span className="truncate text-muted-foreground">
-          {runningPhase.title} · {runningPhase.agents.filter((a) => a.status === "running").length}{" "}
-          running
+          {runningPhase.title} ·{" "}
+          {
+            runningPhase.agents.filter(
+              (a) => a.status === "running" || a.status === "pending" || a.status === "waiting",
+            ).length
+          }{" "}
+          active
         </span>
       ) : null}
       <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">

@@ -554,6 +554,14 @@ function mapCollabAgentActivity(
           payload: { taskId: base.payload.taskId, status: "idle", timelineBypass: true },
         },
       ];
+    case "subAgent/interrupted":
+      return [
+        {
+          ...base,
+          type: "task.completed",
+          payload: { taskId: base.payload.taskId, status: "stopped", timelineBypass: true },
+        },
+      ];
     case "thread/status/changed": {
       const payload = readPayload(
         EffectCodexSchema.V2ThreadStatusChangedNotification,
@@ -576,6 +584,21 @@ function mapCollabAgentActivity(
           },
         ];
       }
+      if (status.type === "systemError") {
+        return [
+          {
+            ...base,
+            type: "task.completed",
+            payload: {
+              taskId: base.payload.taskId,
+              status: "failed",
+              summary: "Codex reported a system error for this agent",
+              timelineBypass: true,
+            },
+          },
+        ];
+      }
+      // notLoaded/idle are covered by turn lifecycle events.
       return [];
     }
     case "thread/closed":
@@ -600,7 +623,9 @@ function mapCollabAgentActivity(
           payload: {
             ...base.payload,
             usage: {
-              totalTokens: usage.usedTokens,
+              // Cumulative across the child's activations; `usedTokens` is
+              // only the latest context window and can shrink on follow-ups.
+              totalTokens: usage.totalProcessedTokens ?? usage.usedTokens,
               ...(usage.inputTokens !== undefined ? { inputTokens: usage.inputTokens } : {}),
               ...(usage.cachedInputTokens !== undefined
                 ? { cachedInputTokens: usage.cachedInputTokens }

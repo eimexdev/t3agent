@@ -12,6 +12,7 @@ import { cn } from "~/lib/utils";
 import { Badge } from "./ui/badge";
 import { ScrollArea } from "./ui/scroll-area";
 import { formatDuration } from "../session-logic";
+import { parseTimestampDate } from "../timestampFormat";
 
 interface AgentsPanelProps {
   agents: ReadonlyArray<ThreadAgentSnapshot>;
@@ -57,19 +58,18 @@ function AgentStatusDot({ status }: { status: ThreadAgentSnapshot["status"] }) {
 function AgentElapsed({ agent }: { agent: ThreadAgentSnapshot }) {
   const textRef = useRef<HTMLSpanElement>(null);
   const settled = isTerminalAgentStatus(agent.status) || agent.status === "idle";
-  const startMs = Date.parse(agent.firstStartedAt);
-  const endMs = agent.endedAt
-    ? Date.parse(agent.endedAt)
-    : settled
-      ? Date.parse(agent.lastActivityAt)
-      : null;
-  const initialText = formatDuration((endMs ?? Date.now()) - startMs);
+  const startMs = parseTimestampDate(agent.firstStartedAt)?.getTime() ?? null;
+  const endMs =
+    (agent.endedAt ? parseTimestampDate(agent.endedAt)?.getTime() : null) ??
+    (settled ? (parseTimestampDate(agent.lastActivityAt)?.getTime() ?? null) : null);
+  const initialText =
+    startMs === null ? null : formatDuration(Math.max(0, (endMs ?? Date.now()) - startMs));
 
   useEffect(() => {
-    if (endMs !== null) return;
+    if (startMs === null || endMs !== null) return;
     const update = () => {
       if (textRef.current) {
-        textRef.current.textContent = formatDuration(Date.now() - startMs);
+        textRef.current.textContent = formatDuration(Math.max(0, Date.now() - startMs));
       }
     };
     update();
@@ -77,6 +77,9 @@ function AgentElapsed({ agent }: { agent: ThreadAgentSnapshot }) {
     return () => clearInterval(id);
   }, [startMs, endMs]);
 
+  if (initialText === null) {
+    return null;
+  }
   return (
     <span ref={textRef} className="font-mono text-[11px] tabular-nums text-muted-foreground">
       {initialText}
@@ -183,8 +186,12 @@ function AgentCard({ agent }: { agent: ThreadAgentSnapshot }) {
 }
 
 function PhaseHeader({ phase }: { phase: AgentPanelPhase }) {
-  const runningCount = phase.agents.filter((agent) => agent.status === "running").length;
-  const doneCount = phase.agents.filter((agent) => isTerminalAgentStatus(agent.status)).length;
+  // "active" (not just status==="running"): a phase whose agents are all
+  // pending/waiting is still in progress and must not read "0 running".
+  const doneCount = phase.agents.filter(
+    (agent) => agent.status === "idle" || isTerminalAgentStatus(agent.status),
+  ).length;
+  const activeCount = phase.agents.length - doneCount;
   return (
     <div className="flex items-center gap-2 px-1 pt-2 pb-1 text-[10px] text-muted-foreground">
       <span
@@ -200,7 +207,7 @@ function PhaseHeader({ phase }: { phase: AgentPanelPhase }) {
       </span>
       {phase.status === "running" ? (
         <span>
-          {runningCount} running{doneCount > 0 ? ` · ${doneCount} done` : ""}
+          {activeCount} active{doneCount > 0 ? ` · ${doneCount} done` : ""}
         </span>
       ) : phase.status === "pending" ? (
         <span>pending</span>

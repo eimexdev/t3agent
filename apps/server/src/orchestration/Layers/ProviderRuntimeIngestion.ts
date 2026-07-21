@@ -51,21 +51,29 @@ const providerTaskKey = (threadId: ThreadId, taskId: string) => `${threadId}:${t
 const AGENT_SETTLED_RETENTION_LIMIT = 50;
 const AGENT_USAGE_MATERIAL_STEP = 25_000;
 
+// Fields must satisfy the contract's NonNegativeInt or the persisted roster
+// row becomes undecodable on the client.
+function usageCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
 function taskUsage(value: unknown): ThreadAgentUsage | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
   const usage = value as Record<string, unknown>;
-  if (typeof usage.totalTokens !== "number" || usage.totalTokens < 0) return undefined;
+  const totalTokens = usageCount(usage.totalTokens);
+  if (totalTokens === undefined) return undefined;
+  const inputTokens = usageCount(usage.inputTokens);
+  const cachedInputTokens = usageCount(usage.cachedInputTokens);
+  const outputTokens = usageCount(usage.outputTokens);
+  const reasoningOutputTokens = usageCount(usage.reasoningOutputTokens);
+  const toolUses = usageCount(usage.toolUses);
   return {
-    totalTokens: usage.totalTokens,
-    ...(typeof usage.inputTokens === "number" ? { inputTokens: usage.inputTokens } : {}),
-    ...(typeof usage.cachedInputTokens === "number"
-      ? { cachedInputTokens: usage.cachedInputTokens }
-      : {}),
-    ...(typeof usage.outputTokens === "number" ? { outputTokens: usage.outputTokens } : {}),
-    ...(typeof usage.reasoningOutputTokens === "number"
-      ? { reasoningOutputTokens: usage.reasoningOutputTokens }
-      : {}),
-    ...(typeof usage.toolUses === "number" ? { toolUses: usage.toolUses } : {}),
+    totalTokens,
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(reasoningOutputTokens !== undefined ? { reasoningOutputTokens } : {}),
+    ...(toolUses !== undefined ? { toolUses } : {}),
   };
 }
 
@@ -192,14 +200,16 @@ export function foldTaskAgentEvent(
     ...((payload.outputFile ?? previous?.outputFile)
       ? { outputFile: payload.outputFile ?? previous?.outputFile }
       : {}),
+    // A re-activated agent starts a fresh run: prior result/error text would
+    // read as the live run's output, so clear both unless this event sets them.
     ...(event.type === "task.completed" && event.payload.summary
       ? { resultSummary: event.payload.summary }
-      : previous?.resultSummary
+      : !reactivated && previous?.resultSummary
         ? { resultSummary: previous.resultSummary }
         : {}),
     ...(event.type === "task.updated" && event.payload.errorMessage
       ? { errorMessage: event.payload.errorMessage }
-      : previous?.errorMessage
+      : !reactivated && previous?.errorMessage
         ? { errorMessage: previous.errorMessage }
         : {}),
     recentActivity,
@@ -1561,12 +1571,14 @@ const make = Effect.gen(function* () {
       if (agentRosterMaterial) {
         pruneSettledAgents(threadAgents);
         const roster = Array.from(threadAgents.values());
-        const running = roster.filter((agent) => agent.status === "running").length;
-        const settled = roster.filter(
-          (agent) => agent.status === "idle" || THREAD_AGENT_TERMINAL_STATUSES.has(agent.status),
+        // "active" covers everything non-settled (running/pending/waiting) so a
+        // roster of blocked agents doesn't read as "0 agents settled".
+        const active = roster.filter(
+          (agent) => agent.status !== "idle" && !THREAD_AGENT_TERMINAL_STATUSES.has(agent.status),
         ).length;
-        const count = running > 0 ? running : settled;
-        const summary = `${count} ${count === 1 ? "agent" : "agents"} ${running > 0 ? "running" : "settled"}`;
+        const settled = roster.length - active;
+        const count = active > 0 ? active : settled;
+        const summary = `${count} ${count === 1 ? "agent" : "agents"} ${active > 0 ? "active" : "settled"}`;
         const snapshotUuid = yield* crypto.randomUUIDv4;
         const activity: OrchestrationThreadActivity = {
           id: EventId.make(`${event.eventId}:agent-snapshot:${snapshotUuid}`),
@@ -1577,13 +1589,26 @@ const make = Effect.gen(function* () {
           payload: { agents: roster },
           turnId: toTurnId(event.turnId) ?? null,
         };
-        yield* orchestrationEngine.dispatch({
-          type: "thread.activity.append",
-          commandId: yield* providerCommandId(event, "agent-snapshot-append"),
-          threadId: thread.id,
-          activity,
-          createdAt: activity.createdAt,
-        });
+        // The reducer map was already mutated; if the append fails, drop the
+        // hydration marker so the next event re-hydrates from the last
+        // *persisted* snapshot and re-detects the missed material change —
+        // otherwise the roster silently stays stale until the next transition.
+        yield* orchestrationEngine
+          .dispatch({
+            type: "thread.activity.append",
+            commandId: yield* providerCommandId(event, "agent-snapshot-append"),
+            threadId: thread.id,
+            activity,
+            createdAt: activity.createdAt,
+          })
+          .pipe(
+            Effect.tapError(() =>
+              Effect.sync(() => {
+                hydratedAgentThreads.delete(thread.id);
+                agentsByThread.delete(thread.id);
+              }),
+            ),
+          );
         agentSnapshotDispatchCount += 1;
         yield* Effect.logDebug("provider agent snapshot appended", {
           threadId: thread.id,
