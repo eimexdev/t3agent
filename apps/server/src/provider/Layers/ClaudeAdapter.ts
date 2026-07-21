@@ -2851,6 +2851,23 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
                 type: "task.started",
                 payload: childPayload,
               });
+              // The CLI emits state:"start" both when queueing (queuedAt only)
+              // and when execution begins (startedAt set). A queued agent must
+              // not show as running in the panel.
+              if (readNonNegativeInteger(item.startedAt) === undefined) {
+                const pendingStamp = yield* makeEventStamp();
+                yield* offerRuntimeEvent({
+                  ...base,
+                  eventId: pendingStamp.eventId,
+                  createdAt: pendingStamp.createdAt,
+                  type: "task.updated",
+                  payload: {
+                    taskId: childPayload.taskId,
+                    status: "pending",
+                    timelineBypass: true,
+                  },
+                });
+              }
             } else if (state === "done" || state === "error") {
               yield* offerRuntimeEvent({
                 ...base,

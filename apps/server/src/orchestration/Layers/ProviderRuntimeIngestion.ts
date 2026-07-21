@@ -235,6 +235,8 @@ export function foldTaskAgentEvent(
     Math.floor((next.usage?.totalTokens ?? 0) / AGENT_USAGE_MATERIAL_STEP);
   return (
     previous.status !== next.status ||
+    previous.kind !== next.kind ||
+    previous.parentAgentId !== next.parentAgentId ||
     previous.name !== next.name ||
     previous.model !== next.model ||
     previous.phaseIndex !== next.phaseIndex ||
@@ -1553,22 +1555,40 @@ const make = Effect.gen(function* () {
           return loadedThreadDetail;
         });
 
-      // Hydrate lazily, only when an event actually touches the roster —
-      // never on ordinary traffic (message deltas would otherwise trigger a
-      // full thread-detail load per thread after every restart, serialized
-      // through the ingestion worker).
+      // Hydrate lazily: on agent-touching events, or amortized once ordinary
+      // traffic has appended enough activities that a persisted snapshot
+      // could be approaching the 500-row cap. Never on every first event —
+      // message deltas after a restart must not each trigger a full
+      // thread-detail load through the serialized ingestion worker.
       const eventTouchesAgents = isTaskAgentEvent(event) || event.type === "session.exited";
-      if (eventTouchesAgents && !hydratedAgentThreads.has(thread.id)) {
-        // Hydration source is the 500-capped activities projection — the same
-        // list clients derive from. While agents exist, the refresh counter
-        // below re-publishes the roster every ~400 activities so the latest
-        // snapshot cannot age past the cap; an empty result here means the
-        // thread genuinely has no roster in the visible timeline era.
+      const unhydratedActivityPressure =
+        !hydratedAgentThreads.has(thread.id) &&
+        (activitiesSinceAgentSnapshot.get(thread.id) ?? 0) >= AGENT_SNAPSHOT_REFRESH_ACTIVITY_COUNT;
+      if (
+        (eventTouchesAgents || unhydratedActivityPressure) &&
+        !hydratedAgentThreads.has(thread.id)
+      ) {
         const detail = yield* getLoadedThreadDetail();
         const activityList = detail?.activities ?? [];
-        const latestSnapshotIndex = activityList.findLastIndex(
-          (activity) => activity.kind === THREAD_AGENTS_ACTIVITY_KIND,
-        );
+        // Select the snapshot the same way the client does — highest revision
+        // wins, list position breaks ties — so the reducer never resumes from
+        // a stale lower-revision roster that landed later in the list.
+        let latestSnapshotIndex = -1;
+        let bestRevision = -1;
+        for (let index = 0; index < activityList.length; index += 1) {
+          const activity = activityList[index];
+          if (!activity || activity.kind !== THREAD_AGENTS_ACTIVITY_KIND) continue;
+          const revision =
+            activity.payload !== null &&
+            typeof activity.payload === "object" &&
+            typeof (activity.payload as { revision?: unknown }).revision === "number"
+              ? ((activity.payload as { revision: number }).revision ?? -1)
+              : -1;
+          if (revision >= bestRevision) {
+            bestRevision = revision;
+            latestSnapshotIndex = index;
+          }
+        }
         const latestSnapshot =
           latestSnapshotIndex >= 0 ? activityList[latestSnapshotIndex] : undefined;
         // Seed the refresh counter with the snapshot's actual age in the
@@ -1579,13 +1599,13 @@ const make = Effect.gen(function* () {
           thread.id,
           latestSnapshotIndex >= 0 ? activityList.length - 1 - latestSnapshotIndex : 0,
         );
+        if (bestRevision >= 0) {
+          agentRosterRevision.set(thread.id, bestRevision);
+        }
         const payload =
           latestSnapshot?.payload !== null && typeof latestSnapshot?.payload === "object"
-            ? (latestSnapshot.payload as { agents?: unknown; revision?: unknown })
+            ? (latestSnapshot.payload as { agents?: unknown })
             : undefined;
-        if (typeof payload?.revision === "number" && Number.isInteger(payload.revision)) {
-          agentRosterRevision.set(thread.id, payload.revision);
-        }
         const agents = new Map<string, ThreadAgentSnapshot>();
         if (Array.isArray(payload?.agents)) {
           for (const candidate of payload.agents) {
@@ -2160,7 +2180,14 @@ const make = Effect.gen(function* () {
       }
 
       const activities = runtimeEventToActivities(event, taskTitle);
-      if (activities.length > 0 && agentsByThread.get(thread.id)?.size) {
+      // Count for hydrated threads with a live roster AND for not-yet-hydrated
+      // threads: the counter is what triggers amortized hydration under
+      // ordinary traffic after a restart, so a persisted snapshot gets
+      // refreshed before it can age out of the capped projection.
+      if (
+        activities.length > 0 &&
+        (!hydratedAgentThreads.has(thread.id) || agentsByThread.get(thread.id)?.size)
+      ) {
         activitiesSinceAgentSnapshot.set(
           thread.id,
           (activitiesSinceAgentSnapshot.get(thread.id) ?? 0) + activities.length,
