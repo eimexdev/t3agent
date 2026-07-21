@@ -186,7 +186,11 @@ export function foldTaskAgentEvent(
     ...((lastToolName ?? previous?.lastToolName)
       ? { lastToolName: lastToolName ?? previous?.lastToolName }
       : {}),
-    ...((nextUsage ?? previous?.usage) ? { usage: nextUsage ?? previous?.usage } : {}),
+    // Merge field-wise: a payload carrying only totalTokens (e.g. a terminal
+    // Claude task_notification) must not wipe previously known breakdowns.
+    ...(nextUsage || previous?.usage
+      ? { usage: { ...previous?.usage, ...nextUsage } as ThreadAgentUsage }
+      : {}),
     firstStartedAt: previous?.firstStartedAt ?? event.createdAt,
     lastActivityAt: event.createdAt,
     ...(!reactivated && (explicitEndTime ?? (terminal ? event.createdAt : previous?.endedAt))
