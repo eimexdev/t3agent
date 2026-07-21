@@ -2805,14 +2805,18 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
             const item = entry as Record<string, unknown>;
             if (item.type !== "workflow_agent") continue;
-            const agentId = readString(item.agentId);
+            // `index` is the stable identity: queued/blocked/pre-spawn-error
+            // events carry no agentId yet, and retries keep the index while
+            // minting a new agentId per attempt. Keying on agentId would drop
+            // queued agents and duplicate cards across retries.
+            const index = readNonNegativeInteger(item.index);
             const label = readString(item.label);
-            if (!agentId || !label) continue;
+            if (index === undefined || !label) continue;
             const state = readString(item.state);
             const childUsage = readNonNegativeInteger(item.tokens);
             const childToolUses = readNonNegativeInteger(item.toolCalls);
             const childPayload = {
-              taskId: RuntimeTaskId.make(agentId),
+              taskId: RuntimeTaskId.make(`${message.task_id}:wf:${index}`),
               description: label,
               name: label,
               taskType: "workflow_agent",

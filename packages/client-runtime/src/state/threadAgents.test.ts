@@ -51,13 +51,31 @@ describe("deriveLatestAgentSnapshot", () => {
     expect(agents[0]?.resultSummary).toBe("Hi! How can I help you today?");
   });
 
-  it("skips rows whose payload fails to decode instead of failing", () => {
+  it("treats the newest agents array as authoritative even when its rows fail to decode", () => {
+    // Falling back to the older roster would resurrect a stale "running"
+    // snapshot; an undecodable newest roster must yield an empty panel.
     const agents = deriveLatestAgentSnapshot([
-      activity("agent.snapshot", { agents: [persistedAgent] }, 1),
-      activity("agent.snapshot", { agents: [{ bogus: true }] }, 2),
+      activity("agent.snapshot", { agents: [persistedAgent], revision: 1 }, 1),
+      activity("agent.snapshot", { agents: [{ bogus: true }], revision: 2 }, 2),
+    ]);
+    expect(agents).toHaveLength(0);
+  });
+
+  it("skips bad rows within a roster while keeping decodable ones", () => {
+    const agents = deriveLatestAgentSnapshot([
+      activity("agent.snapshot", { agents: [persistedAgent, { bogus: true }], revision: 1 }, 1),
     ]);
     expect(agents).toHaveLength(1);
     expect(agents[0]?.agentId).toBe(persistedAgent.agentId);
+  });
+
+  it("selects the highest revision regardless of list position", () => {
+    const older = { ...persistedAgent, status: "running" };
+    const agents = deriveLatestAgentSnapshot([
+      activity("agent.snapshot", { agents: [persistedAgent], revision: 5 }, 1),
+      activity("agent.snapshot", { agents: [older], revision: 4 }, 2),
+    ]);
+    expect(agents[0]?.status).toBe("completed");
   });
 
   it("returns an empty roster when no snapshot activity exists", () => {

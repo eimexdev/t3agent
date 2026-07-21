@@ -141,7 +141,12 @@ export function foldTaskAgentEvent(
   const summary = "summary" in payload ? payload.summary : undefined;
   const nextUsage = "usage" in payload ? taskUsage(payload.usage) : undefined;
   const lastToolName = "lastToolName" in payload ? payload.lastToolName : undefined;
-  const currentActivity = summary ?? lastToolName ?? previous?.currentActivity;
+  const settledNow = status === "idle" || THREAD_AGENT_TERMINAL_STATUSES.has(status);
+  // A settled agent's card shows its result/error, not a stale in-flight
+  // activity line ("Reading files…" on a failed card).
+  const currentActivity = settledNow
+    ? undefined
+    : (summary ?? lastToolName ?? previous?.currentActivity);
   const activityChanged =
     (summary !== undefined && summary !== previous?.currentActivity) ||
     (lastToolName !== undefined && lastToolName !== previous?.lastToolName);
@@ -154,15 +159,23 @@ export function foldTaskAgentEvent(
   const wasSettled =
     previous !== undefined &&
     (previous.status === "idle" || THREAD_AGENT_TERMINAL_STATUSES.has(previous.status));
-  const reactivated = wasSettled && status === "running";
+  // Any non-settled status counts as a fresh activation — an idle Codex agent
+  // resumed via a waiting approval still increments, not just idle→running.
+  const reactivated =
+    wasSettled && status !== "idle" && !THREAD_AGENT_TERMINAL_STATUSES.has(status);
   const explicitEndTime = event.type === "task.updated" ? event.payload.endTime : undefined;
   const terminal = THREAD_AGENT_TERMINAL_STATUSES.has(status);
+  // Re-derive kind whenever this event carries a taskType/parent — a child
+  // registered from an early notification (before its parent linkage arrived)
+  // must not stay pinned to a first-guess "other".
+  const eventKind = taskKind(
+    "taskType" in payload ? payload.taskType : undefined,
+    payload.parentTaskId,
+  );
   const next: ThreadAgentSnapshot = {
     agentId: payload.taskId,
     provider: event.provider,
-    kind:
-      previous?.kind ??
-      taskKind("taskType" in payload ? payload.taskType : undefined, payload.parentTaskId),
+    kind: eventKind !== "other" ? eventKind : (previous?.kind ?? eventKind),
     name: payload.name ?? description ?? payload.workflowName ?? previous?.name ?? payload.taskId,
     ...((payload.agentType ?? previous?.agentType)
       ? { agentType: payload.agentType ?? previous?.agentType }
@@ -240,8 +253,11 @@ export function foldTaskAgentEvent(
 }
 
 export function pruneSettledAgents(agents: Map<string, ThreadAgentSnapshot>): void {
+  // Idle agents are resumable identities, not history — only terminal agents
+  // compete for the retention pool, so re-activating an old idle Codex child
+  // never loses its usage/activation record to pruning.
   const settled = Array.from(agents.values())
-    .filter((agent) => agent.status === "idle" || THREAD_AGENT_TERMINAL_STATUSES.has(agent.status))
+    .filter((agent) => THREAD_AGENT_TERMINAL_STATUSES.has(agent.status))
     .sort((left, right) => left.lastActivityAt.localeCompare(right.lastActivityAt));
   for (const agent of settled.slice(
     0,
@@ -920,6 +936,10 @@ const make = Effect.gen(function* () {
   // client's latest-wins scan) always finds one while agents exist.
   const activitiesSinceAgentSnapshot = new Map<ThreadId, number>();
   const AGENT_SNAPSHOT_REFRESH_ACTIVITY_COUNT = 400;
+  // Monotonic per-thread roster revision. Snapshot activities carry it so the
+  // client picks the newest roster deterministically even when two appends
+  // share a createdAt millisecond. Seeded from the hydrated snapshot.
+  const agentRosterRevision = new Map<ThreadId, number>();
   let agentSnapshotDispatchCount = 0;
   const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
     crypto.randomUUIDv4.pipe(
@@ -1533,7 +1553,12 @@ const make = Effect.gen(function* () {
           return loadedThreadDetail;
         });
 
-      if (!hydratedAgentThreads.has(thread.id)) {
+      // Hydrate lazily, only when an event actually touches the roster —
+      // never on ordinary traffic (message deltas would otherwise trigger a
+      // full thread-detail load per thread after every restart, serialized
+      // through the ingestion worker).
+      const eventTouchesAgents = isTaskAgentEvent(event) || event.type === "session.exited";
+      if (eventTouchesAgents && !hydratedAgentThreads.has(thread.id)) {
         // Hydration source is the 500-capped activities projection — the same
         // list clients derive from. While agents exist, the refresh counter
         // below re-publishes the roster every ~400 activities so the latest
@@ -1556,8 +1581,11 @@ const make = Effect.gen(function* () {
         );
         const payload =
           latestSnapshot?.payload !== null && typeof latestSnapshot?.payload === "object"
-            ? (latestSnapshot.payload as { agents?: unknown })
+            ? (latestSnapshot.payload as { agents?: unknown; revision?: unknown })
             : undefined;
+        if (typeof payload?.revision === "number" && Number.isInteger(payload.revision)) {
+          agentRosterRevision.set(thread.id, payload.revision);
+        }
         const agents = new Map<string, ThreadAgentSnapshot>();
         if (Array.isArray(payload?.agents)) {
           for (const candidate of payload.agents) {
@@ -1615,6 +1643,7 @@ const make = Effect.gen(function* () {
         const settled = roster.length - active;
         const count = active > 0 ? active : settled;
         const summary = `${count} ${count === 1 ? "agent" : "agents"} ${active > 0 ? "active" : "settled"}`;
+        const nextRevision = (agentRosterRevision.get(thread.id) ?? 0) + 1;
         const snapshotUuid = yield* crypto.randomUUIDv4;
         const activity: OrchestrationThreadActivity = {
           id: EventId.make(`${event.eventId}:agent-snapshot:${snapshotUuid}`),
@@ -1622,7 +1651,7 @@ const make = Effect.gen(function* () {
           tone: "info",
           kind: THREAD_AGENTS_ACTIVITY_KIND,
           summary,
-          payload: { agents: roster },
+          payload: { agents: roster, revision: nextRevision },
           turnId: toTurnId(event.turnId) ?? null,
         };
         // The in-memory roster is authoritative (already folded); if the
@@ -1646,6 +1675,7 @@ const make = Effect.gen(function* () {
               Effect.gen(function* () {
                 pendingRosterRedispatch.delete(thread.id);
                 activitiesSinceAgentSnapshot.set(thread.id, 0);
+                agentRosterRevision.set(thread.id, nextRevision);
                 agentSnapshotDispatchCount += 1;
                 yield* Effect.logDebug("provider agent snapshot appended", {
                   threadId: thread.id,
@@ -1673,6 +1703,7 @@ const make = Effect.gen(function* () {
         agentsByThread.delete(thread.id);
         hydratedAgentThreads.delete(thread.id);
         activitiesSinceAgentSnapshot.delete(thread.id);
+        agentRosterRevision.delete(thread.id);
       }
 
       const now = event.createdAt;

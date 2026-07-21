@@ -134,5 +134,8 @@ export const THREAD_AGENTS_ACTIVITY_KIND = "agent.snapshot";
  */
 export const ThreadAgentsActivityPayload = Schema.Struct({
   agents: Schema.Array(ThreadAgentSnapshot),
+  // Monotonic per-thread revision: latest-wins selection uses the highest
+  // revision (not list position), making same-timestamp appends deterministic.
+  revision: Schema.optional(NonNegativeInt),
 });
 export type ThreadAgentsActivityPayload = typeof ThreadAgentsActivityPayload.Type;

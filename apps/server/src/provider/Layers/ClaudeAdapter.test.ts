@@ -1755,6 +1755,7 @@ describe("ClaudeAdapterLive", () => {
           { type: "workflow_phase", index: 0, title: "Inspect" },
           {
             type: "workflow_agent",
+            index: 1,
             label: "Reviewer",
             phaseIndex: 0,
             phaseTitle: "Inspect",
@@ -1805,7 +1806,7 @@ describe("ClaudeAdapterLive", () => {
         assert.deepEqual(phasePatch.payload.phases, [{ index: 0, title: "Inspect" }]);
       }
       const child = runtimeEvents.find(
-        (event) => event.type === "task.started" && event.payload.taskId === "agent-1",
+        (event) => event.type === "task.started" && event.payload.taskId === "workflow-1:wf:1",
       );
       assert.equal(child?.type, "task.started");
       if (child?.type === "task.started") {

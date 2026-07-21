@@ -16,43 +16,64 @@ import * as Schema from "effect/Schema";
 
 const decodeAgent = Schema.decodeUnknownOption(ThreadAgentSnapshot);
 
+interface DecodedRoster {
+  readonly agents: ReadonlyArray<ThreadAgentSnapshot>;
+  readonly revision: number | undefined;
+}
+
 /**
  * Rows decode per-element: one malformed or forward-incompatible agent entry
- * is skipped without discarding the rest of the roster. Only a payload with
- * no decodable agents at all falls through to an older snapshot.
+ * is skipped without discarding the rest of the roster. Any payload with an
+ * `agents` array is authoritative — a roster whose rows all fail to decode
+ * yields an empty panel rather than resurrecting an older (possibly still
+ * "running") snapshot.
  */
-function decodeRoster(payload: unknown): ReadonlyArray<ThreadAgentSnapshot> | undefined {
+function decodeRoster(payload: unknown): DecodedRoster | undefined {
   if (payload === null || typeof payload !== "object") {
     return undefined;
   }
-  const agents = (payload as { agents?: unknown }).agents;
-  if (!Array.isArray(agents)) {
+  const record = payload as { agents?: unknown; revision?: unknown };
+  if (!Array.isArray(record.agents)) {
     return undefined;
   }
   const decoded: ThreadAgentSnapshot[] = [];
-  for (const candidate of agents) {
+  for (const candidate of record.agents) {
     const result = decodeAgent(candidate);
     if (result._tag === "Some") {
       decoded.push(result.value);
     }
   }
-  return agents.length === 0 || decoded.length > 0 ? decoded : undefined;
+  return {
+    agents: decoded,
+    revision:
+      typeof record.revision === "number" && Number.isInteger(record.revision)
+        ? record.revision
+        : undefined,
+  };
 }
 
 export function deriveLatestAgentSnapshot(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): ReadonlyArray<ThreadAgentSnapshot> {
-  for (let index = activities.length - 1; index >= 0; index -= 1) {
-    const activity = activities[index];
-    if (!activity || activity.kind !== THREAD_AGENTS_ACTIVITY_KIND) {
+  // Highest revision wins; list order breaks ties (and covers revision-less
+  // rosters from before the field existed). Guards against same-millisecond
+  // appends landing out of order in the capped projection.
+  let best: DecodedRoster | undefined;
+  for (const activity of activities) {
+    if (activity.kind !== THREAD_AGENTS_ACTIVITY_KIND) {
       continue;
     }
     const roster = decodeRoster(activity.payload);
-    if (roster !== undefined) {
-      return roster;
+    if (!roster) {
+      continue;
+    }
+    if (!best || roster.revision === undefined || best.revision === undefined) {
+      best = roster;
+    } else if (roster.revision >= best.revision) {
+      best = roster;
     }
   }
-  return [];
+  return best?.agents ?? [];
 }
 
 export function isTerminalAgentStatus(status: ThreadAgentSnapshot["status"]): boolean {
@@ -140,15 +161,28 @@ export function deriveAgentPanelState(agents: ReadonlyArray<ThreadAgentSnapshot>
     groups.push({ workflow: null, phases: [], rest: direct });
   }
 
+  // Workflow container rows are grouping chrome, not workers: they are
+  // excluded from worker counts, and a container's own usage only counts when
+  // it has no member rows to avoid double-counting the same tokens.
+  const workflowsWithMembers = new Set(
+    agents.flatMap((agent) =>
+      agent.kind !== "workflow" && agent.parentAgentId ? [agent.parentAgentId] : [],
+    ),
+  );
   let runningCount = 0;
   let waitingCount = 0;
   let settledCount = 0;
   let totalTokens = 0;
   for (const agent of agents) {
-    if (agent.status === "running" || agent.status === "pending") runningCount += 1;
-    else if (agent.status === "waiting") waitingCount += 1;
-    else settledCount += 1; // idle + terminal
-    totalTokens += agent.usage?.totalTokens ?? 0;
+    const isContainer = agent.kind === "workflow";
+    if (!isContainer) {
+      if (agent.status === "running" || agent.status === "pending") runningCount += 1;
+      else if (agent.status === "waiting") waitingCount += 1;
+      else settledCount += 1; // idle + terminal
+    }
+    if (!isContainer || !workflowsWithMembers.has(agent.agentId)) {
+      totalTokens += agent.usage?.totalTokens ?? 0;
+    }
   }
 
   return { groups, runningCount, waitingCount, settledCount, totalTokens };

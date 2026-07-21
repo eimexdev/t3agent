@@ -546,7 +546,34 @@ function mapCollabAgentActivity(
   switch (wrapper.method) {
     case "turn/started":
       return [{ ...base, type: "task.started", payload: { ...base.payload } }];
-    case "turn/completed":
+    case "turn/completed": {
+      const payload = readPayload(EffectCodexSchema.V2TurnCompletedNotification, inner.payload);
+      const turnStatus = payload?.turn.status;
+      const errorMessage = payload?.turn.error?.message;
+      if (turnStatus === "failed") {
+        return [
+          {
+            ...base,
+            type: "task.completed",
+            payload: {
+              taskId: base.payload.taskId,
+              status: "failed",
+              ...(errorMessage ? { summary: errorMessage } : {}),
+              timelineBypass: true,
+            },
+          },
+        ];
+      }
+      if (turnStatus === "interrupted") {
+        return [
+          {
+            ...base,
+            type: "task.completed",
+            payload: { taskId: base.payload.taskId, status: "stopped", timelineBypass: true },
+          },
+        ];
+      }
+      // completed (or unparseable payload): the identity is idle-and-resumable.
       return [
         {
           ...base,
@@ -554,6 +581,7 @@ function mapCollabAgentActivity(
           payload: { taskId: base.payload.taskId, status: "idle", timelineBypass: true },
         },
       ];
+    }
     case "subAgent/interrupted":
       return [
         {
@@ -614,8 +642,11 @@ function mapCollabAgentActivity(
         EffectCodexSchema.V2ThreadTokenUsageUpdatedNotification,
         inner.payload,
       );
-      const usage = payload ? normalizeCodexTokenUsage(payload.tokenUsage) : undefined;
-      if (!usage) return [];
+      // All fields from the cumulative `total` breakdown — mixing the
+      // cumulative total with `last` (per-turn) breakdowns would make the
+      // numbers internally inconsistent, and `last` can shrink on follow-ups.
+      const total = payload?.tokenUsage.total;
+      if (!total || total.totalTokens <= 0) return [];
       return [
         {
           ...base,
@@ -623,17 +654,11 @@ function mapCollabAgentActivity(
           payload: {
             ...base.payload,
             usage: {
-              // Cumulative across the child's activations; `usedTokens` is
-              // only the latest context window and can shrink on follow-ups.
-              totalTokens: usage.totalProcessedTokens ?? usage.usedTokens,
-              ...(usage.inputTokens !== undefined ? { inputTokens: usage.inputTokens } : {}),
-              ...(usage.cachedInputTokens !== undefined
-                ? { cachedInputTokens: usage.cachedInputTokens }
-                : {}),
-              ...(usage.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}),
-              ...(usage.reasoningOutputTokens !== undefined
-                ? { reasoningOutputTokens: usage.reasoningOutputTokens }
-                : {}),
+              totalTokens: total.totalTokens,
+              inputTokens: total.inputTokens,
+              cachedInputTokens: total.cachedInputTokens,
+              outputTokens: total.outputTokens,
+              reasoningOutputTokens: total.reasoningOutputTokens,
             },
           },
         },

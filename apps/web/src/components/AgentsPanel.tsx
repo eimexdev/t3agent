@@ -90,13 +90,19 @@ function AgentElapsed({ agent }: { agent: ThreadAgentSnapshot }) {
 function AgentCard({ agent }: { agent: ThreadAgentSnapshot }) {
   const [expanded, setExpanded] = useState(false);
   const settled = isTerminalAgentStatus(agent.status);
+  // Settled cards lead with outcome (error first); live cards with activity.
   const activity =
     agent.status === "waiting"
       ? "Waiting on approval"
-      : (agent.currentActivity ??
-        (agent.lastToolName ? `▸ ${agent.lastToolName}` : null) ??
-        agent.resultSummary ??
-        agent.errorMessage);
+      : settled || agent.status === "idle"
+        ? (agent.errorMessage ??
+          agent.resultSummary ??
+          agent.currentActivity ??
+          (agent.lastToolName ? `▸ ${agent.lastToolName}` : null))
+        : (agent.currentActivity ??
+          (agent.lastToolName ? `▸ ${agent.lastToolName}` : null) ??
+          agent.resultSummary ??
+          agent.errorMessage);
   const hasFeed = agent.recentActivity.length > 0;
 
   return (
