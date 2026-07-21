@@ -1540,8 +1540,19 @@ const make = Effect.gen(function* () {
         // snapshot cannot age past the cap; an empty result here means the
         // thread genuinely has no roster in the visible timeline era.
         const detail = yield* getLoadedThreadDetail();
-        const latestSnapshot = detail?.activities.findLast(
+        const activityList = detail?.activities ?? [];
+        const latestSnapshotIndex = activityList.findLastIndex(
           (activity) => activity.kind === THREAD_AGENTS_ACTIVITY_KIND,
+        );
+        const latestSnapshot =
+          latestSnapshotIndex >= 0 ? activityList[latestSnapshotIndex] : undefined;
+        // Seed the refresh counter with the snapshot's actual age in the
+        // capped projection — after a restart it may already sit hundreds of
+        // rows deep, and starting from zero would let it age out before the
+        // first refresh.
+        activitiesSinceAgentSnapshot.set(
+          thread.id,
+          latestSnapshotIndex >= 0 ? activityList.length - 1 - latestSnapshotIndex : 0,
         );
         const payload =
           latestSnapshot?.payload !== null && typeof latestSnapshot?.payload === "object"
@@ -1632,10 +1643,15 @@ const make = Effect.gen(function* () {
           })
           .pipe(
             Effect.andThen(
-              Effect.sync(() => {
+              Effect.gen(function* () {
                 pendingRosterRedispatch.delete(thread.id);
                 activitiesSinceAgentSnapshot.set(thread.id, 0);
                 agentSnapshotDispatchCount += 1;
+                yield* Effect.logDebug("provider agent snapshot appended", {
+                  threadId: thread.id,
+                  agentCount: roster.length,
+                  dispatchCount: agentSnapshotDispatchCount,
+                });
               }),
             ),
             Effect.catchCause((cause) =>
@@ -1648,11 +1664,6 @@ const make = Effect.gen(function* () {
                   }),
             ),
           );
-        yield* Effect.logDebug("provider agent snapshot appended", {
-          threadId: thread.id,
-          agentCount: roster.length,
-          dispatchCount: agentSnapshotDispatchCount,
-        });
       }
 
       // Sessions are done producing agent events once they exit; release the
