@@ -2464,7 +2464,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
     }),
   );
 
-  it.effect("only clears the pending turn start that failed", () =>
+  it.effect("only clears pending turn starts targeted by failure signals", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;
       const eventStore = yield* OrchestrationEventStore;
@@ -2474,6 +2474,13 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
         eventStore
           .append(event)
           .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+      const listPendingStarts = () => sql<{ readonly messageId: string }>`
+        SELECT pending_message_id AS "messageId"
+        FROM projection_turns
+        WHERE thread_id = ${threadId}
+          AND turn_id IS NULL
+          AND state = 'pending'
+      `;
 
       yield* appendAndProject({
         type: "thread.turn-start-requested",
@@ -2535,13 +2542,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
         },
       });
 
-      const pendingRows = yield* sql<{ readonly messageId: string }>`
-        SELECT pending_message_id AS "messageId"
-        FROM projection_turns
-        WHERE thread_id = ${threadId}
-          AND turn_id IS NULL
-          AND state = 'pending'
-      `;
+      const pendingRows = yield* listPendingStarts();
       assert.deepEqual(pendingRows, [{ messageId: "message-start-new" }]);
 
       yield* appendAndProject({
@@ -2568,14 +2569,80 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
         },
       });
 
-      const clearedRows = yield* sql<{ readonly messageId: string }>`
-        SELECT pending_message_id AS "messageId"
-        FROM projection_turns
-        WHERE thread_id = ${threadId}
-          AND turn_id IS NULL
-          AND state = 'pending'
-      `;
+      const clearedRows = yield* listPendingStarts();
       assert.deepEqual(clearedRows, []);
+
+      yield* appendAndProject({
+        type: "thread.turn-start-requested",
+        eventId: EventId.make("evt-start-failed-5"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T13:00:00.500Z",
+        commandId: CommandId.make("cmd-start-failed-5"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-start-failed-5"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId: MessageId.make("message-start-terminal"),
+          runtimeMode: "full-access",
+          createdAt: "2026-02-26T13:00:00.500Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.session-set",
+        eventId: EventId.make("evt-start-failed-6"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T13:00:00.600Z",
+        commandId: CommandId.make("cmd-start-failed-6"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-start-failed-6"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "error",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: "Earlier session failed",
+            updatedAt: "2026-02-26T13:00:00.400Z",
+          },
+        },
+      });
+
+      const rowsAfterStaleSession = yield* listPendingStarts();
+      assert.deepEqual(rowsAfterStaleSession, [{ messageId: "message-start-terminal" }]);
+
+      yield* appendAndProject({
+        type: "thread.session-set",
+        eventId: EventId.make("evt-start-failed-7"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-02-26T13:00:00.700Z",
+        commandId: CommandId.make("cmd-start-failed-7"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-start-failed-7"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "stopped",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: "2026-02-26T13:00:00.700Z",
+          },
+        },
+      });
+
+      const rowsAfterCurrentSession = yield* listPendingStarts();
+      assert.deepEqual(rowsAfterCurrentSession, []);
     }),
   );
 });
