@@ -511,6 +511,11 @@ export function HomeScreen(props: HomeScreenProps) {
                 (item.thread.session?.providerInstanceId ?? item.thread.modelSelection.instanceId),
             )?.driver ?? null
         }
+        environmentLabel={
+          Object.keys(props.savedConnectionsById).length > 1
+            ? (props.savedConnectionsById[item.thread.environmentId]?.environmentLabel ?? null)
+            : null
+        }
         onSelectThread={props.onSelectThread}
         onDeleteThread={handleDeleteThread}
         onArchiveThread={props.onArchiveThread}
@@ -537,6 +542,7 @@ export function HomeScreen(props: HomeScreenProps) {
       projectCwdByKey,
       props.onArchiveThread,
       props.onSelectThread,
+      props.savedConnectionsById,
       serverConfigs,
       settlementEnvironmentIds,
     ],

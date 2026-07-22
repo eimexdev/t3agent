@@ -81,6 +81,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly showSettledDivider: boolean;
   readonly project: EnvironmentProject | null;
   readonly providerDriver: string | null;
+  /** Which machine hosts the thread. Null when only one environment is
+      connected — repeating the same label on every row is noise. Mirrors
+      the web sidebar's remote-environment cloud icon, but as text since
+      phones have no hover tooltips. */
+  readonly environmentLabel: string | null;
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
   readonly onDeleteThread: (thread: EnvironmentThreadShell) => void;
   readonly onSettleThread: (thread: EnvironmentThreadShell) => void;
@@ -247,6 +252,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                 <View className="opacity-60">
                   <ProviderIcon provider={props.providerDriver} size={14} />
                 </View>
+              ) : null}
+              {props.environmentLabel ? (
+                <Text className="max-w-40 text-xs text-foreground-tertiary" numberOfLines={1}>
+                  {props.environmentLabel}
+                </Text>
               ) : null}
             </View>
           </View>
