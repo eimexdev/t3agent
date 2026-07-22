@@ -72,12 +72,16 @@ Discord embeds, buttons, emoji status, guild roles, mention rules, forum creatio
 - [ ] Send/cancel/interrupt, busy-message queue/steer behavior, and `/stop` semantics.
 - [ ] Pass every gateway-visible slash command and arguments unchanged; autocomplete is generated from Hermes commands/skills/plugins.
 - [ ] Structured dangerous-command approvals, slash confirmations, clarifications, model picker, reasoning/fast choices, typed fallbacks, authorization, and expiry.
-- [ ] Images and arbitrary file attachments in both directions, including safe caching and visible delivery failures.
+- [ ] Images and arbitrary file attachments in both directions, including safe caching and visible delivery failures. Render Hermes image results inline from structured attachments on web and mobile rather than relying only on Markdown image URLs.
 - [ ] Proactive background/cron delivery into the correct existing or newly created thread, including continuable `attach_to_session` behavior.
 - [ ] `/restart` end to end: drain, reconnect, restore the same thread/session, notify success, and suppress duplicate processing.
 - [ ] Durable turn state and explicit retryable/terminal errors; replay/ack sequence prevents duplicate messages after reconnect.
 - [ ] Show active Hermes profile/provider/model read-only; model changes continue through `/model` initially.
 - [ ] Owner-only authentication for v1.
 - [ ] Exclude Discord-specific rich formatting, guild/role/mention policy, forum mechanics, reactions, and live voice-channel participation.
+- [ ] Treat background-agent support as command and delivery parity in v1; defer a dedicated task visualizer and inherit/adapt the planned upstream T3 Code implementation when useful.
 - [ ] Immediate post-v1: native voice-message record/upload → Hermes transcription; then optional Hermes TTS/audio reply.
 
+### Current T3 image-rendering seam
+
+T3 already has a structured image-attachment contract and preserves attachments on both user and assistant messages. Mobile renders attachments inline for both roles. Web renders user attachments inline and can render image URLs embedded in Markdown, but its assistant timeline currently does not render the structured attachments already present on assistant messages. Hermes outbound images therefore require a small web rendering addition, not a new attachment protocol or storage design.
