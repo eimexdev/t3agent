@@ -183,13 +183,16 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
   const status = resolveSidebarV2Status(thread);
   const shouldRecede = status === "ready" && !isUnread && !props.isActive && !isSelected;
+  // Status hues follow the system-wide convention set by sidebar v1 and the
+  // mobile Live Activity/widgets (amber approval, indigo input, sky working)
+  // so a thread reads the same color everywhere it surfaces.
   const topStatus =
     status === "working"
       ? {
           label: "Working",
           icon: "working" as const,
           className:
-            "animate-sidebar-working-text font-semibold text-blue-600 motion-reduce:animate-none dark:text-blue-400",
+            "animate-sidebar-working-text font-semibold text-sky-600 motion-reduce:animate-none dark:text-sky-400",
         }
       : status === "approval"
         ? {
@@ -201,7 +204,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
           ? {
               label: "Input",
               icon: null,
-              className: "font-semibold text-amber-700 dark:text-amber-300",
+              className: "font-semibold text-indigo-600 dark:text-indigo-300",
             }
           : status === "failed"
             ? {
