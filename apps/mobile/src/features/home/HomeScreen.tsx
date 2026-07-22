@@ -325,9 +325,11 @@ export function HomeScreen(props: HomeScreenProps) {
         ? null
         : (props.projects.find(
             (project) =>
-              scopedProjectKey(project.environmentId, project.id) === props.selectedProjectKey,
+              scopedProjectKey(project.environmentId, project.id) === props.selectedProjectKey &&
+              (props.selectedEnvironmentId === null ||
+                project.environmentId === props.selectedEnvironmentId),
           ) ?? null),
-    [props.projects, props.selectedProjectKey],
+    [props.projects, props.selectedEnvironmentId, props.selectedProjectKey],
   );
   const scopedProjects = useMemo(
     () => (scopedProject === null ? props.projects : [scopedProject]),
