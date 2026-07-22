@@ -19,10 +19,6 @@ import { toastManager } from "./ui/toast";
  * button, while a legitimately slow install is never cut off.
  */
 const UPDATE_PENDING_EXPIRY_MS = 12 * 60_000;
-/** An interrupted RPC usually means systemd stopped the responding server,
-    but can also be a client-side cancellation. Give reconnect a short grace
-    period without stranding the action for the full install timeout. */
-const INTERRUPTED_RESTART_GRACE_MS = 30_000;
 
 function updateFailureMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Server update failed.";
@@ -95,7 +91,7 @@ export function ServerUpdateAction({
     attemptRef.current = attempt;
     const ownsAttempt = () => attemptRef.current === attempt;
     setPending(true);
-    const armExpiry = (delayMs = UPDATE_PENDING_EXPIRY_MS) => {
+    const armExpiry = () => {
       const expiry = setTimeout(() => {
         if (!ownsAttempt()) return;
         expiryRef.current = null;
@@ -107,17 +103,17 @@ export function ServerUpdateAction({
           title: "Server update timed out",
           description: "The update may still be running on the server — check again in a minute.",
         });
-      }, delayMs);
+      }, UPDATE_PENDING_EXPIRY_MS);
       expiryRef.current = expiry;
       return expiry;
     };
     let expiry = armExpiry();
     let restartAccepted = false;
-    const keepPendingForRestart = (expiryMs = UPDATE_PENDING_EXPIRY_MS) => {
+    const keepPendingForRestart = () => {
       restartAccepted = true;
       if (expiryRef.current === expiry) {
         clearTimeout(expiry);
-        expiry = armExpiry(expiryMs);
+        expiry = armExpiry();
       }
     };
     void Promise.resolve()
@@ -130,11 +126,11 @@ export function ServerUpdateAction({
       .then((result) => {
         if (!ownsAttempt()) return;
         if (result._tag === "Failure") {
-          // A successful boot-service restart kills the process serving this
-          // RPC, so interruption is the expected acknowledgement. Keep the UI
-          // pending until the new server version reconnects (or expiry).
+          // An interrupt may be the expected boot-service disconnect, but it
+          // can also be client-side cancellation before restart was accepted.
+          // Release the action quietly; version sync will remove it when a
+          // successful replacement reconnects.
           if (isAtomCommandInterrupted(result)) {
-            keepPendingForRestart(INTERRUPTED_RESTART_GRACE_MS);
             return;
           }
           toastManager.add({

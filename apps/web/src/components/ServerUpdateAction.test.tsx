@@ -108,6 +108,8 @@ async function flushPromises(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 describe("ServerUpdateAction", () => {
@@ -182,18 +184,15 @@ describe("ServerUpdateAction", () => {
     expect(renderAction().props.disabled).toBe(true);
   });
 
-  it("gives an interrupted restart RPC a bounded reconnect grace period", async () => {
+  it("quietly releases the action when a restart RPC is interrupted", async () => {
     testState.updateServer.mockResolvedValue(AsyncResult.failure(Cause.interrupt()));
 
     renderAction().props.onClick?.();
     await flushPromises();
 
-    expect(renderAction().props.disabled).toBe(true);
+    expect(renderAction().props.disabled).not.toBe(true);
     expect(testState.toast).not.toHaveBeenCalledWith(
       expect.objectContaining({ title: "Server update failed" }),
     );
-
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(renderAction().props.disabled).not.toBe(true);
   });
 });
