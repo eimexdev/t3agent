@@ -362,6 +362,40 @@ it.layer(NodeServices.layer)("ServerSelfUpdate.update", (it) => {
     }).pipe(Effect.provide(TestClock.layer())),
   );
 
+  it.effect("reinstalls the same version after a failed preflight", () =>
+    Effect.gen(function* () {
+      let preflightAttempts = 0;
+      const context = yield* makeContext({
+        failWhen: (command) => {
+          if (command !== NODE_PATH) return false;
+          preflightAttempts += 1;
+          return preflightAttempts === 1;
+        },
+      });
+      const versionDir = context.path.join(context.baseDir, "runtime", "versions", "0.0.29");
+      const entryPath = context.path.join(versionDir, "node_modules", "t3", "dist", "bin.mjs");
+      yield* context.fs.makeDirectory(context.path.dirname(entryPath), { recursive: true });
+      yield* context.fs.writeFileString(entryPath, "export {};\n");
+      yield* context.fs.writeFileString(
+        context.path.join(versionDir, ".install-complete"),
+        "0.0.29\n",
+      );
+
+      const firstError = yield* context.service
+        .update({ targetVersion: "0.0.29" })
+        .pipe(Effect.flip);
+      assert.include(firstError.reason, "failed its version check");
+      assert.isFalse(yield* context.fs.exists(versionDir));
+
+      const result = yield* context.service.update({ targetVersion: "0.0.29" });
+      assert.deepEqual(result, { targetVersion: "0.0.29", method: "respawn" });
+      assert.deepEqual(
+        context.commands.map((entry) => entry.command),
+        [NODE_PATH, "npm", NODE_PATH],
+      );
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
   it.effect("installs, preflights, and respawns a foreground server", () =>
     Effect.gen(function* () {
       const context = yield* makeContext();

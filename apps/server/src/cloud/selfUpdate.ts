@@ -242,6 +242,16 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* (option
           ),
         );
       if (preflight.code !== 0) {
+        // A completed npm install can still be unusable under this Node or on
+        // this machine. Remove its sentinel and tree so a retry of the same
+        // version performs a clean install instead of reusing a known-bad one.
+        yield* fs
+          .remove(runtimePaths.versionDir, { recursive: true, force: true })
+          .pipe(
+            Effect.mapError((cause) =>
+              failWith(`Could not remove the failed t3@${targetVersion} installation.`, cause),
+            ),
+          );
         return yield* failWith(
           `The installed t3@${targetVersion} failed its version check (exit code ${String(preflight.code)}).`,
         );
