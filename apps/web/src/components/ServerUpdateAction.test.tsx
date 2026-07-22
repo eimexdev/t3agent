@@ -182,7 +182,7 @@ describe("ServerUpdateAction", () => {
     expect(renderAction().props.disabled).toBe(true);
   });
 
-  it("treats an interrupted restart RPC as pending until reconnect or expiry", async () => {
+  it("gives an interrupted restart RPC a bounded reconnect grace period", async () => {
     testState.updateServer.mockResolvedValue(AsyncResult.failure(Cause.interrupt()));
 
     renderAction().props.onClick?.();
@@ -192,5 +192,8 @@ describe("ServerUpdateAction", () => {
     expect(testState.toast).not.toHaveBeenCalledWith(
       expect.objectContaining({ title: "Server update failed" }),
     );
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(renderAction().props.disabled).not.toBe(true);
   });
 });

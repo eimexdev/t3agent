@@ -19,6 +19,10 @@ import { toastManager } from "./ui/toast";
  * button, while a legitimately slow install is never cut off.
  */
 const UPDATE_PENDING_EXPIRY_MS = 12 * 60_000;
+/** An interrupted RPC usually means systemd stopped the responding server,
+    but can also be a client-side cancellation. Give reconnect a short grace
+    period without stranding the action for the full install timeout. */
+const INTERRUPTED_RESTART_GRACE_MS = 30_000;
 
 function updateFailureMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Server update failed.";
@@ -91,7 +95,7 @@ export function ServerUpdateAction({
     attemptRef.current = attempt;
     const ownsAttempt = () => attemptRef.current === attempt;
     setPending(true);
-    const armExpiry = () => {
+    const armExpiry = (delayMs = UPDATE_PENDING_EXPIRY_MS) => {
       const expiry = setTimeout(() => {
         if (!ownsAttempt()) return;
         expiryRef.current = null;
@@ -103,17 +107,17 @@ export function ServerUpdateAction({
           title: "Server update timed out",
           description: "The update may still be running on the server — check again in a minute.",
         });
-      }, UPDATE_PENDING_EXPIRY_MS);
+      }, delayMs);
       expiryRef.current = expiry;
       return expiry;
     };
     let expiry = armExpiry();
     let restartAccepted = false;
-    const keepPendingForRestart = () => {
+    const keepPendingForRestart = (expiryMs = UPDATE_PENDING_EXPIRY_MS) => {
       restartAccepted = true;
       if (expiryRef.current === expiry) {
         clearTimeout(expiry);
-        expiry = armExpiry();
+        expiry = armExpiry(expiryMs);
       }
     };
     void Promise.resolve()
@@ -130,7 +134,7 @@ export function ServerUpdateAction({
           // RPC, so interruption is the expected acknowledgement. Keep the UI
           // pending until the new server version reconnects (or expiry).
           if (isAtomCommandInterrupted(result)) {
-            keepPendingForRestart();
+            keepPendingForRestart(INTERRUPTED_RESTART_GRACE_MS);
             return;
           }
           toastManager.add({
