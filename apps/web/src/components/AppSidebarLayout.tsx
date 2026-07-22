@@ -84,7 +84,7 @@ function SidebarControl() {
                 "pointer-events-auto",
                 isSidebarVisible &&
                   stageBackdropVariant &&
-                  "hover:bg-white/15 [&_svg]:text-white/85! [&_svg]:hover:text-white!",
+                  "[:hover,[data-pressed]]:bg-white/15 focus-visible:ring-white/90 focus-visible:ring-offset-blue-700 [&_svg]:stroke-white/90! [&_svg]:opacity-100! [&_svg]:hover:stroke-white!",
               )}
               aria-label="Toggle main sidebar"
             />
@@ -164,9 +164,11 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       <Sidebar
         side="left"
         collapsible="offcanvas"
+        data-sidebar-version={useSidebarV2 ? "v2" : "v1"}
         className={cn(
-          "border-r border-border text-foreground",
-          useSidebarV2 ? "app-sidebar" : "bg-card",
+          useSidebarV2
+            ? "border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
+            : "border-r border-border bg-card text-foreground",
         )}
         resizable={{
           maxWidth: sidebarMaximumWidth,

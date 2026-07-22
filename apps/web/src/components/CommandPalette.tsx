@@ -1855,7 +1855,7 @@ function OpenCommandPaletteDialog(props: {
                   <span className="truncate text-foreground text-sm">
                     {remoteProjectContext.title}
                   </span>
-                  <span className="truncate text-muted-foreground/70 text-xs">
+                  <span className="truncate text-muted-foreground/85 text-xs">
                     {remoteProjectContext.description}
                   </span>
                 </span>
@@ -1896,30 +1896,30 @@ function OpenCommandPaletteDialog(props: {
               <Kbd>
                 <ArrowDownIcon />
               </Kbd>
-              <span className={cn("text-muted-foreground/80")}>Navigate</span>
+              <span className="text-muted-foreground dark:text-zinc-300">Navigate</span>
             </KbdGroup>
             {addProjectCloneFlow?.step === "repository" ? (
               <KbdGroup className="items-center gap-1.5">
                 <Kbd>Enter</Kbd>
-                <span className={cn("text-muted-foreground/80")}>
+                <span className="text-muted-foreground dark:text-zinc-300">
                   {remoteProjectButtonLabel ?? "Continue"}
                 </span>
               </KbdGroup>
             ) : !canSubmitBrowsePath || hasHighlightedBrowseItem ? (
               <KbdGroup className="items-center gap-1.5">
                 <Kbd>Enter</Kbd>
-                <span className={cn("text-muted-foreground/80")}>Select</span>
+                <span className="text-muted-foreground dark:text-zinc-300">Select</span>
               </KbdGroup>
             ) : null}
             {isSubmenu ? (
               <KbdGroup className="items-center gap-1.5">
                 <Kbd>Backspace</Kbd>
-                <span className={cn("text-muted-foreground/80")}>Back</span>
+                <span className="text-muted-foreground dark:text-zinc-300">Back</span>
               </KbdGroup>
             ) : null}
             <KbdGroup className="items-center gap-1.5">
               <Kbd>Esc</Kbd>
-              <span className={cn("text-muted-foreground/80")}>Close</span>
+              <span className="text-muted-foreground dark:text-zinc-300">Close</span>
             </KbdGroup>
           </div>
           {canOpenProjectFromFileManager ? (
