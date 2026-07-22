@@ -19,8 +19,10 @@ import { ThreadSwipeable } from "../home/thread-swipe-actions";
 import { resolveThreadListV2Status, type ThreadListV2Status } from "./threadListV2";
 
 /**
- * Thread List v2 rows mirror the web sidebar's compact tonal cards and
- * receded settled tail while retaining native swipe and long-press actions.
+ * Thread List v2 renders one flat native list: rich edge-to-edge rows for
+ * active work and a receded settled tail, all with native swipe and
+ * long-press actions. State reads through colored status labels and text
+ * hierarchy rather than card fills.
  */
 
 const MONO_FONT = Platform.select({
@@ -186,75 +188,66 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         }}
         style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
       >
-        <View className="bg-screen px-4 py-1">
-          {/* Light cards lift OFF the gray screen as white surfaces (iOS
-              grouped-list convention — a darker gray tint on the gray screen
-              reads dingy); quiet ready rows sit at partial opacity so active
-              work pops. Dark keeps the original graphite tints. */}
-          <View
-            className={cn(
-              "overflow-hidden",
-              status === "ready"
-                ? "bg-white/65 dark:bg-white/[0.025]"
-                : "bg-white dark:bg-white/[0.04]",
-            )}
-            style={{ borderRadius: 12, borderCurve: "continuous", minHeight: 84 }}
-          >
-            <View className="px-3 py-2.5">
-              <View className="flex-row items-center gap-1.5">
-                {props.project ? (
-                  <ProjectFavicon
-                    environmentId={thread.environmentId}
-                    size={15}
-                    projectTitle={props.project.title}
-                    workspaceRoot={props.project.workspaceRoot}
-                  />
-                ) : null}
+        {/* Flat native list rows: no tonal containers — colored status
+            labels and text hierarchy carry state, an inset hairline
+            separates rows. The opaque screen background stays so swipe
+            actions reveal behind the row. */}
+        <View className="bg-screen">
+          <View className="px-5 py-2.5">
+            <View className="flex-row items-center gap-1.5">
+              {props.project ? (
+                <ProjectFavicon
+                  environmentId={thread.environmentId}
+                  size={15}
+                  projectTitle={props.project.title}
+                  workspaceRoot={props.project.workspaceRoot}
+                />
+              ) : null}
+              <Text
+                className="flex-1 text-sm font-t3-medium text-foreground-muted"
+                numberOfLines={1}
+              >
+                {props.project?.title ?? ""}
+              </Text>
+              <Text
+                className={cn(
+                  "text-xs tabular-nums",
+                  statusLabel?.className ?? "text-foreground-tertiary",
+                )}
+              >
+                {statusLabel?.label ?? timeLabel}
+              </Text>
+            </View>
+            <Text className="mt-1 text-base font-t3-medium text-foreground" numberOfLines={2}>
+              {thread.title}
+            </Text>
+            <View className="mt-1 flex-row items-center gap-2">
+              {status === "failed" && thread.session?.lastError ? (
                 <Text
-                  className="flex-1 text-sm font-t3-medium text-foreground-muted"
+                  className="flex-1 text-xs text-red-600/80 dark:text-red-400/80"
                   numberOfLines={1}
                 >
-                  {props.project?.title ?? ""}
+                  {thread.session.lastError}
                 </Text>
+              ) : thread.branch ? (
                 <Text
-                  className={cn(
-                    "text-xs tabular-nums",
-                    statusLabel?.className ?? "text-foreground-tertiary",
-                  )}
+                  className="flex-1 text-xs text-foreground-muted"
+                  numberOfLines={1}
+                  style={{ fontFamily: MONO_FONT }}
                 >
-                  {statusLabel?.label ?? timeLabel}
+                  {thread.branch}
                 </Text>
-              </View>
-              <Text className="mt-1 text-base font-t3-medium text-foreground" numberOfLines={2}>
-                {thread.title}
-              </Text>
-              <View className="mt-1 flex-row items-center gap-2">
-                {status === "failed" && thread.session?.lastError ? (
-                  <Text
-                    className="flex-1 text-xs text-red-600/80 dark:text-red-400/80"
-                    numberOfLines={1}
-                  >
-                    {thread.session.lastError}
-                  </Text>
-                ) : thread.branch ? (
-                  <Text
-                    className="flex-1 text-xs text-foreground-muted"
-                    numberOfLines={1}
-                    style={{ fontFamily: MONO_FONT }}
-                  >
-                    {thread.branch}
-                  </Text>
-                ) : (
-                  <View className="flex-1" />
-                )}
-                {props.providerDriver ? (
-                  <View className="opacity-60">
-                    <ProviderIcon provider={props.providerDriver} size={14} />
-                  </View>
-                ) : null}
-              </View>
+              ) : (
+                <View className="flex-1" />
+              )}
+              {props.providerDriver ? (
+                <View className="opacity-60">
+                  <ProviderIcon provider={props.providerDriver} size={14} />
+                </View>
+              ) : null}
             </View>
           </View>
+          <View className="ml-5 h-px bg-border-subtle" />
         </View>
       </Pressable>
     ) : (
