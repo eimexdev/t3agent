@@ -445,6 +445,10 @@ export function HomeScreen(props: HomeScreenProps) {
   const [nowMinute, setNowMinute] = useState(() => new Date().toISOString().slice(0, 16));
   useEffect(() => {
     if (!threadListV2Enabled) return;
+    // Refresh immediately on enable: the mount-time value can be hours old
+    // by the time the beta is switched on, which would misclassify the
+    // inactivity auto-settle boundary until the first tick.
+    setNowMinute(new Date().toISOString().slice(0, 16));
     const id = setInterval(() => setNowMinute(new Date().toISOString().slice(0, 16)), 60_000);
     return () => clearInterval(id);
   }, [threadListV2Enabled]);
@@ -801,7 +805,11 @@ export function HomeScreen(props: HomeScreenProps) {
             data={threadListV2Items}
             renderItem={renderV2Item}
             keyExtractor={v2KeyExtractor}
-            extraData={{ projectByKey, serverConfigs }}
+            extraData={{
+              projectByKey,
+              serverConfigs,
+              savedConnectionsById: props.savedConnectionsById,
+            }}
             ListHeaderComponent={v2ListHeader}
             ListFooterComponent={
               threadListV2Layout.hiddenSettledCount > 0 ? (

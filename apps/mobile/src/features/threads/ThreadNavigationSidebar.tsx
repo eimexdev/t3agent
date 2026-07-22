@@ -27,7 +27,7 @@ import { useThemeColor } from "../../lib/useThemeColor";
 import { useProjects, useThreadShells } from "../../state/entities";
 import { mobilePreferencesAtom } from "../../state/preferences";
 import { environmentServerConfigsAtom } from "../../state/server";
-import { usePendingNewTasks } from "../../state/use-pending-new-tasks";
+import { usePendingNewTasks, type PendingNewTask } from "../../state/use-pending-new-tasks";
 import { useWorkspaceState } from "../../state/workspace";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { useHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands";
@@ -73,9 +73,16 @@ import {
 } from "./threadListV2";
 
 /** The sidebar list serves both lists: v1 grouped items or, when the Thread
-    List v2 beta is on, flat v2 rows plus a settled "Show more" pager. */
+    List v2 beta is on, queued offline tasks, flat v2 rows, and a settled
+    "Show more" pager. */
 type SidebarListItem =
   | HomeListItem
+  | {
+      readonly type: "v2-pending-task";
+      readonly key: string;
+      readonly pendingTask: PendingNewTask;
+      readonly isLast: boolean;
+    }
   | { readonly type: "v2-thread"; readonly key: string; readonly item: ThreadListV2Item }
   | { readonly type: "v2-show-more"; readonly key: string; readonly hiddenCount: number };
 
@@ -312,6 +319,10 @@ function ThreadNavigationSidebarPane(
   const [nowMinute, setNowMinute] = useState(() => new Date().toISOString().slice(0, 16));
   useEffect(() => {
     if (!threadListV2Enabled) return;
+    // Refresh immediately on enable: the mount-time value can be hours old
+    // by the time the beta is switched on, which would misclassify the
+    // inactivity auto-settle boundary until the first tick.
+    setNowMinute(new Date().toISOString().slice(0, 16));
     const id = setInterval(() => setNowMinute(new Date().toISOString().slice(0, 16)), 60_000);
     return () => clearInterval(id);
   }, [threadListV2Enabled]);
@@ -350,11 +361,32 @@ function ThreadNavigationSidebarPane(
   ]);
   const listItems = useMemo<readonly SidebarListItem[]>(() => {
     if (!threadListV2Enabled) return listLayout.items;
-    const items: SidebarListItem[] = threadListV2Layout.items.map((item) => ({
-      type: "v2-thread" as const,
-      key: scopedThreadKey(item.thread.environmentId, item.thread.id),
-      item,
+    // Queued offline tasks render above the thread rows (mirrors the
+    // compact Home v2 list): they are not thread shells, so the v2 item
+    // builder never sees them, but they must stay visible and deletable
+    // while their environment is offline. Same environment scope and
+    // search filter as the list.
+    const v2SearchQuery = props.searchQuery.trim().toLocaleLowerCase();
+    const v2PendingTasks = pendingTasks.filter(
+      (pendingTask) =>
+        (options.selectedEnvironmentId === null ||
+          pendingTask.message.environmentId === options.selectedEnvironmentId) &&
+        (v2SearchQuery.length === 0 ||
+          pendingTask.title.toLocaleLowerCase().includes(v2SearchQuery)),
+    );
+    const items: SidebarListItem[] = v2PendingTasks.map((pendingTask, index) => ({
+      type: "v2-pending-task" as const,
+      key: `v2-pending:${pendingTask.message.messageId}`,
+      pendingTask,
+      isLast: index === v2PendingTasks.length - 1,
     }));
+    for (const item of threadListV2Layout.items) {
+      items.push({
+        type: "v2-thread" as const,
+        key: scopedThreadKey(item.thread.environmentId, item.thread.id),
+        item,
+      });
+    }
     if (threadListV2Layout.hiddenSettledCount > 0) {
       items.push({
         type: "v2-show-more",
@@ -363,7 +395,14 @@ function ThreadNavigationSidebarPane(
       });
     }
     return items;
-  }, [listLayout.items, threadListV2Enabled, threadListV2Layout]);
+  }, [
+    listLayout.items,
+    options.selectedEnvironmentId,
+    pendingTasks,
+    props.searchQuery,
+    threadListV2Enabled,
+    threadListV2Layout,
+  ]);
   const showsConnectionStatus = shouldShowWorkspaceConnectionStatus(catalogState);
   const listMenuActions = useMemo<MenuAction[]>(
     () => [
@@ -387,36 +426,43 @@ function ThreadNavigationSidebarPane(
           })),
         ],
       },
-      {
-        id: "project-sort",
-        title: "Sort projects",
-        subactions: PROJECT_SORT_OPTIONS.map((option) => ({
-          id: `project-sort:${option.value}`,
-          title: option.label,
-          state: options.projectSortOrder === option.value ? "on" : "off",
-        })),
-      },
-      {
-        id: "thread-sort",
-        title: "Sort threads",
-        subactions: THREAD_SORT_OPTIONS.map((option) => ({
-          id: `thread-sort:${option.value}`,
-          title: option.label,
-          state: options.threadSortOrder === option.value ? "on" : "off",
-        })),
-      },
-      {
-        id: "project-grouping",
-        title: "Group projects",
-        subactions: PROJECT_GROUPING_OPTIONS.map((option) => ({
-          id: `project-grouping:${option.value}`,
-          title: option.label,
-          subtitle: option.subtitle,
-          state: options.projectGroupingMode === option.value ? "on" : "off",
-        })),
-      },
+      // v2 lays the list out in fixed creation order — offering sort/group
+      // controls it silently ignores would be a lie. Environment still
+      // scopes the v2 partition, so it stays.
+      ...(threadListV2Enabled
+        ? []
+        : ([
+            {
+              id: "project-sort",
+              title: "Sort projects",
+              subactions: PROJECT_SORT_OPTIONS.map((option) => ({
+                id: `project-sort:${option.value}`,
+                title: option.label,
+                state: options.projectSortOrder === option.value ? "on" : "off",
+              })),
+            },
+            {
+              id: "thread-sort",
+              title: "Sort threads",
+              subactions: THREAD_SORT_OPTIONS.map((option) => ({
+                id: `thread-sort:${option.value}`,
+                title: option.label,
+                state: options.threadSortOrder === option.value ? "on" : "off",
+              })),
+            },
+            {
+              id: "project-grouping",
+              title: "Group projects",
+              subactions: PROJECT_GROUPING_OPTIONS.map((option) => ({
+                id: `project-grouping:${option.value}`,
+                title: option.label,
+                subtitle: option.subtitle,
+                state: options.projectGroupingMode === option.value ? "on" : "off",
+              })),
+            },
+          ] satisfies MenuAction[])),
     ],
-    [environments, options],
+    [environments, options, threadListV2Enabled],
   );
   const handleListMenuAction = useCallback(
     ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) => {
@@ -530,11 +576,16 @@ function ThreadNavigationSidebarPane(
       if (previous.type === "v2-show-more" && item.type === "v2-show-more") {
         return previous.hiddenCount === item.hiddenCount;
       }
+      if (previous.type === "v2-pending-task" && item.type === "v2-pending-task") {
+        return previous.pendingTask === item.pendingTask && previous.isLast === item.isLast;
+      }
       if (
         previous.type === "v2-thread" ||
         previous.type === "v2-show-more" ||
+        previous.type === "v2-pending-task" ||
         item.type === "v2-thread" ||
-        item.type === "v2-show-more"
+        item.type === "v2-show-more" ||
+        item.type === "v2-pending-task"
       ) {
         return false;
       }
@@ -562,6 +613,20 @@ function ThreadNavigationSidebarPane(
   const renderListItem = useCallback(
     ({ item }: { readonly item: SidebarListItem }) => {
       switch (item.type) {
+        case "v2-pending-task":
+          return (
+            <PendingTaskListRow
+              variant="sidebar"
+              pendingTask={item.pendingTask}
+              environmentLabel={
+                savedConnectionsById[item.pendingTask.message.environmentId]?.environmentLabel ??
+                null
+              }
+              isLast={item.isLast}
+              onSelectPendingTask={openPendingTask}
+              onDeletePendingTask={confirmDeletePendingTask}
+            />
+          );
         case "v2-thread": {
           const thread = item.item.thread;
           const scopeKey = scopedProjectKey(thread.environmentId, thread.projectId);
@@ -713,7 +778,12 @@ function ThreadNavigationSidebarPane(
       updateGroupDisplay,
     ],
   );
-  const filterIcon = hasCustomHomeListOptions(options)
+  // v2 ignores the sort/group options, so only the environment filter can
+  // light the "customized" state while the beta is on.
+  const filterCustomized = threadListV2Enabled
+    ? options.selectedEnvironmentId !== null
+    : hasCustomHomeListOptions(options);
+  const filterIcon = filterCustomized
     ? "line.3.horizontal.decrease.circle.fill"
     : "line.3.horizontal.decrease.circle";
   const filterMenu = useMemo(
@@ -728,6 +798,7 @@ function ThreadNavigationSidebarPane(
         onProjectSortOrderChange: setProjectSortOrder,
         onThreadSortOrderChange: setThreadSortOrder,
         onProjectGroupingModeChange: setProjectGroupingMode,
+        listOrganization: !threadListV2Enabled,
       }),
     [
       environments,
@@ -736,6 +807,7 @@ function ThreadNavigationSidebarPane(
       setProjectSortOrder,
       setSelectedEnvironmentId,
       setThreadSortOrder,
+      threadListV2Enabled,
     ],
   );
   const nativeHeaderItems = useMemo(
