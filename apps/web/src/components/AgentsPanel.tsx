@@ -58,7 +58,10 @@ function AgentStatusDot({ status }: { status: ThreadAgentSnapshot["status"] }) {
 function AgentElapsed({ agent }: { agent: ThreadAgentSnapshot }) {
   const textRef = useRef<HTMLSpanElement>(null);
   const settled = isTerminalAgentStatus(agent.status) || agent.status === "idle";
-  const startMs = parseTimestampDate(agent.firstStartedAt)?.getTime() ?? null;
+  // Current-activation start (falls back to firstStartedAt for pre-field
+  // snapshots) so a resumed agent's timer excludes prior runs and idle gaps.
+  const startMs =
+    parseTimestampDate(agent.lastStartedAt ?? agent.firstStartedAt)?.getTime() ?? null;
   const endMs =
     (agent.endedAt ? parseTimestampDate(agent.endedAt)?.getTime() : null) ??
     (settled ? (parseTimestampDate(agent.lastActivityAt)?.getTime() ?? null) : null);
@@ -93,7 +96,7 @@ function AgentCard({ agent }: { agent: ThreadAgentSnapshot }) {
   // Settled cards lead with outcome (error first); live cards with activity.
   const activity =
     agent.status === "waiting"
-      ? "Waiting on approval"
+      ? "Waiting on approval or input"
       : settled || agent.status === "idle"
         ? (agent.errorMessage ??
           agent.resultSummary ??
@@ -119,7 +122,7 @@ function AgentCard({ agent }: { agent: ThreadAgentSnapshot }) {
         <AgentStatusDot status={agent.status} />
         <span className="min-w-0 truncate text-[12.5px] font-semibold">{agent.name}</span>
         {agent.agentType ? (
-          <Badge variant="secondary" size="sm" className="min-w-0 max-w-28 shrink-1 truncate">
+          <Badge variant="secondary" size="sm" className="min-w-0 max-w-28 shrink truncate">
             {agent.agentType}
           </Badge>
         ) : null}
@@ -262,6 +265,19 @@ function AgentGroup({
         )}
         <span className="h-px flex-1 bg-border/60" />
       </div>
+      {/* A failed/errored workflow with no member rows would otherwise render
+          as a bare header — surface the container itself so its status and
+          error are visible. */}
+      {group.workflow &&
+      group.rest.length === 0 &&
+      group.phases.every((phase) => phase.agents.length === 0) &&
+      (group.workflow.status === "failed" ||
+        group.workflow.status === "stopped" ||
+        group.workflow.errorMessage) ? (
+        <div className="space-y-1.5">
+          <AgentCard agent={group.workflow} />
+        </div>
+      ) : null}
       {group.phases.map((phase) => (
         <div key={phase.index}>
           <PhaseHeader phase={phase} />

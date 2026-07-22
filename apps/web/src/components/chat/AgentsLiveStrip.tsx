@@ -21,6 +21,8 @@ const AgentsLiveStrip = memo(function AgentsLiveStrip({
   const state = deriveAgentPanelState(agents);
   const liveCount = state.runningCount + state.waitingCount;
   if (liveCount === 0) {
+    // Parent wrappers must not reserve space when nothing renders (the
+    // caller keys visibility off hasLiveAgents with the same derivation).
     return null;
   }
 

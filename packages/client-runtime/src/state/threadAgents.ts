@@ -3,8 +3,8 @@
  *
  * The server ships the full per-thread roster latest-wins in the payload of
  * `agent.snapshot` activities (see `@t3tools/contracts` ThreadAgentsActivityPayload).
- * Mirrors the `context-window.updated` pattern: scan activities newest-first,
- * decode tolerantly, ignore rows that fail to decode.
+ * Mirrors the `context-window.updated` pattern: select the newest roster
+ * (highest revision), decode tolerantly, skip rows that fail to decode.
  */
 import {
   THREAD_AGENT_TERMINAL_STATUSES,
@@ -16,19 +16,12 @@ import * as Schema from "effect/Schema";
 
 const decodeAgent = Schema.decodeUnknownOption(ThreadAgentSnapshot);
 
-interface DecodedRoster {
-  readonly agents: ReadonlyArray<ThreadAgentSnapshot>;
-  readonly revision: number | undefined;
+interface RosterCandidate {
+  readonly payload: { readonly agents: ReadonlyArray<unknown> };
+  readonly revision: number;
 }
 
-/**
- * Rows decode per-element: one malformed or forward-incompatible agent entry
- * is skipped without discarding the rest of the roster. Any payload with an
- * `agents` array is authoritative — a roster whose rows all fail to decode
- * yields an empty panel rather than resurrecting an older (possibly still
- * "running") snapshot.
- */
-function decodeRoster(payload: unknown): DecodedRoster | undefined {
+function peekRoster(payload: unknown): RosterCandidate | undefined {
   if (payload === null || typeof payload !== "object") {
     return undefined;
   }
@@ -36,44 +29,49 @@ function decodeRoster(payload: unknown): DecodedRoster | undefined {
   if (!Array.isArray(record.agents)) {
     return undefined;
   }
-  const decoded: ThreadAgentSnapshot[] = [];
-  for (const candidate of record.agents) {
-    const result = decodeAgent(candidate);
-    if (result._tag === "Some") {
-      decoded.push(result.value);
-    }
-  }
   return {
-    agents: decoded,
+    payload: record as RosterCandidate["payload"],
+    // Missing revision ranks lowest (-1), mirroring server hydration: a
+    // revision-less legacy roster never beats a revisioned one, and among
+    // equals the later list position wins.
     revision:
       typeof record.revision === "number" && Number.isInteger(record.revision)
         ? record.revision
-        : undefined,
+        : -1,
   };
 }
 
 export function deriveLatestAgentSnapshot(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): ReadonlyArray<ThreadAgentSnapshot> {
-  // Highest revision wins; list order breaks ties (and covers revision-less
-  // rosters from before the field existed). Guards against same-millisecond
-  // appends landing out of order in the capped projection.
-  let best: DecodedRoster | undefined;
+  // Two passes so only ONE roster is schema-decoded per recompute: rosters
+  // can dominate the 500-row activity window in busy sessions, and this runs
+  // inside a useMemo that re-fires on every activities change. Winner =
+  // highest revision, later list position breaking ties.
+  let best: RosterCandidate | undefined;
   for (const activity of activities) {
     if (activity.kind !== THREAD_AGENTS_ACTIVITY_KIND) {
       continue;
     }
-    const roster = decodeRoster(activity.payload);
-    if (!roster) {
-      continue;
-    }
-    if (!best || roster.revision === undefined || best.revision === undefined) {
-      best = roster;
-    } else if (roster.revision >= best.revision) {
-      best = roster;
+    const candidate = peekRoster(activity.payload);
+    if (candidate && (!best || candidate.revision >= best.revision)) {
+      best = candidate;
     }
   }
-  return best?.agents ?? [];
+  if (!best) {
+    return [];
+  }
+  // The winning roster is authoritative: rows decode per-element (one bad row
+  // is skipped, the rest kept), and a fully undecodable roster yields an
+  // empty panel rather than resurrecting an older snapshot.
+  const decoded: ThreadAgentSnapshot[] = [];
+  for (const candidate of best.payload.agents) {
+    const result = decodeAgent(candidate);
+    if (result._tag === "Some") {
+      decoded.push(result.value);
+    }
+  }
+  return decoded;
 }
 
 export function isTerminalAgentStatus(status: ThreadAgentSnapshot["status"]): boolean {

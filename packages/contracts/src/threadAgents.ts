@@ -96,6 +96,10 @@ export const ThreadAgentSnapshot = Schema.Struct({
   lastToolName: Schema.optional(TrimmedNonEmptyString),
   usage: Schema.optional(ThreadAgentUsage),
   firstStartedAt: IsoDateTime,
+  // Start of the CURRENT activation. Live elapsed timers derive from this so
+  // idle gaps between resumptions don't inflate the display; absent on
+  // pre-field snapshots (clients fall back to firstStartedAt).
+  lastStartedAt: Schema.optional(IsoDateTime),
   lastActivityAt: IsoDateTime,
   // Cleared when a re-activation (Codex follow-up) starts a new run.
   endedAt: Schema.optional(IsoDateTime),
@@ -112,9 +116,9 @@ export const ThreadAgentSnapshot = Schema.Struct({
   phases: Schema.optional(Schema.Array(ThreadAgentWorkflowPhase)),
   scriptPath: Schema.optional(TrimmedNonEmptyString),
   runId: Schema.optional(TrimmedNonEmptyString),
-  // Set while waiting on an approval so the UI can deep-link to the request.
+  // Reserved for the approval deep-link milestone; no emitter populates it yet.
   approvalRequestId: Schema.optional(ApprovalRequestId),
-  // Claude transcript/output path; the drill-in RPC reads it on demand.
+  // Claude transcript/output path; reserved for the transcript drill-in milestone.
   outputFile: Schema.optional(TrimmedNonEmptyString),
   resultSummary: Schema.optional(TrimmedNonEmptyString),
   errorMessage: Schema.optional(TrimmedNonEmptyString),

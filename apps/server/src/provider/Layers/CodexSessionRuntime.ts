@@ -899,9 +899,14 @@ export const makeCodexSessionRuntime = (
         // the session's own provider thread nor a v1 collab receiver is
         // treated as an unregistered child.
         const providerThreadId = currentProviderThreadId(yield* Ref.get(sessionRef));
-        const knownChild = notificationThreadId
-          ? collabChildAgents.get(notificationThreadId)
-          : undefined;
+        // Re-check v1 receiver registration on every notification: if a
+        // thread was provisionally classified as a v2 child before the
+        // parent's collabAgentToolCall arrived, hand it back to the v1
+        // suppression path once the receiver registration lands.
+        const knownChild =
+          notificationThreadId && !collabReceiverTurns.has(notificationThreadId)
+            ? collabChildAgents.get(notificationThreadId)
+            : undefined;
         const isForeignThread =
           notificationThreadId !== undefined &&
           providerThreadId !== undefined &&

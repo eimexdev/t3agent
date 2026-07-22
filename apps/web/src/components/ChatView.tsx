@@ -1869,6 +1869,16 @@ function ChatViewContent(props: ChatViewProps) {
     () => deriveLatestAgentSnapshot(threadActivities),
     [threadActivities],
   );
+  // Mirrors AgentsLiveStrip's own visibility rule so the wrapper doesn't
+  // reserve space (mb-1.5) after all agents settle.
+  const hasLiveAgents = useMemo(
+    () =>
+      threadAgents.some(
+        (agent) =>
+          agent.status === "running" || agent.status === "pending" || agent.status === "waiting",
+      ),
+    [threadAgents],
+  );
   const pendingApprovals = useMemo(
     () => derivePendingApprovals(threadActivities),
     [threadActivities],
@@ -5380,7 +5390,7 @@ function ChatViewContent(props: ChatViewProps) {
                   ) : (
                     <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
                   )}
-                  {threadAgents.length > 0 ? (
+                  {hasLiveAgents ? (
                     <div className="mb-1.5">
                       <AgentsLiveStrip agents={threadAgents} onOpen={addAgentsSurface} />
                     </div>

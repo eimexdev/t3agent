@@ -723,8 +723,14 @@ function normalizeRuntimeTaskUsage(value: unknown) {
   }
   const toolUses = readNonNegativeInteger(usage.tool_uses);
   const durationMs = readNonNegativeInteger(usage.duration_ms);
+  const inputTokens = readNonNegativeInteger(usage.input_tokens);
+  const outputTokens = readNonNegativeInteger(usage.output_tokens);
+  const cachedInputTokens = readNonNegativeInteger(usage.cache_read_input_tokens);
   return {
     totalTokens,
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
     ...(toolUses !== undefined ? { toolUses } : {}),
     ...(durationMs !== undefined ? { durationMs } : {}),
   };
@@ -2895,12 +2901,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }
       case "task_updated": {
         const record = message as unknown as Record<string, unknown>;
-        // SDK shape: {task_id, patch: {status?, end_time?, is_backgrounded?, error?}}
+        // SDK shape: {task_id, patch: {status?, description?, end_time?, is_backgrounded?, error?}}
         const patch =
           record.patch !== null && typeof record.patch === "object" && !Array.isArray(record.patch)
             ? (record.patch as Record<string, unknown>)
             : {};
         const status = readString(patch.status);
+        const patchedDescription = readString(patch.description);
         const endTime =
           typeof patch.end_time === "number" ? epochMillisToIso(patch.end_time) : undefined;
         yield* offerRuntimeEvent({
@@ -2917,6 +2924,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               ? { status }
               : {}),
             ...(endTime ? { endTime } : {}),
+            ...(patchedDescription ? { name: patchedDescription } : {}),
             ...(typeof patch.is_backgrounded === "boolean"
               ? { isBackgrounded: patch.is_backgrounded }
               : {}),

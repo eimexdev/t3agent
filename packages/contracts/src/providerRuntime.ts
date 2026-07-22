@@ -518,7 +518,7 @@ const TaskProgressPayload = Schema.Struct({
   taskId: RuntimeTaskId,
   description: TrimmedNonEmptyStringSchema,
   summary: Schema.optional(TrimmedNonEmptyStringSchema),
-  usage: Schema.optional(Schema.Union([RuntimeTaskUsage, Schema.Unknown])),
+  usage: Schema.optional(RuntimeTaskUsage),
   lastToolName: Schema.optional(TrimmedNonEmptyStringSchema),
   ...TaskAgentLinkage,
 });
@@ -555,7 +555,7 @@ const TaskCompletedPayload = Schema.Struct({
   taskId: RuntimeTaskId,
   status: Schema.Literals(["completed", "failed", "stopped"]),
   summary: Schema.optional(TrimmedNonEmptyStringSchema),
-  usage: Schema.optional(Schema.Union([RuntimeTaskUsage, Schema.Unknown])),
+  usage: Schema.optional(RuntimeTaskUsage),
   ...TaskAgentLinkage,
 });
 export type TaskCompletedPayload = typeof TaskCompletedPayload.Type;
