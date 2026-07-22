@@ -82,7 +82,7 @@ internal class AgentLiveUpdateManager(private val context: Context) {
 
     val notification = builder.build()
     notificationManagerCompat.notify(NOTIFICATION_TAG, NOTIFICATION_ID, notification)
-    return status(notification)
+    return status()
   }
 
   fun cancel(): Map<String, Any> {
