@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { EnvironmentId, ServerSelfUpdateCapability } from "@t3tools/contracts";
 import {
   isAtomCommandInterrupted,
@@ -48,6 +48,7 @@ export function ServerUpdateAction({
   });
   const [pending, setPending] = useState(false);
   const inFlightRef = useRef(false);
+  const expiryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { copyToClipboard } = useCopyToClipboard<{ command: string }>({
     target: "update command",
     onCopy: ({ command }) => {
@@ -66,6 +67,16 @@ export function ServerUpdateAction({
     },
   });
 
+  useEffect(
+    () => () => {
+      if (expiryRef.current !== null) {
+        clearTimeout(expiryRef.current);
+        expiryRef.current = null;
+      }
+    },
+    [],
+  );
+
   const handleUpdate = () => {
     // Synchronous re-entry guard: setPending is async, so a rapid
     // double-click would otherwise dispatch two updates.
@@ -75,6 +86,7 @@ export function ServerUpdateAction({
     inFlightRef.current = true;
     setPending(true);
     const expiry = setTimeout(() => {
+      expiryRef.current = null;
       inFlightRef.current = false;
       setPending(false);
       toastManager.add({
@@ -83,6 +95,8 @@ export function ServerUpdateAction({
         description: "The update may still be running on the server — check again in a minute.",
       });
     }, UPDATE_PENDING_EXPIRY_MS);
+    expiryRef.current = expiry;
+    let restartAccepted = false;
     void Promise.resolve()
       .then(() =>
         updateServer({
@@ -101,6 +115,7 @@ export function ServerUpdateAction({
           }
           return;
         }
+        restartAccepted = true;
         toastManager.add({
           type: "success",
           title: `Updating ${serverLabel}`,
@@ -115,6 +130,13 @@ export function ServerUpdateAction({
         });
       })
       .finally(() => {
+        // A successful RPC only acknowledges that restart is scheduled. Keep
+        // the action disabled until version sync unmounts it, or until the
+        // safety expiry reports that reconnection never arrived.
+        if (restartAccepted) return;
+        if (expiryRef.current === expiry) {
+          expiryRef.current = null;
+        }
         clearTimeout(expiry);
         inFlightRef.current = false;
         setPending(false);

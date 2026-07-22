@@ -355,7 +355,7 @@ it.layer(NodeServices.layer)("ServerSelfUpdate.update", (it) => {
     Effect.gen(function* () {
       const context = yield* makeContext({ failWhen: (command) => command === "npm" });
       const error = yield* context.service.update({ targetVersion: "0.0.29" }).pipe(Effect.flip);
-      assert.include(error.reason, "installing the pinned t3 runtime");
+      assert.equal(error.reason, "Could not install the requested t3 version.");
       yield* TestClock.adjust(Duration.seconds(10));
       assert.lengthOf(context.spawns, 0);
       assert.equal(context.exitCount(), 0);

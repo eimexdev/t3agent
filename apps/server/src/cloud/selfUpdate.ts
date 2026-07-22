@@ -226,7 +226,9 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* (option
         fs,
         path,
         runner,
-      }).pipe(Effect.mapError((error) => failWith(error.message, error)));
+      }).pipe(
+        Effect.mapError((error) => failWith("Could not install the requested t3 version.", error)),
+      );
 
       // A broken artifact (failed native build, incompatible node) must be
       // caught while the current server is still alive to report it.
