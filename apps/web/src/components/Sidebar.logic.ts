@@ -115,6 +115,7 @@ type ThreadStatusInput = Pick<
   | "hasPendingUserInput"
   | "interactionMode"
   | "latestTurn"
+  | "latestUserMessageAt"
   | "session"
 > & {
   lastVisitedAt?: string | undefined;
@@ -221,6 +222,32 @@ export function hasUnseenCompletion(thread: ThreadStatusInput): boolean {
   const lastVisitedAt = Date.parse(thread.lastVisitedAt);
   if (Number.isNaN(lastVisitedAt)) return true;
   return completedAt > lastVisitedAt;
+}
+
+function hasPendingTurnStart(thread: ThreadStatusInput): boolean {
+  if (!thread.latestUserMessageAt) return false;
+  const latestUserMessageAt = Date.parse(thread.latestUserMessageAt);
+  if (Number.isNaN(latestUserMessageAt)) return false;
+
+  const latestTurnRequestedAt = thread.latestTurn
+    ? Date.parse(thread.latestTurn.requestedAt)
+    : Number.NaN;
+  if (!Number.isNaN(latestTurnRequestedAt) && latestTurnRequestedAt >= latestUserMessageAt) {
+    return false;
+  }
+
+  // Session bootstrap may pass through starting/ready before the provider
+  // creates the turn; only terminal states can acknowledge a failed start.
+  const session = thread.session;
+  if (
+    !session ||
+    (session.status !== "error" && session.status !== "interrupted" && session.status !== "stopped")
+  ) {
+    return true;
+  }
+
+  const sessionUpdatedAt = Date.parse(session.updatedAt);
+  return Number.isNaN(sessionUpdatedAt) || sessionUpdatedAt < latestUserMessageAt;
 }
 
 export function shouldClearThreadSelectionOnMouseDown(target: HTMLElement | null): boolean {
@@ -505,7 +532,7 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
-  if (thread.session?.status === "running") {
+  if (thread.session?.status === "running" || hasPendingTurnStart(thread)) {
     return {
       label: "Working",
       colorClass: "text-sky-600 dark:text-sky-300/80",

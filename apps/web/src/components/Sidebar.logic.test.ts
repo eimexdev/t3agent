@@ -170,6 +170,7 @@ describe("hasUnseenCompletion", () => {
         hasPendingUserInput: false,
         interactionMode: "default",
         latestTurn: makeLatestTurn(),
+        latestUserMessageAt: null,
         lastVisitedAt: "2026-03-09T10:04:00.000Z",
         session: null,
       }),
@@ -184,6 +185,7 @@ describe("hasUnseenCompletion", () => {
         hasPendingUserInput: false,
         interactionMode: "default",
         latestTurn: makeLatestTurn(),
+        latestUserMessageAt: null,
         lastVisitedAt: undefined,
         session: null,
       }),
@@ -737,6 +739,7 @@ describe("resolveThreadStatusPill", () => {
     hasPendingUserInput: false,
     interactionMode: "plan" as const,
     latestTurn: null,
+    latestUserMessageAt: null,
     lastVisitedAt: undefined,
     session: {
       threadId: ThreadId.make("thread-1"),
@@ -779,6 +782,56 @@ describe("resolveThreadStatusPill", () => {
         thread: baseThread,
       }),
     ).toMatchObject({ label: "Working", pulse: true });
+  });
+
+  it("shows working while a new thread turn is waiting for its first session update", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          latestUserMessageAt: "2026-03-09T10:00:01.000Z",
+          session: null,
+        },
+      }),
+    ).toMatchObject({ label: "Working", pulse: true });
+  });
+
+  it("keeps showing working through a ready session before the turn starts", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          latestUserMessageAt: "2026-03-09T10:00:01.000Z",
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            activeTurnId: null,
+            updatedAt: "2026-03-09T10:00:02.000Z",
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Working", pulse: true });
+  });
+
+  it("does not show stale pending work after the turn acknowledges the message", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          latestUserMessageAt: "2026-03-09T10:00:01.000Z",
+          latestTurn: {
+            ...makeLatestTurn(),
+            requestedAt: "2026-03-09T10:00:02.000Z",
+          },
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            activeTurnId: null,
+            updatedAt: "2026-03-09T10:05:00.000Z",
+          },
+        },
+      }),
+    ).toBeNull();
   });
 
   it("shows plan ready when a settled plan turn has a proposed plan ready for follow-up", () => {
