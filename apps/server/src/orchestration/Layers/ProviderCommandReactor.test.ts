@@ -371,6 +371,7 @@ describe("ProviderCommandReactor", () => {
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provide(SqlitePersistenceMemory),
     );
     runtime = ManagedRuntime.make(layer);
 
@@ -547,6 +548,12 @@ describe("ProviderCommandReactor", () => {
         }),
       );
 
+      const readModel = yield* harness.snapshotQuery.getSnapshot();
+      expect(
+        readModel.threads[0]?.activities.find(
+          (activity) => activity.kind === "provider.turn.start.failed",
+        ),
+      ).toMatchObject({ payload: { requestId: messageId } });
       const shellSnapshot = yield* harness.snapshotQuery.getShellSnapshot();
       expect(shellSnapshot.threads[0]?.hasPendingTurnStart).toBe(false);
     }),

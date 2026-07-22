@@ -29,6 +29,8 @@ import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
+import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
+import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
@@ -190,6 +192,7 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const projectionTurnRepository = yield* ProjectionTurnRepository;
   const providerService = yield* ProviderService;
   const providerRegistry = yield* ProviderRegistry;
   const gitWorkflow = yield* GitWorkflowService;
@@ -805,10 +808,13 @@ const make = Effect.gen(function* () {
     const handleTurnStartFailure = Effect.fnUntraced(function* (cause: Cause.Cause<unknown>) {
       const interrupted = Cause.hasInterruptsOnly(cause);
       if (interrupted) {
-        const threadShell = yield* projectionSnapshotQuery.getThreadShellById(
-          event.payload.threadId,
-        );
-        if (Option.isNone(threadShell) || threadShell.value.hasPendingTurnStart !== true) {
+        const pendingTurnStart = yield* projectionTurnRepository.getPendingTurnStartByThreadId({
+          threadId: event.payload.threadId,
+        });
+        if (
+          Option.isNone(pendingTurnStart) ||
+          pendingTurnStart.value.messageId !== event.payload.messageId
+        ) {
           return;
         }
       }
@@ -1094,4 +1100,6 @@ const make = Effect.gen(function* () {
   } satisfies ProviderCommandReactorShape;
 });
 
-export const ProviderCommandReactorLive = Layer.effect(ProviderCommandReactor, make);
+export const ProviderCommandReactorLive = Layer.effect(ProviderCommandReactor, make).pipe(
+  Layer.provide(ProjectionTurnRepositoryLive),
+);
