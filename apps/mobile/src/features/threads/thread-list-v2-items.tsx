@@ -211,11 +211,20 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                   workspaceRoot={props.project.workspaceRoot}
                 />
               ) : null}
+              {/* "project · machine" share one truncating line — both answer
+                  "where does this thread live", and pairing them keeps the
+                  meta row down to branch + PR + provider. */}
               <Text
                 className="flex-1 text-sm font-t3-medium text-foreground-muted"
                 numberOfLines={1}
               >
                 {props.project?.title ?? ""}
+                {props.environmentLabel ? (
+                  <Text className="text-sm text-foreground-tertiary">
+                    {"  ·  "}
+                    {props.environmentLabel}
+                  </Text>
+                ) : null}
               </Text>
               <Text
                 className={cn(
@@ -261,11 +270,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                 <View className="opacity-60">
                   <ProviderIcon provider={props.providerDriver} size={14} />
                 </View>
-              ) : null}
-              {props.environmentLabel ? (
-                <Text className="max-w-40 text-xs text-foreground-tertiary" numberOfLines={1}>
-                  {props.environmentLabel}
-                </Text>
               ) : null}
             </View>
           </View>
