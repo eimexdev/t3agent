@@ -65,10 +65,20 @@ const LEGACY_MENU_ACTIONS: MenuAction[] = [
   { id: "delete", title: "Delete", image: "trash", attributes: { destructive: true } },
 ];
 
-export const ThreadListV2SettledDivider = memo(function ThreadListV2SettledDivider() {
+/** Rounded-row radius shared with the v1 sidebar rows. */
+const SIDEBAR_V2_ROW_RADIUS = 12;
+
+export const ThreadListV2SettledDivider = memo(function ThreadListV2SettledDivider(props: {
+  readonly pane?: "screen" | "sidebar";
+}) {
   const borderColor = useThemeColor("--color-border");
   return (
-    <View className="mb-1.5 mt-4 flex-row items-center gap-2.5 px-5">
+    <View
+      className={cn(
+        "mb-1.5 mt-4 flex-row items-center gap-2.5",
+        props.pane === "sidebar" ? "px-3" : "px-5",
+      )}
+    >
       <Text className="text-xs font-t3-medium text-foreground-tertiary">Settled</Text>
       <View className="h-px flex-1" style={{ backgroundColor: borderColor }} />
     </View>
@@ -86,6 +96,12 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       the web sidebar's remote-environment cloud icon, but as text since
       phones have no hover tooltips. */
   readonly environmentLabel: string | null;
+  /** Hosting surface. "screen" (default) renders the compact Home idiom:
+      flat edge-to-edge rows on the screen background with inset hairlines.
+      "sidebar" renders the iPad split-view idiom: rounded rows blending
+      into the drawer surface, selection filled with the accent color —
+      matching the v1 sidebar rows. */
+  readonly pane?: "screen" | "sidebar";
   /** Highlights the thread open in the detail pane (iPad split view). The
       compact Home list never sets it — phones navigate away on select. */
   readonly selected?: boolean;
@@ -132,6 +148,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   }, [onChangeRequestState, prState, threadKey]);
 
   const screenColor = useThemeColor("--color-screen");
+  const drawerColor = useThemeColor("--color-drawer");
+  const pressedBackgroundColor = useThemeColor("--color-subtle");
+  const selectedBackgroundColor = useThemeColor("--color-user-bubble");
+  const sidebarPane = props.pane === "sidebar";
+  const selected = props.selected === true;
 
   const status = resolveThreadListV2Status(thread);
   const statusLabel = STATUS_LABEL_BY_STATUS[status];
@@ -189,115 +210,173 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     thread.title,
   ]);
 
+  // The sidebar pane fills selected rows with the accent color (matching the
+  // v1 sidebar), so every piece of row text needs a white-on-accent variant.
+  const cardContent = (
+    <>
+      <View className="flex-row items-center gap-1.5">
+        {props.project ? (
+          <ProjectFavicon
+            environmentId={thread.environmentId}
+            size={15}
+            projectTitle={props.project.title}
+            workspaceRoot={props.project.workspaceRoot}
+          />
+        ) : null}
+        {/* "project · machine" share one truncating line — both answer
+            "where does this thread live", and pairing them keeps the
+            meta row down to branch + PR + provider. */}
+        <Text
+          className={cn(
+            "flex-1 text-sm font-t3-medium",
+            selected ? "text-user-bubble-foreground-muted" : "text-foreground-muted",
+          )}
+          numberOfLines={1}
+        >
+          {props.project?.title ?? ""}
+          {props.environmentLabel ? (
+            <Text
+              className={cn(
+                "text-sm",
+                selected ? "text-user-bubble-foreground-muted" : "text-foreground-tertiary",
+              )}
+            >
+              {"  ·  "}
+              {props.environmentLabel}
+            </Text>
+          ) : null}
+        </Text>
+        <Text
+          className={cn(
+            "text-xs tabular-nums",
+            selected ? "text-white" : (statusLabel?.className ?? "text-foreground-tertiary"),
+          )}
+        >
+          {statusLabel?.label ?? timeLabel}
+        </Text>
+      </View>
+      <Text
+        className={cn(
+          "mt-1 text-base font-t3-medium",
+          selected ? "text-user-bubble-foreground" : "text-foreground",
+        )}
+        numberOfLines={2}
+      >
+        {thread.title}
+      </Text>
+      <View className="mt-1 flex-row items-center gap-2">
+        {status === "failed" && thread.session?.lastError ? (
+          <Text
+            className={cn(
+              "flex-1 text-xs",
+              selected
+                ? "text-user-bubble-foreground-muted"
+                : "text-red-600/80 dark:text-red-400/80",
+            )}
+            numberOfLines={1}
+          >
+            {thread.session.lastError}
+          </Text>
+        ) : thread.branch ? (
+          <Text
+            className={cn(
+              "flex-1 text-xs",
+              selected ? "text-user-bubble-foreground-muted" : "text-foreground-muted",
+            )}
+            numberOfLines={1}
+            style={{ fontFamily: MONO_FONT }}
+          >
+            {thread.branch}
+          </Text>
+        ) : (
+          <View className="flex-1" />
+        )}
+        {pr ? (
+          <Text
+            accessibilityLabel={pr.accessibilityLabel}
+            className={cn("text-xs", selected ? "text-white" : pr.textClassName)}
+            style={{ fontFamily: MONO_FONT }}
+          >
+            #{pr.label}
+          </Text>
+        ) : null}
+        {props.providerDriver ? (
+          <View className="opacity-60">
+            <ProviderIcon provider={props.providerDriver} size={14} />
+          </View>
+        ) : null}
+      </View>
+    </>
+  );
+
   const rowContent = (close: () => void) =>
     variant === "card" ? (
       <Pressable
         accessibilityHint={`Opens the thread. Swipe left to ${primaryAction.label.toLowerCase()}.`}
         accessibilityLabel={thread.title}
         accessibilityRole="button"
+        accessibilityState={{ selected }}
         onPress={() => {
           close();
           onSelectThread(thread);
         }}
-        style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
+        style={
+          sidebarPane
+            ? ({ pressed }) => ({
+                backgroundColor: selected
+                  ? selectedBackgroundColor
+                  : pressed
+                    ? pressedBackgroundColor
+                    : drawerColor,
+                borderRadius: SIDEBAR_V2_ROW_RADIUS,
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+              })
+            : ({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })
+        }
       >
-        {/* Flat native list rows: no tonal containers — colored status
-            labels and text hierarchy carry state, an inset hairline
-            separates rows. The opaque screen background stays so swipe
-            actions reveal behind the row. */}
-        <View className="bg-screen">
-          <View className={cn("px-5 py-2.5", props.selected && "bg-subtle dark:bg-white/[0.07]")}>
-            <View className="flex-row items-center gap-1.5">
-              {props.project ? (
-                <ProjectFavicon
-                  environmentId={thread.environmentId}
-                  size={15}
-                  projectTitle={props.project.title}
-                  workspaceRoot={props.project.workspaceRoot}
-                />
-              ) : null}
-              {/* "project · machine" share one truncating line — both answer
-                  "where does this thread live", and pairing them keeps the
-                  meta row down to branch + PR + provider. */}
-              <Text
-                className="flex-1 text-sm font-t3-medium text-foreground-muted"
-                numberOfLines={1}
-              >
-                {props.project?.title ?? ""}
-                {props.environmentLabel ? (
-                  <Text className="text-sm text-foreground-tertiary">
-                    {"  ·  "}
-                    {props.environmentLabel}
-                  </Text>
-                ) : null}
-              </Text>
-              <Text
-                className={cn(
-                  "text-xs tabular-nums",
-                  statusLabel?.className ?? "text-foreground-tertiary",
-                )}
-              >
-                {statusLabel?.label ?? timeLabel}
-              </Text>
-            </View>
-            <Text className="mt-1 text-base font-t3-medium text-foreground" numberOfLines={2}>
-              {thread.title}
-            </Text>
-            <View className="mt-1 flex-row items-center gap-2">
-              {status === "failed" && thread.session?.lastError ? (
-                <Text
-                  className="flex-1 text-xs text-red-600/80 dark:text-red-400/80"
-                  numberOfLines={1}
-                >
-                  {thread.session.lastError}
-                </Text>
-              ) : thread.branch ? (
-                <Text
-                  className="flex-1 text-xs text-foreground-muted"
-                  numberOfLines={1}
-                  style={{ fontFamily: MONO_FONT }}
-                >
-                  {thread.branch}
-                </Text>
-              ) : (
-                <View className="flex-1" />
-              )}
-              {pr ? (
-                <Text
-                  accessibilityLabel={pr.accessibilityLabel}
-                  className={cn("text-xs", pr.textClassName)}
-                  style={{ fontFamily: MONO_FONT }}
-                >
-                  #{pr.label}
-                </Text>
-              ) : null}
-              {props.providerDriver ? (
-                <View className="opacity-60">
-                  <ProviderIcon provider={props.providerDriver} size={14} />
-                </View>
-              ) : null}
-            </View>
+        {sidebarPane ? (
+          cardContent
+        ) : (
+          /* Flat native list rows: no tonal containers — colored status
+             labels and text hierarchy carry state, an inset hairline
+             separates rows. The opaque screen background stays so swipe
+             actions reveal behind the row. */
+          <View className="bg-screen">
+            <View className="px-5 py-2.5">{cardContent}</View>
+            <View className="ml-5 h-px bg-border-subtle" />
           </View>
-          <View className="ml-5 h-px bg-border-subtle" />
-        </View>
+        )}
       </Pressable>
     ) : (
       <Pressable
         accessibilityHint={`Opens the thread. Swipe left to ${primaryAction.label.toLowerCase()}.`}
         accessibilityLabel={thread.title}
         accessibilityRole="button"
-        className="bg-screen"
+        accessibilityState={{ selected }}
+        className={sidebarPane ? undefined : "bg-screen"}
         onPress={() => {
           close();
           onSelectThread(thread);
         }}
-        style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
+        style={
+          sidebarPane
+            ? ({ pressed }) => ({
+                backgroundColor: selected
+                  ? selectedBackgroundColor
+                  : pressed
+                    ? pressedBackgroundColor
+                    : drawerColor,
+                borderRadius: SIDEBAR_V2_ROW_RADIUS,
+              })
+            : ({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })
+        }
       >
         {/* Settled history recedes: dimmed favicon + muted title. */}
         <View
           className={cn(
-            "min-h-[44px] flex-row items-center gap-2.5 px-5 py-2",
-            props.selected && "bg-subtle dark:bg-white/[0.07]",
+            "min-h-[44px] flex-row items-center gap-2.5 py-2",
+            sidebarPane ? "px-3" : "px-5",
           )}
         >
           {props.project ? (
@@ -310,11 +389,20 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               />
             </View>
           ) : null}
-          <Text className="flex-1 text-base text-foreground-muted" numberOfLines={1}>
+          <Text
+            className={cn(
+              "flex-1 text-base",
+              selected ? "text-user-bubble-foreground" : "text-foreground-muted",
+            )}
+            numberOfLines={1}
+          >
             {thread.title}
           </Text>
           <Text
-            className="text-sm tabular-nums text-foreground-tertiary"
+            className={cn(
+              "text-sm tabular-nums",
+              selected ? "text-user-bubble-foreground-muted" : "text-foreground-tertiary",
+            )}
             style={{ fontFamily: MONO_FONT }}
           >
             {relativeTime(thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt)}
@@ -325,9 +413,12 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
 
   return (
     <>
-      {props.showSettledDivider ? <ThreadListV2SettledDivider /> : null}
+      {props.showSettledDivider ? <ThreadListV2SettledDivider pane={props.pane} /> : null}
       <ThreadSwipeable
-        backgroundColor={screenColor}
+        backgroundColor={sidebarPane ? drawerColor : screenColor}
+        containerStyle={
+          sidebarPane ? { borderRadius: SIDEBAR_V2_ROW_RADIUS, overflow: "hidden" } : undefined
+        }
         enableTrackpadSwipe
         // Full swipe commits the advertised lifecycle action (Settle /
         // Un-settle), never the destructive delete.
