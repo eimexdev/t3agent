@@ -5,9 +5,12 @@ import type {
 } from "@t3tools/client-runtime/state/shell";
 import { LegendList } from "@legendapp/list/react-native";
 import type { MenuAction } from "@react-native-menu/menu";
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useAtomValue } from "@effect/atom-react";
+import { AsyncResult } from "effect/unstable/reactivity";
+import type { EnvironmentId } from "@t3tools/contracts";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent } from "react-native";
-import { Platform, StyleSheet, TextInput, View, useColorScheme } from "react-native";
+import { Platform, Pressable, StyleSheet, TextInput, View, useColorScheme } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -22,6 +25,8 @@ import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { useProjects, useThreadShells } from "../../state/entities";
+import { mobilePreferencesAtom } from "../../state/preferences";
+import { environmentServerConfigsAtom } from "../../state/server";
 import { usePendingNewTasks } from "../../state/use-pending-new-tasks";
 import { useWorkspaceState } from "../../state/workspace";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
@@ -59,6 +64,20 @@ import {
   ThreadListRow,
   ThreadListShowMoreRow,
 } from "./thread-list-items";
+import { ThreadListV2Row } from "./thread-list-v2-items";
+import {
+  buildThreadListV2Items,
+  THREAD_LIST_V2_SETTLED_INITIAL_COUNT,
+  THREAD_LIST_V2_SETTLED_PAGE_COUNT,
+  type ThreadListV2Item,
+} from "./threadListV2";
+
+/** The sidebar list serves both lists: v1 grouped items or, when the Thread
+    List v2 beta is on, flat v2 rows plus a settled "Show more" pager. */
+type SidebarListItem =
+  | HomeListItem
+  | { readonly type: "v2-thread"; readonly key: string; readonly item: ThreadListV2Item }
+  | { readonly type: "v2-show-more"; readonly key: string; readonly hiddenCount: number };
 
 /**
  * Shared capsule behind the sidebar header buttons — a native liquid-glass
@@ -169,7 +188,12 @@ function ThreadNavigationSidebarPane(
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const headerIsOverContentRef = useRef(false);
   const sidebarScrollGesture = useMemo(() => Gesture.Native(), []);
-  const { archiveThread, confirmDeleteThread } = useThreadListActions();
+  const { archiveThread, confirmDeleteThread, settleThread, unsettleThread } =
+    useThreadListActions();
+  const preferencesResult = useAtomValue(mobilePreferencesAtom);
+  const threadListV2Enabled =
+    AsyncResult.isSuccess(preferencesResult) &&
+    preferencesResult.value.threadListV2Enabled === true;
   const pendingTasks = usePendingNewTasks();
   const { openPendingTask, confirmDeletePendingTask } = usePendingTaskListActions();
   const environments = useMemo(
@@ -237,6 +261,109 @@ function ThreadNavigationSidebarPane(
     }
     return map;
   }, [projects]);
+  const projectByKey = useMemo(() => {
+    const map = new Map<string, EnvironmentProject>();
+    for (const project of projects) {
+      map.set(scopedProjectKey(project.environmentId, project.id), project);
+    }
+    return map;
+  }, [projects]);
+
+  // Thread List v2 (beta) support — same model as the compact Home list
+  // (HomeScreen.tsx): flat creation-order card block + settled recency tail.
+  // PR states stream in per-row; merged/closed PRs auto-settle their thread
+  // on the next partition.
+  const [changeRequestStateByKey, setChangeRequestStateByKey] = useState<
+    ReadonlyMap<string, "open" | "closed" | "merged">
+  >(() => new Map());
+  const handleChangeRequestState = useCallback(
+    (threadKey: string, state: "open" | "closed" | "merged" | null) => {
+      setChangeRequestStateByKey((current) => {
+        if ((current.get(threadKey) ?? null) === state) return current;
+        const next = new Map(current);
+        if (state === null) {
+          next.delete(threadKey);
+        } else {
+          next.set(threadKey, state);
+        }
+        return next;
+      });
+    },
+    [],
+  );
+  // The settled tail renders in pages; expansion resets when the filter
+  // context changes so environment/search flips never inherit a deep page.
+  const [settledVisibleCount, setSettledVisibleCount] = useState(
+    THREAD_LIST_V2_SETTLED_INITIAL_COUNT,
+  );
+  const settledResetKey = `${options.selectedEnvironmentId ?? "all"}:${props.searchQuery.trim()}`;
+  const lastSettledResetKeyRef = useRef(settledResetKey);
+  if (lastSettledResetKeyRef.current !== settledResetKey) {
+    lastSettledResetKeyRef.current = settledResetKey;
+    setSettledVisibleCount(THREAD_LIST_V2_SETTLED_INITIAL_COUNT);
+  }
+  const showMoreSettled = useCallback(
+    () => setSettledVisibleCount((count) => count + THREAD_LIST_V2_SETTLED_PAGE_COUNT),
+    [],
+  );
+  // now ticks per minute so the inactivity auto-settle boundary is actually
+  // crossed while the pane stays open; without a clock dependency the
+  // partition memoizes a frozen "now".
+  const [nowMinute, setNowMinute] = useState(() => new Date().toISOString().slice(0, 16));
+  useEffect(() => {
+    if (!threadListV2Enabled) return;
+    const id = setInterval(() => setNowMinute(new Date().toISOString().slice(0, 16)), 60_000);
+    return () => clearInterval(id);
+  }, [threadListV2Enabled]);
+  // Threads on servers without the settlement capability never classify as
+  // settled (the user could neither un-settle nor pin them).
+  const serverConfigs = useAtomValue(environmentServerConfigsAtom);
+  const settlementEnvironmentIds = useMemo(() => {
+    const supported = new Set<EnvironmentId>();
+    for (const [environmentId, config] of serverConfigs) {
+      if (config.environment.capabilities.threadSettlement === true) {
+        supported.add(environmentId);
+      }
+    }
+    return supported;
+  }, [serverConfigs]);
+  const threadListV2Layout = useMemo(() => {
+    if (!threadListV2Enabled) return { items: [], hiddenSettledCount: 0 };
+    return buildThreadListV2Items({
+      threads: threads.filter((thread) => thread.archivedAt === null),
+      environmentId: options.selectedEnvironmentId,
+      searchQuery: props.searchQuery,
+      changeRequestStateByKey,
+      settlementEnvironmentIds,
+      settledLimit: settledVisibleCount,
+      now: `${nowMinute}:00.000Z`,
+    });
+  }, [
+    changeRequestStateByKey,
+    nowMinute,
+    options.selectedEnvironmentId,
+    props.searchQuery,
+    settledVisibleCount,
+    settlementEnvironmentIds,
+    threadListV2Enabled,
+    threads,
+  ]);
+  const listItems = useMemo<readonly SidebarListItem[]>(() => {
+    if (!threadListV2Enabled) return listLayout.items;
+    const items: SidebarListItem[] = threadListV2Layout.items.map((item) => ({
+      type: "v2-thread" as const,
+      key: scopedThreadKey(item.thread.environmentId, item.thread.id),
+      item,
+    }));
+    if (threadListV2Layout.hiddenSettledCount > 0) {
+      items.push({
+        type: "v2-show-more",
+        key: "v2-show-more",
+        hiddenCount: threadListV2Layout.hiddenSettledCount,
+      });
+    }
+    return items;
+  }, [listLayout.items, threadListV2Enabled, threadListV2Layout]);
   const showsConnectionStatus = shouldShowWorkspaceConnectionStatus(catalogState);
   const listMenuActions = useMemo<MenuAction[]>(
     () => [
@@ -382,7 +509,39 @@ function ThreadNavigationSidebarPane(
     onScroll: handleScroll,
     onScrollBeginDrag: handleScrollBeginDrag,
   });
-  const listExtraData = props.selectedThreadKey ?? "";
+  const listExtraData = useMemo(
+    () => ({
+      selectedThreadKey: props.selectedThreadKey ?? "",
+      savedConnectionsById,
+      serverConfigs,
+    }),
+    [props.selectedThreadKey, savedConnectionsById, serverConfigs],
+  );
+  const sidebarItemsAreEqual = useCallback(
+    (previous: SidebarListItem, item: SidebarListItem): boolean => {
+      if (previous.type === "v2-thread" && item.type === "v2-thread") {
+        return (
+          previous.key === item.key &&
+          previous.item.thread === item.item.thread &&
+          previous.item.variant === item.item.variant &&
+          previous.item.showSettledDivider === item.item.showSettledDivider
+        );
+      }
+      if (previous.type === "v2-show-more" && item.type === "v2-show-more") {
+        return previous.hiddenCount === item.hiddenCount;
+      }
+      if (
+        previous.type === "v2-thread" ||
+        previous.type === "v2-show-more" ||
+        item.type === "v2-thread" ||
+        item.type === "v2-show-more"
+      ) {
+        return false;
+      }
+      return homeListItemsAreEqual(previous, item);
+    },
+    [],
+  );
   const focusSearch = useCallback(() => {
     const focus = () => {
       if (props.nativeChrome) {
@@ -401,8 +560,63 @@ function ThreadNavigationSidebarPane(
   }, [props.nativeChrome, props.onRequestVisibility, props.visible]);
   useHardwareKeyboardCommand("focusSearch", focusSearch);
   const renderListItem = useCallback(
-    ({ item }: { readonly item: HomeListItem }) => {
+    ({ item }: { readonly item: SidebarListItem }) => {
       switch (item.type) {
+        case "v2-thread": {
+          const thread = item.item.thread;
+          const scopeKey = scopedProjectKey(thread.environmentId, thread.projectId);
+          return (
+            <ThreadListV2Row
+              thread={thread}
+              variant={item.item.variant}
+              showSettledDivider={item.item.showSettledDivider}
+              project={projectByKey.get(scopeKey) ?? null}
+              providerDriver={
+                serverConfigs
+                  .get(thread.environmentId)
+                  ?.providers.find(
+                    (provider) =>
+                      provider.instanceId ===
+                      (thread.session?.providerInstanceId ?? thread.modelSelection.instanceId),
+                  )?.driver ?? null
+              }
+              environmentLabel={
+                Object.keys(savedConnectionsById).length > 1
+                  ? (savedConnectionsById[thread.environmentId]?.environmentLabel ?? null)
+                  : null
+              }
+              selected={
+                scopedThreadKey(thread.environmentId, thread.id) === props.selectedThreadKey
+              }
+              fullSwipeWidth={props.width - 20}
+              onSelectThread={handleSelectThread}
+              onDeleteThread={confirmDeleteThread}
+              onArchiveThread={archiveThread}
+              settlementSupported={settlementEnvironmentIds.has(thread.environmentId)}
+              onSettleThread={settleThread}
+              onUnsettleThread={unsettleThread}
+              onChangeRequestState={handleChangeRequestState}
+              projectCwd={projectCwdByKey.get(scopeKey) ?? null}
+              onSwipeableClose={handleSwipeableClose}
+              onSwipeableWillOpen={handleSwipeableWillOpen}
+              simultaneousSwipeGesture={sidebarScrollGesture}
+            />
+          );
+        }
+        case "v2-show-more":
+          return (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Show ${Math.min(item.hiddenCount, THREAD_LIST_V2_SETTLED_PAGE_COUNT)} more settled threads`}
+              onPress={showMoreSettled}
+              className="mx-4 mt-2 items-center rounded-lg border border-dashed border-border py-2.5"
+              style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+            >
+              <Text className="text-xs font-t3-medium text-foreground-muted">
+                Show more ({item.hiddenCount} settled hidden)
+              </Text>
+            </Pressable>
+          );
         case "header":
           return (
             <ThreadListGroupHeader
@@ -478,16 +692,23 @@ function ThreadNavigationSidebarPane(
       archiveThread,
       confirmDeletePendingTask,
       confirmDeleteThread,
+      handleChangeRequestState,
       handleSelectThread,
       handleSwipeableClose,
       handleSwipeableWillOpen,
       openPendingTask,
+      projectByKey,
       projectCwdByKey,
       props.onNewThreadInProject,
       props.selectedThreadKey,
       props.width,
       savedConnectionsById,
+      serverConfigs,
+      settleThread,
+      settlementEnvironmentIds,
+      showMoreSettled,
       sidebarScrollGesture,
+      unsettleThread,
       updateGroupDisplay,
     ],
   );
@@ -564,12 +785,12 @@ function ThreadNavigationSidebarPane(
           <SwipeableScrollGateProvider enabled={swipeEnabled}>
             <GestureDetector gesture={sidebarScrollGesture}>
               <LegendList
-                data={listLayout.items}
+                data={listItems}
                 drawDistance={500}
                 estimatedItemSize={64}
                 extraData={listExtraData}
                 getItemType={(item) => item.type}
-                itemsAreEqual={homeListItemsAreEqual}
+                itemsAreEqual={sidebarItemsAreEqual}
                 keyExtractor={(item) => item.key}
                 renderItem={renderListItem}
                 automaticallyAdjustsScrollIndicatorInsets={NATIVE_LIQUID_GLASS_SUPPORTED}
@@ -625,12 +846,12 @@ function ThreadNavigationSidebarPane(
         <SwipeableScrollGateProvider enabled={swipeEnabled}>
           <GestureDetector gesture={sidebarScrollGesture}>
             <LegendList
-              data={listLayout.items}
+              data={listItems}
               drawDistance={500}
               estimatedItemSize={64}
               extraData={listExtraData}
               getItemType={(item) => item.type}
-              itemsAreEqual={homeListItemsAreEqual}
+              itemsAreEqual={sidebarItemsAreEqual}
               keyExtractor={(item) => item.key}
               renderItem={renderListItem}
               contentContainerStyle={[

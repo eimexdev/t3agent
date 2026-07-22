@@ -86,6 +86,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       the web sidebar's remote-environment cloud icon, but as text since
       phones have no hover tooltips. */
   readonly environmentLabel: string | null;
+  /** Highlights the thread open in the detail pane (iPad split view). The
+      compact Home list never sets it — phones navigate away on select. */
+  readonly selected?: boolean;
+  /** Override for narrow panes (iPad sidebar); defaults to window width. */
+  readonly fullSwipeWidth?: number;
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
   readonly onDeleteThread: (thread: EnvironmentThreadShell) => void;
   readonly onSettleThread: (thread: EnvironmentThreadShell) => void;
@@ -201,7 +206,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             separates rows. The opaque screen background stays so swipe
             actions reveal behind the row. */}
         <View className="bg-screen">
-          <View className="px-5 py-2.5">
+          <View className={cn("px-5 py-2.5", props.selected && "bg-subtle dark:bg-white/[0.07]")}>
             <View className="flex-row items-center gap-1.5">
               {props.project ? (
                 <ProjectFavicon
@@ -289,7 +294,12 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
       >
         {/* Settled history recedes: dimmed favicon + muted title. */}
-        <View className="min-h-[44px] flex-row items-center gap-2.5 px-5 py-2">
+        <View
+          className={cn(
+            "min-h-[44px] flex-row items-center gap-2.5 px-5 py-2",
+            props.selected && "bg-subtle dark:bg-white/[0.07]",
+          )}
+        >
           {props.project ? (
             <View className="opacity-40">
               <ProjectFavicon
@@ -322,7 +332,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         // Full swipe commits the advertised lifecycle action (Settle /
         // Un-settle), never the destructive delete.
         fullSwipeAction="primary"
-        fullSwipeWidth={windowWidth - 32}
+        fullSwipeWidth={props.fullSwipeWidth ?? windowWidth - 32}
         onDelete={handleDelete}
         onSwipeableClose={props.onSwipeableClose}
         onSwipeableWillOpen={props.onSwipeableWillOpen}

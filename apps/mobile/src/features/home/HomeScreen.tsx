@@ -38,7 +38,12 @@ import {
   ThreadListShowMoreRow,
 } from "../threads/thread-list-items";
 import { ThreadListV2Row } from "../threads/thread-list-v2-items";
-import { buildThreadListV2Items, type ThreadListV2Item } from "../threads/threadListV2";
+import {
+  buildThreadListV2Items,
+  THREAD_LIST_V2_SETTLED_INITIAL_COUNT,
+  THREAD_LIST_V2_SETTLED_PAGE_COUNT,
+  type ThreadListV2Item,
+} from "../threads/threadListV2";
 import type { HomeListFilterMenuEnvironment } from "./home-list-filter-menu";
 import {
   buildHomeListLayout,
@@ -91,10 +96,6 @@ interface HomeScreenProps {
 /* ─── Layout constants ───────────────────────────────────────────────── */
 
 const ESTIMATED_THREAD_ROW_HEIGHT = 72;
-// v2 settled-tail paging: recent history is the common lookup; the deep
-// tail stays behind an explicit Show more.
-const THREAD_LIST_V2_SETTLED_INITIAL_COUNT = 10;
-const THREAD_LIST_V2_SETTLED_PAGE_COUNT = 25;
 /**
  * Top spacing between the list and the Android custom header. The Android
  * header (AndroidHomeHeader) is rendered in-flow above this screen and
