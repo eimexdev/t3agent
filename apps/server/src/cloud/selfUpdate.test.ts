@@ -498,9 +498,7 @@ it.layer(NodeServices.layer)("ServerSelfUpdate.update", (it) => {
         if ((yield* context.fs.readFileString(unitPath)) === previousUnit) {
           break;
         }
-        yield* Effect.promise(
-          () => new Promise<void>((resolve) => globalThis.setTimeout(resolve, 5)),
-        );
+        yield* Effect.yieldNow;
       }
       assert.equal(yield* context.fs.readFileString(unitPath), previousUnit);
       assert.deepEqual(
