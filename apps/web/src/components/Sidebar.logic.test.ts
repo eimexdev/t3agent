@@ -825,6 +825,15 @@ describe("resolveWorkingStartedAt", () => {
     ).toBe("2026-03-09T10:02:00.000Z");
   });
 
+  it("skips a malformed startedAt instead of returning it", () => {
+    expect(
+      resolveWorkingStartedAt({
+        latestTurn: makeLatestTurn({ startedAt: "not-a-date", completedAt: null }),
+        session,
+      }),
+    ).toBe("2026-03-09T10:00:00.000Z");
+  });
+
   it("returns null with neither a running turn nor a session", () => {
     expect(resolveWorkingStartedAt({ latestTurn: null, session: null })).toBeNull();
   });

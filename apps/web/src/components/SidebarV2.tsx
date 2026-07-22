@@ -72,6 +72,7 @@ import { formatRelativeTimeLabel } from "../timestampFormat";
 import type { SidebarThreadSummary } from "../types";
 import { cn } from "~/lib/utils";
 import {
+  firstValidTimestamp,
   formatWorkingDurationLabel,
   hasUnseenCompletion,
   isTrailingDoubleClick,
@@ -118,20 +119,28 @@ function threadTimeLabel(thread: SidebarThreadSummary): string {
 
 // Settled rows read "how long ago did this wrap up", matching their sort
 // key; auto-settled threads have no stamp and fall back to last activity.
+// Same candidate chain as sortSettledThreadsForSidebarV2 — a malformed
+// settledAt must fall through identically or label and order disagree.
 function settledTimeLabel(thread: SidebarThreadSummary): string {
-  const timestamp = thread.settledAt ?? thread.latestUserMessageAt ?? thread.updatedAt;
-  return compactSidebarTimeLabel(formatRelativeTimeLabel(timestamp));
+  const timestamp = firstValidTimestamp(
+    thread.settledAt,
+    thread.latestUserMessageAt,
+    thread.updatedAt,
+  );
+  return timestamp === null ? "" : compactSidebarTimeLabel(formatRelativeTimeLabel(timestamp));
 }
 
 // Floats at the row's right edge, vertically centered, while the jump
 // modifier is held. An overlay pill instead of an inline slot: the hint
 // must neither displace the status/time label (holding ⌘ used to blank
-// out "Working") nor shift any layout when it appears.
+// out "Working") nor shift any layout when it appears. pointer-events-none
+// so it never swallows clicks meant for the settle/un-settle buttons it
+// can overlap.
 function JumpHintBadge(props: { label: string }) {
   return (
     <span
       aria-hidden
-      className="absolute right-1.5 top-1/2 z-10 inline-flex h-5 -translate-y-1/2 items-center rounded-full border border-border/80 bg-background/95 px-1.5 font-mono text-[10px] font-medium tracking-tight text-foreground shadow-sm"
+      className="pointer-events-none absolute right-1.5 top-1/2 z-10 inline-flex h-5 -translate-y-1/2 items-center rounded-full border border-border/80 bg-background/95 px-1.5 font-mono text-[10px] font-medium tracking-tight text-foreground shadow-sm"
     >
       {props.label}
     </span>

@@ -468,6 +468,18 @@ export function firstValidTimestampMs(
   return 0;
 }
 
+/** String twin of firstValidTimestampMs for callers that need the ISO string
+    (display labels, tick anchors) rather than epoch ms. */
+export function firstValidTimestamp(
+  ...candidates: ReadonlyArray<string | null | undefined>
+): string | null {
+  for (const candidate of candidates) {
+    if (candidate == null) continue;
+    if (!Number.isNaN(Date.parse(candidate))) return candidate;
+  }
+  return null;
+}
+
 // v2 sort: static creation order, newest thread on top. Activity NEVER
 // reorders the list — a row holds its position from open until settled, so
 // the screen only moves at lifecycle transitions. Status (including pending
@@ -504,15 +516,16 @@ export function sortSettledThreadsForSidebarV2<
 
 /** The timestamp a working thread's elapsed label counts from: the running
     turn's start (request time until adoption), falling back to the session's
-    last transition when the turn projection lags behind. */
+    last transition when the turn projection lags behind. Malformed
+    timestamps fall through to the next candidate, not just missing ones. */
 export function resolveWorkingStartedAt(
   thread: Pick<SidebarThreadSummary, "latestTurn" | "session">,
 ): string | null {
   const turn = thread.latestTurn;
   if (turn && turn.completedAt === null) {
-    return turn.startedAt ?? turn.requestedAt;
+    return firstValidTimestamp(turn.startedAt, turn.requestedAt, thread.session?.updatedAt);
   }
-  return thread.session?.updatedAt ?? null;
+  return firstValidTimestamp(thread.session?.updatedAt);
 }
 
 export function formatWorkingDurationLabel(elapsedMs: number): string {
