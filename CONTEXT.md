@@ -12,6 +12,9 @@ T3 Agent is the working name for a rich Hermes-native conversation surface and g
 - T3 Code's provider architecture should remain reusable, but the initial product exposes only Hermes.
 - Coding, project, workspace, and specialized sidebar integrations are later capabilities. Existing T3 Code implementations should initially be hidden rather than treated as the core product.
 - V1 targets Discord-like Hermes gateway parity before notification work: Hermes slash commands, streaming and interruption, approvals, clarifications, reconnect/restart recovery, and other core conversational gateway behavior must work end to end.
+- Gateway-visible commands come from Hermes' command/skill/plugin registry. T3 Agent provides searchable `/` autocomplete and forwards the selected command and arguments unchanged; Hermes remains the command implementation.
+- Discord-specific rich formatting and live voice-channel mechanics are not parity requirements. T3 Agent uses its native rich conversation renderer.
+- Voice-message recording/upload and Hermes transcription are the first post-v1 capability. Outbound Hermes TTS is separate and may follow it.
 - Notifications and T3 Connect rollout follow gateway parity rather than compensating for an incomplete interactive surface.
 
 ## Language
