@@ -95,6 +95,9 @@ const SHORT_SHA_LENGTH = 7;
 const TOAST_DESCRIPTION_MAX = 72;
 const STATUS_RESULT_CACHE_TTL = Duration.seconds(1);
 const STATUS_RESULT_CACHE_CAPACITY = 2_048;
+const PR_LOOKUP_CACHE_TTL = Duration.minutes(2);
+const PR_LOOKUP_FAILURE_TTL = Duration.seconds(20);
+const PR_LOOKUP_CACHE_CAPACITY = 2_048;
 type StripProgressContext<T> = T extends any ? Omit<T, "actionId" | "cwd" | "action"> : never;
 type GitActionProgressPayload = StripProgressContext<GitActionProgressEvent>;
 type GitActionProgressEmitter = (event: GitActionProgressPayload) => Effect.Effect<void, never>;
@@ -768,6 +771,82 @@ export const make = Effect.gen(function* () {
     normalizeStatusCacheKey(cwd).pipe(
       Effect.flatMap((cacheKey) => Cache.invalidate(localStatusResultCache, cacheKey)),
     );
+  // PR lookups hit the hosting provider's API (gh/glab/...), so they refresh
+  // on their own, slower cadence: ahead/behind counts stay fresh on every
+  // status poll while the PR association is re-fetched at most once per
+  // PR_LOOKUP_CACHE_TTL per branch. Git actions and user-driven refreshes bump
+  // the epoch (invalidateStatus) to bypass the cache immediately.
+  const prLookupEpochByCwd = new Map<string, number>();
+  const prLookupEpoch = (cwd: string) => prLookupEpochByCwd.get(cwd) ?? 0;
+  const bumpPrLookupEpoch = (cwd: string) =>
+    normalizeStatusCacheKey(cwd).pipe(
+      Effect.map((cacheKey) => {
+        prLookupEpochByCwd.set(cacheKey, prLookupEpoch(cacheKey) + 1);
+      }),
+    );
+  // Cache keys are NUL-joined [cwd, branch, upstreamRef, epoch] — none of the
+  // segments can contain a NUL byte, and refs are never empty, so "" decodes
+  // back to a null upstreamRef.
+  const prLookupCacheKey = (cwd: string, details: { branch: string; upstreamRef: string | null }) =>
+    [cwd, details.branch, details.upstreamRef ?? "", String(prLookupEpoch(cwd))].join("\u0000");
+  const prLookupCache = yield* Cache.makeWith(
+    (key: string) => {
+      const [cwd = "", branch = "", upstreamRef = ""] = key.split("\u0000");
+      return findLatestPr(cwd, {
+        branch,
+        upstreamRef: upstreamRef.length > 0 ? upstreamRef : null,
+      });
+    },
+    {
+      capacity: PR_LOOKUP_CACHE_CAPACITY,
+      timeToLive: (exit) => (Exit.isSuccess(exit) ? PR_LOOKUP_CACHE_TTL : PR_LOOKUP_FAILURE_TTL),
+    },
+  );
+  // A transient lookup failure (rate limit, network blip) must not clear an
+  // already-known PR badge, so the last successful answer per branch sticks
+  // around as the fallback.
+  const lastKnownPrByBranchKey = new Map<string, ReturnType<typeof toStatusPr> | null>();
+  const rememberLastKnownPr = (branchKey: string, pr: ReturnType<typeof toStatusPr> | null) => {
+    if (
+      !lastKnownPrByBranchKey.has(branchKey) &&
+      lastKnownPrByBranchKey.size >= PR_LOOKUP_CACHE_CAPACITY
+    ) {
+      const oldestKey = lastKnownPrByBranchKey.keys().next().value;
+      if (oldestKey !== undefined) {
+        lastKnownPrByBranchKey.delete(oldestKey);
+      }
+    }
+    lastKnownPrByBranchKey.set(branchKey, pr);
+  };
+  const lookupStatusPr = Effect.fn("lookupStatusPr")(function* (
+    cwd: string,
+    details: { branch: string; upstreamRef: string | null; isDefaultBranch: boolean },
+  ) {
+    const branchKey = `${cwd}\u0000${details.branch}\u0000${details.upstreamRef ?? ""}`;
+    return yield* Cache.get(prLookupCache, prLookupCacheKey(cwd, details)).pipe(
+      Effect.map((latest) => {
+        if (!latest) return null;
+        // On the default branch, only surface open PRs.
+        // Merged/closed matches are usually reverse-merge history, not the thread's PR context.
+        if (details.isDefaultBranch && latest.state !== "open") return null;
+        return toStatusPr(latest);
+      }),
+      Effect.tap((pr) => Effect.sync(() => rememberLastKnownPr(branchKey, pr))),
+      Effect.catch((error) =>
+        Effect.logWarning("PR lookup failed; keeping last known PR state.").pipe(
+          Effect.annotateLogs({
+            operation: "lookupStatusPr",
+            branch: details.branch,
+            errorTag:
+              typeof error === "object" && error !== null && "_tag" in error
+                ? String(error._tag)
+                : typeof error,
+          }),
+          Effect.as(lastKnownPrByBranchKey.get(branchKey) ?? null),
+        ),
+      ),
+    );
+  });
   const readRemoteStatus = Effect.fn("readRemoteStatus")(function* (
     cwd: string,
     options?: GitVcsDriver.GitRemoteStatusOptions,
@@ -781,19 +860,11 @@ export const make = Effect.gen(function* () {
 
     const pr =
       details.branch !== null
-        ? yield* findLatestPr(cwd, {
+        ? yield* lookupStatusPr(cwd, {
             branch: details.branch,
             upstreamRef: details.upstreamRef,
-          }).pipe(
-            Effect.map((latest) => {
-              if (!latest) return null;
-              // On the default branch, only surface open PRs.
-              // Merged/closed matches are usually reverse-merge history, not the thread's PR context.
-              if (details.isDefaultBranch && latest.state !== "open") return null;
-              return toStatusPr(latest);
-            }),
-            Effect.orElseSucceed(() => null),
-          )
+            isDefaultBranch: details.isDefaultBranch,
+          })
         : null;
 
     return {
@@ -1442,6 +1513,10 @@ export const make = Effect.gen(function* () {
     function* (cwd) {
       yield* invalidateLocalStatusResultCache(cwd);
       yield* invalidateRemoteStatusResultCache(cwd);
+      // Full invalidation is the explicit-freshness path (git actions, user
+      // refresh); it also bypasses the slow PR-lookup cache. The periodic
+      // status poll only invalidates local/remote and keeps the PR cache warm.
+      yield* bumpPrLookupEpoch(cwd);
     },
   );
 

@@ -50,6 +50,8 @@ interface FakeGhScenario {
   };
   repositoryCloneUrls?: Record<string, { url: string; sshUrl: string }>;
   failWith?: GitHubCli.GitHubCliError;
+  /** Let this many gh calls succeed before failWith kicks in (default 0 = fail immediately). */
+  failAfterCalls?: number;
 }
 
 function fakeGhOutput(stdout: string): VcsProcess.VcsProcessOutput {
@@ -382,7 +384,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
     const args = [...input.args];
     ghCalls.push(args.join(" "));
 
-    if (scenario.failWith) {
+    if (scenario.failWith && ghCalls.length > (scenario.failAfterCalls ?? 0)) {
       return Effect.fail(scenario.failWith);
     }
 
@@ -1333,6 +1335,47 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       const status = yield* manager.status({ cwd: repoDir });
       expect(status.refName).toBe("feature/status-no-gh");
       expect(status.pr).toBeNull();
+    }),
+  );
+
+  it.effect("status keeps the last known PR when a later lookup fails", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      yield* runGit(repoDir, ["checkout", "-b", "feature/pr-sticky"]);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "feature/pr-sticky"]);
+
+      const existingPr = {
+        number: 214,
+        title: "Sticky PR",
+        url: "https://github.com/pingdotgg/codething-mvp/pull/214",
+        baseRefName: "main",
+        headRefName: "feature/pr-sticky",
+      };
+      const { manager } = yield* makeManager({
+        ghScenario: {
+          // @effect-diagnostics-next-line preferSchemaOverJson:off
+          prListSequence: [JSON.stringify([existingPr])],
+          failWith: new GitHubCli.GitHubCliUnavailableError({
+            command: "gh",
+            cwd: repoDir,
+            cause: new Error("rate limited"),
+          }),
+          failAfterCalls: 1,
+        },
+      });
+
+      const first = yield* manager.status({ cwd: repoDir });
+      expect(first.pr?.number).toBe(214);
+
+      // An explicit invalidation (user refresh, git action) bypasses the PR
+      // cache and forces a live lookup — which now fails. The badge must keep
+      // the last known PR instead of blanking out.
+      yield* manager.invalidateStatus(repoDir);
+      const second = yield* manager.status({ cwd: repoDir });
+      expect(second.pr?.number).toBe(214);
     }),
   );
 

@@ -236,11 +236,24 @@ function sanitizeRemoteName(value: string): string {
 }
 
 function normalizeRemoteUrl(value: string): string {
-  return value
+  const normalized = value
     .trim()
     .replace(/\/+$/g, "")
     .replace(/\.git$/i, "")
     .toLowerCase();
+  // Reduce transport variants of the same repository to `host/path` so
+  // ensureRemote reuses an existing remote instead of adding an ssh/https
+  // duplicate (git@host:owner/repo, ssh://git@host/owner/repo,
+  // https://host/owner/repo all compare equal).
+  const scpLike = /^(?:ssh:\/\/)?(?:[^@/:]+@)([^:/]+)[:/](.+)$/.exec(normalized);
+  if (scpLike) {
+    return `${scpLike[1]}/${scpLike[2]}`;
+  }
+  const urlLike = /^(?:https?|git):\/\/(?:[^@/]+@)?(.+)$/.exec(normalized);
+  if (urlLike) {
+    return urlLike[1] ?? normalized;
+  }
+  return normalized;
 }
 
 function parseRemoteFetchUrls(stdout: string): Map<string, string> {
