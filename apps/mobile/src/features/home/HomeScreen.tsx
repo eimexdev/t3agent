@@ -805,6 +805,11 @@ export function HomeScreen(props: HomeScreenProps) {
   const listEmpty = !hasResults ? (
     hasSearchQuery ? (
       <EmptyState title="No results" detail={`No threads matching "${props.searchQuery}".`} />
+    ) : scopedProject !== null ? (
+      <EmptyState
+        title={`No threads in ${scopedProject.title}`}
+        detail="Choose another project or create a new task."
+      />
     ) : selectedEnvironmentLabel ? (
       <EmptyState
         title={`No threads in ${selectedEnvironmentLabel}`}

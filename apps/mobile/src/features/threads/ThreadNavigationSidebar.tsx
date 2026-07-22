@@ -885,7 +885,7 @@ function ThreadNavigationSidebarPane(
   // light the "customized" state while the beta is on.
   const filterCustomized = threadListV2Enabled
     ? options.selectedEnvironmentId !== null || selectedProjectKey !== null
-    : hasCustomHomeListOptions(options);
+    : hasCustomHomeListOptions({ ...options, selectedProjectKey });
   const filterIcon = filterCustomized
     ? "line.3.horizontal.decrease.circle.fill"
     : "line.3.horizontal.decrease.circle";
@@ -933,7 +933,9 @@ function ThreadNavigationSidebarPane(
         ? "Loading threads…"
         : props.searchQuery.trim().length > 0
           ? "No matching threads"
-          : "No threads yet"}
+          : selectedProject !== null
+            ? `No threads in ${selectedProject.title}`
+            : "No threads yet"}
     </Text>
   );
 
