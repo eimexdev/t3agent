@@ -727,6 +727,13 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         });
         assert.equal(reusedForSshPort, "origin");
 
+        const reusedForSshWithPort = yield* driver.ensureRemote({
+          cwd,
+          preferredName: "pingdotgg",
+          url: "ssh://git@github.com:22/pingdotgg/t3code.git",
+        });
+        assert.equal(reusedForSshWithPort, "origin");
+
         const addedForFork = yield* driver.ensureRemote({
           cwd,
           preferredName: "octocat",
