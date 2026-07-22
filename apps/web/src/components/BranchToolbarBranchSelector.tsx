@@ -3,7 +3,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, VcsRef, ThreadId } from "@t3tools/contracts";
+import type { ContextMenuItem, EnvironmentId, VcsRef, ThreadId } from "@t3tools/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { ChevronDownIcon, GitBranchIcon, RefreshCwIcon, SearchIcon } from "lucide-react";
 import {
@@ -17,9 +17,12 @@ import {
   useRef,
   useState,
   useTransition,
+  type MouseEvent as ReactMouseEvent,
 } from "react";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
+import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
+import { readLocalApi } from "../localApi";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { usePaginatedBranches } from "../state/queries";
 import { useProject, useThread } from "../state/entities";
@@ -317,6 +320,45 @@ export function BranchToolbarBranchSelector({
   // ---------------------------------------------------------------------------
   // Branch actions
   // ---------------------------------------------------------------------------
+  const copyBranchName = useCallback((branchName: string) => {
+    void writeTextToClipboard(branchName, "branch name").then(
+      (didCopy) => {
+        if (!didCopy) return;
+        toastManager.add({
+          type: "success",
+          title: "Branch name copied",
+          description: branchName,
+        });
+      },
+      (error: unknown) => {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to copy branch name",
+            description: toBranchActionErrorMessage(error),
+          }),
+        );
+      },
+    );
+  }, []);
+
+  const handleBranchContextMenu = useCallback(
+    (event: ReactMouseEvent, branchName: string | null) => {
+      if (!branchName) return;
+      const api = readLocalApi();
+      if (!api) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const items: ContextMenuItem<"copy-branch-name">[] = [
+        { id: "copy-branch-name", label: "Copy branch name", icon: "copy" },
+      ];
+      void api.contextMenu.show(items, { x: event.clientX, y: event.clientY }).then((action) => {
+        if (action === "copy-branch-name") copyBranchName(branchName);
+      });
+    },
+    [copyBranchName],
+  );
+
   const runBranchAction = (action: () => Promise<void>) => {
     startBranchActionTransition(async () => {
       await action();
@@ -624,6 +666,7 @@ export function BranchToolbarBranchSelector({
         value={itemValue}
         className="pe-1.5"
         onClick={() => selectBranch(refName)}
+        onContextMenu={(event) => handleBranchContextMenu(event, itemValue)}
       >
         <div className="flex w-full min-w-0 items-center justify-between gap-2">
           <span className="min-w-0 flex-1 truncate">{itemValue}</span>
@@ -678,6 +721,7 @@ export function BranchToolbarBranchSelector({
           render={<Button variant="ghost" size="xs" />}
           className="min-w-0 text-muted-foreground/70 hover:text-foreground/80"
           disabled={isInitialBranchesLoadPending || isBranchActionPending}
+          onContextMenu={(event) => handleBranchContextMenu(event, resolvedActiveBranch)}
         >
           <GitBranchIcon className="size-3 shrink-0 opacity-70" />
           <span className="min-w-0 max-w-[240px] truncate">{triggerLabel}</span>
