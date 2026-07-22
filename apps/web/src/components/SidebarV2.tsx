@@ -324,9 +324,9 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   const rowClassName = cn(
     "group/v2-row relative w-full cursor-pointer select-none rounded-md text-left",
     props.isActive
-      ? "bg-foreground/[0.11] text-foreground dark:bg-white/[0.11]"
+      ? "bg-background text-foreground shadow-xs/5 ring-1 ring-inset ring-border dark:bg-white/[0.11] dark:shadow-none dark:ring-0"
       : isSelected
-        ? "bg-foreground/[0.07] text-foreground dark:bg-white/[0.07]"
+        ? "bg-muted text-foreground dark:bg-white/[0.07]"
         : "hover:bg-accent/65",
   );
 
@@ -355,7 +355,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                 : status !== "ready"
                   ? "font-semibold text-foreground/95"
                   : shouldRecede
-                    ? "font-normal text-muted-foreground/75"
+                    ? "font-normal text-muted-foreground/80"
                     : "font-medium text-foreground/90",
             )
           : cn(
@@ -364,7 +364,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                 ? "text-foreground"
                 : isUnread
                   ? "font-medium text-muted-foreground"
-                  : "text-muted-foreground/60",
+                  : "text-muted-foreground/70",
             ),
       )}
     >
@@ -399,8 +399,8 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
       >
         {props.showSettledGap ? (
           <div aria-hidden className="mb-1 mt-3 flex items-center gap-2 px-2.5">
-            <span className="text-[10px] font-medium text-muted-foreground/50">Settled</span>
-            <span className="h-px flex-1 bg-border/60" />
+            <span className="text-[10px] font-medium text-muted-foreground/65">Settled</span>
+            <span className="h-px flex-1 bg-border/80" />
           </div>
         ) : null}
         <div
@@ -434,7 +434,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
               the time/jump label yields to the settle affordance. */}
           {prBadge}
           <span className="relative ml-auto flex h-6 min-w-8 shrink-0 items-center justify-end">
-            <span className="inline-flex justify-end tabular-nums text-muted-foreground/40 transition-opacity group-hover/v2-row:opacity-0">
+            <span className="inline-flex justify-end tabular-nums text-muted-foreground/55 transition-opacity group-hover/v2-row:opacity-0">
               <span className="text-[13px]">
                 {props.jumpLabel ??
                   compactSidebarTimeLabel(
@@ -479,17 +479,17 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
         tabIndex={0}
         data-testid="sidebar-v2-row-card"
         className={cn(
-          // Every card carries a faint tonal fill so threads read as
-          // discrete objects; active/selected/hover are brighter tones of
-          // the same treatment rather than a different shape.
+          // Light cards sit just above the zinc rail instead of tinting it
+          // darker. Active/selected rows then add only a restrained neutral
+          // fill. Dark mode keeps the original graphite treatments.
           "group/v2-row relative w-full cursor-pointer select-none overflow-hidden rounded-lg text-left transition-colors",
           props.isActive
-            ? "bg-foreground/[0.11] text-foreground dark:bg-white/[0.11]"
+            ? "bg-background text-foreground shadow-xs/5 ring-1 ring-inset ring-border dark:bg-white/[0.11] dark:shadow-none dark:ring-0"
             : isSelected
-              ? "bg-foreground/[0.07] text-foreground dark:bg-white/[0.07]"
+              ? "bg-muted text-foreground dark:bg-white/[0.07]"
               : shouldRecede
-                ? "bg-foreground/[0.025] hover:bg-accent/45 dark:bg-white/[0.025]"
-                : "bg-foreground/[0.035] hover:bg-accent/65 dark:bg-white/[0.035]",
+                ? "bg-background/50 hover:bg-accent/45 dark:bg-white/[0.025]"
+                : "bg-background hover:bg-accent/65 dark:bg-white/[0.035]",
         )}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
@@ -506,7 +506,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
             {props.projectTitle ? (
               <span
                 className={cn(
-                  "min-w-0 flex-1 truncate text-[13px] leading-5 text-muted-foreground/70",
+                  "min-w-0 flex-1 truncate text-[13px] leading-5 text-muted-foreground/85",
                   isUnread || status !== "ready"
                     ? "font-semibold"
                     : shouldRecede
@@ -520,7 +520,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
               <span className="flex-1" />
             )}
             <span className="relative ml-auto flex h-5 min-w-8 shrink-0 items-center justify-end pl-1 text-[13px]">
-              <span className="tabular-nums text-muted-foreground/55 transition-opacity group-hover/v2-row:opacity-0">
+              <span className="tabular-nums text-muted-foreground/65 transition-opacity group-hover/v2-row:opacity-0">
                 {props.jumpLabel ? (
                   props.jumpLabel
                 ) : topStatus ? (
@@ -556,7 +556,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
             </span>
           </div>
           <div className="mt-1 flex min-w-0">{title}</div>
-          <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground/65">
+          <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground/75">
             {thread.branch ? (
               <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap font-mono [mask-image:linear-gradient(to_right,#000_0,#000_calc(100%-1rem),transparent_100%)] [-webkit-mask-image:linear-gradient(to_right,#000_0,#000_calc(100%-1rem),transparent_100%)]">
                 {thread.branch}
@@ -805,7 +805,7 @@ export default function SidebarV2() {
   // filter context changes so a scope/search flip never inherits a deep
   // page state.
   const [settledVisibleCount, setSettledVisibleCount] = useState(SETTLED_TAIL_INITIAL_COUNT);
-  const settledResetKey = `${projectScopeKey ?? "all"}`;
+  const settledResetKey = projectScopeKey ?? "all";
   const lastSettledResetKeyRef = useRef(settledResetKey);
   if (lastSettledResetKeyRef.current !== settledResetKey) {
     lastSettledResetKeyRef.current = settledResetKey;
@@ -1415,12 +1415,12 @@ export default function SidebarV2() {
                 render={
                   <SidebarMenuButton
                     size="sm"
-                    className="gap-2 border border-border bg-background/60 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground focus-visible:ring-0"
+                    className="gap-2 border border-border bg-background px-2 py-1.5 text-muted-foreground shadow-xs/5 hover:bg-background hover:text-foreground focus-visible:ring-0 dark:bg-background/60 dark:shadow-none dark:hover:bg-accent"
                     data-testid="command-palette-trigger"
                   />
                 }
               >
-                <SearchIcon className="size-3.5 text-muted-foreground/70" />
+                <SearchIcon className="size-3.5 text-muted-foreground/80" />
                 <span className="flex-1 truncate text-left text-xs">Search</span>
                 {commandPaletteShortcutLabel ? (
                   <Kbd className="h-4 min-w-0 rounded-sm px-1.5 text-[10px]">
@@ -1432,7 +1432,7 @@ export default function SidebarV2() {
             <SidebarMenuItem className="shrink-0">
               <SidebarMenuButton
                 size="sm"
-                className="size-7 justify-center border border-border bg-background/60 p-0 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
+                className="size-7 justify-center border border-border bg-background p-0 text-muted-foreground shadow-xs/5 hover:bg-background hover:text-foreground dark:bg-background/60 dark:shadow-none dark:hover:bg-accent"
                 onClick={handleNewThreadClick}
                 disabled={projects.length === 0}
                 aria-label="New thread"
@@ -1443,7 +1443,7 @@ export default function SidebarV2() {
                   side: "right",
                 }}
               >
-                <SquarePenIcon className="size-3.5 text-muted-foreground/70" />
+                <SquarePenIcon className="size-3.5 text-muted-foreground/80" />
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
@@ -1472,7 +1472,7 @@ export default function SidebarV2() {
                       "shrink-0 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors",
                       projectScopeKey === null
                         ? "border-foreground/15 bg-accent text-foreground"
-                        : "border-black/15 text-muted-foreground hover:border-black/40 hover:text-foreground dark:border-white/15 dark:hover:border-white/40",
+                        : "border-border bg-background/60 text-muted-foreground hover:border-input hover:bg-background hover:text-foreground dark:border-white/15 dark:bg-transparent dark:hover:border-white/40 dark:hover:bg-transparent",
                     )}
                   >
                     All
@@ -1492,7 +1492,7 @@ export default function SidebarV2() {
                         "flex shrink-0 items-center gap-1.5 rounded-md border py-1 pl-1.5 pr-2.5 text-[11px] font-medium transition-colors",
                         isScoped
                           ? "border-foreground/15 bg-accent text-foreground"
-                          : "border-black/15 text-muted-foreground hover:border-black/40 hover:text-foreground dark:border-white/15 dark:hover:border-white/40",
+                          : "border-border bg-background/60 text-muted-foreground hover:border-input hover:bg-background hover:text-foreground dark:border-white/15 dark:bg-transparent dark:hover:border-white/40 dark:hover:bg-transparent",
                       )}
                     >
                       <ProjectFavicon
@@ -1505,7 +1505,7 @@ export default function SidebarV2() {
                   );
                 })}
               </div>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex w-12 items-center justify-end bg-gradient-to-r from-transparent via-card/90 to-card">
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex w-12 items-center justify-end bg-linear-to-r from-transparent via-card/90 to-card">
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -1513,7 +1513,7 @@ export default function SidebarV2() {
                         type="button"
                         aria-label="Add project"
                         onClick={openAddProjectCommandPalette}
-                        className="pointer-events-auto flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-card text-muted-foreground/70 shadow-sm transition-colors hover:bg-accent hover:text-foreground"
+                        className="pointer-events-auto flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-xs transition-colors hover:border-input hover:bg-accent hover:text-foreground dark:bg-card dark:shadow-sm"
                       />
                     }
                   >
@@ -1586,7 +1586,7 @@ export default function SidebarV2() {
                 <button
                   type="button"
                   onClick={showMoreSettled}
-                  className="mt-1 flex h-[30px] w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-black/15 font-mono text-[11px] text-muted-foreground transition-colors hover:border-solid hover:border-black/30 hover:text-foreground dark:border-white/15 dark:hover:border-white/30"
+                  className="mt-1 flex h-[30px] w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border font-mono text-[11px] text-muted-foreground transition-colors hover:border-solid hover:border-input hover:bg-background/45 hover:text-foreground dark:border-white/15 dark:hover:border-white/30 dark:hover:bg-transparent"
                 >
                   Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
                   <span className="text-muted-foreground/50">
@@ -1619,7 +1619,7 @@ export default function SidebarV2() {
           ) : null}
         </SidebarGroup>
       </SidebarContent>
-      <SidebarSeparator />
+      <SidebarSeparator className="bg-border/80" />
       <SidebarChromeFooter />
       <Dialog open={newThreadPickerOpen} onOpenChange={setNewThreadPickerOpen}>
         <DialogPopup className="max-w-sm p-0">
