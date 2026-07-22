@@ -70,11 +70,13 @@ interface HomeScreenProps {
   readonly environments: ReadonlyArray<HomeListFilterMenuEnvironment>;
   readonly searchQuery: string;
   readonly selectedEnvironmentId: EnvironmentId | null;
+  readonly selectedProjectKey: string | null;
   readonly projectSortOrder: HomeProjectSortOrder;
   readonly threadSortOrder: SidebarThreadSortOrder;
   readonly projectGroupingMode: SidebarProjectGroupingMode;
   readonly onSearchQueryChange: (query: string) => void;
   readonly onEnvironmentChange: (environmentId: EnvironmentId | null) => void;
+  readonly onProjectChange: (projectKey: string | null) => void;
   readonly onProjectSortOrderChange: (sortOrder: HomeProjectSortOrder) => void;
   readonly onThreadSortOrderChange: (sortOrder: SidebarThreadSortOrder) => void;
   readonly onProjectGroupingModeChange: (mode: SidebarProjectGroupingMode) => void;
@@ -317,12 +319,49 @@ export function HomeScreen(props: HomeScreenProps) {
     onScrollBeginDrag: handleScrollBeginDrag,
   });
 
+  const scopedProject = useMemo(
+    () =>
+      props.selectedProjectKey === null
+        ? null
+        : (props.projects.find(
+            (project) =>
+              scopedProjectKey(project.environmentId, project.id) === props.selectedProjectKey,
+          ) ?? null),
+    [props.projects, props.selectedProjectKey],
+  );
+  const scopedProjects = useMemo(
+    () => (scopedProject === null ? props.projects : [scopedProject]),
+    [props.projects, scopedProject],
+  );
+  const scopedThreads = useMemo(
+    () =>
+      scopedProject === null
+        ? props.threads
+        : props.threads.filter(
+            (thread) =>
+              thread.environmentId === scopedProject.environmentId &&
+              thread.projectId === scopedProject.id,
+          ),
+    [props.threads, scopedProject],
+  );
+  const scopedPendingTasks = useMemo(
+    () =>
+      scopedProject === null
+        ? props.pendingTasks
+        : props.pendingTasks.filter(
+            (pendingTask) =>
+              pendingTask.message.environmentId === scopedProject.environmentId &&
+              pendingTask.creation.projectId === scopedProject.id,
+          ),
+    [props.pendingTasks, scopedProject],
+  );
+
   const projectGroups = useMemo(
     () =>
       buildHomeThreadGroups({
-        projects: props.projects,
-        threads: props.threads,
-        pendingTasks: props.pendingTasks,
+        projects: scopedProjects,
+        threads: scopedThreads,
+        pendingTasks: scopedPendingTasks,
         environmentId: props.selectedEnvironmentId,
         searchQuery: props.searchQuery,
         projectSortOrder: props.projectSortOrder,
@@ -330,14 +369,14 @@ export function HomeScreen(props: HomeScreenProps) {
         projectGroupingMode: props.projectGroupingMode,
       }),
     [
-      props.pendingTasks,
       props.projectGroupingMode,
-      props.projects,
       props.projectSortOrder,
       props.searchQuery,
       props.selectedEnvironmentId,
       props.threadSortOrder,
-      props.threads,
+      scopedPendingTasks,
+      scopedProjects,
+      scopedThreads,
     ],
   );
 
@@ -368,7 +407,8 @@ export function HomeScreen(props: HomeScreenProps) {
     return map;
   }, [props.projects]);
 
-  const [v2ProjectScopeKey, setV2ProjectScopeKey] = useState<string | null>(null);
+  const v2ProjectScopeKey = props.selectedProjectKey;
+  const setV2ProjectScopeKey = props.onProjectChange;
   const v2ScopeProjects = useMemo(
     () =>
       props.selectedEnvironmentId === null
@@ -385,12 +425,6 @@ export function HomeScreen(props: HomeScreenProps) {
           ) ?? null),
     [v2ProjectScopeKey, v2ScopeProjects],
   );
-  useEffect(() => {
-    if (v2ProjectScopeKey !== null && v2ScopedProject === null) {
-      setV2ProjectScopeKey(null);
-    }
-  }, [v2ProjectScopeKey, v2ScopedProject]);
-
   // Thread List v2 (beta): one flat list in creation order, no grouping.
   // Settled threads collapse into a recency tail below the card block.
   // Settled threads stay in the live shell stream (settled ≠ archived), so
