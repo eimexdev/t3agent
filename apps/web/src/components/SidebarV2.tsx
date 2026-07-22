@@ -468,15 +468,15 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
         tabIndex={0}
         data-testid="sidebar-v2-row-card"
         className={cn(
-          // Light cards are white objects lifted off the zinc rail: hairline
-          // rings carry the resting/active hierarchy (hover deepens the ring,
-          // active deepens it further and adds a shadow). Dark mode keeps the
-          // original graphite fills where rings would glow too hard.
+          // Light cards are white objects lifted off the zinc rail. The active
+          // thread deliberately gets a blue selection surface and leading rail:
+          // a slightly darker white card was too easy to lose in a light
+          // sidebar. Dark mode keeps its graphite selection treatment.
           "group/v2-row relative w-full cursor-pointer select-none overflow-hidden rounded-lg text-left transition-colors",
           props.isActive
-            ? "bg-background text-foreground shadow-xs ring-1 ring-inset ring-black/[0.13] dark:bg-white/[0.11] dark:shadow-none dark:ring-0"
+            ? "bg-primary/[0.12] text-foreground shadow-sm ring-1 ring-inset ring-primary/45 before:absolute before:inset-y-2 before:left-0 before:w-1 before:rounded-r-full before:bg-primary dark:bg-white/[0.11] dark:shadow-none dark:ring-0 dark:before:bg-primary"
             : isSelected
-              ? "bg-muted text-foreground ring-1 ring-inset ring-black/[0.05] dark:bg-white/[0.07] dark:ring-0"
+              ? "bg-primary/[0.07] text-foreground ring-1 ring-inset ring-primary/25 dark:bg-white/[0.07] dark:ring-0"
               : shouldRecede
                 ? "bg-background/70 ring-1 ring-inset ring-black/[0.045] hover:bg-background hover:ring-black/[0.08] dark:bg-white/[0.025] dark:ring-0 dark:hover:bg-accent/45"
                 : "bg-background shadow-xs/5 ring-1 ring-inset ring-black/[0.06] hover:ring-black/[0.11] dark:bg-white/[0.035] dark:shadow-none dark:ring-0 dark:hover:bg-accent/65",
