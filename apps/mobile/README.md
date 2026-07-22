@@ -68,6 +68,10 @@ The first native build may need roughly 20 GB of free space for SDK, NDK, Gradle
 caches. In a development build on Android, Settings includes an **Android Live Update · Mock**
 section for exercising the active-agents and needs-attention states without the relay.
 
+The mock preview is entirely local. It does not require T3 Connect, a hosted relay, Clerk
+configuration, Firebase/FCM credentials, or a connected T3 Code server. Remote delivery and
+background reconciliation require the separate T3 Connect infrastructure.
+
 Build and run the local iOS dev client:
 
 ```bash

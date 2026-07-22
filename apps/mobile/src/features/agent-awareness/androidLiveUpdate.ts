@@ -38,7 +38,7 @@ const MOCK_SNAPSHOTS: Record<AndroidLiveUpdateMockKind, AndroidLiveUpdateSnapsho
     lines: [
       "● Implementing Android Live Updates",
       "● Running the mobile typecheck",
-      "◌ Reviewing changes from #3579",
+      "◌ Reviewing recent agent changes",
     ],
     shortCriticalText: "3",
   },
