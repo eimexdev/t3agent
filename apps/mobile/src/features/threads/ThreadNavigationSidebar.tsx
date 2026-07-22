@@ -244,12 +244,9 @@ function ThreadNavigationSidebarPane(
       selectedProjectKey === null
         ? null
         : (projects.find(
-            (project) =>
-              scopedProjectKey(project.environmentId, project.id) === selectedProjectKey &&
-              (options.selectedEnvironmentId === null ||
-                project.environmentId === options.selectedEnvironmentId),
+            (project) => scopedProjectKey(project.environmentId, project.id) === selectedProjectKey,
           ) ?? null),
-    [options.selectedEnvironmentId, projects, selectedProjectKey],
+    [projects, selectedProjectKey],
   );
   useEffect(() => {
     if (
