@@ -34,6 +34,8 @@ import {
   VcsPullResult,
   VcsRemoveWorktreeInput,
   GitResolvePullRequestResult,
+  GitIssueRefInput,
+  GitResolveIssueResult,
   GitRunStackedActionInput,
   VcsStatusInput,
   VcsStatusResult,
@@ -174,6 +176,7 @@ export const WS_METHODS = {
   // Git workflow methods
   gitRunStackedAction: "git.runStackedAction",
   gitResolvePullRequest: "git.resolvePullRequest",
+  gitResolveIssue: "git.resolveIssue",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
 
   // Review methods
@@ -431,6 +434,12 @@ export const WsGitRunStackedActionRpc = Rpc.make(WS_METHODS.gitRunStackedAction,
 export const WsGitResolvePullRequestRpc = Rpc.make(WS_METHODS.gitResolvePullRequest, {
   payload: GitPullRequestRefInput,
   success: GitResolvePullRequestResult,
+  error: Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),
+});
+
+export const WsGitResolveIssueRpc = Rpc.make(WS_METHODS.gitResolveIssue, {
+  payload: GitIssueRefInput,
+  success: GitResolveIssueResult,
   error: Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),
 });
 
@@ -719,6 +728,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsVcsRefreshStatusRpc,
   WsGitRunStackedActionRpc,
   WsGitResolvePullRequestRpc,
+  WsGitResolveIssueRpc,
   WsGitPreparePullRequestThreadRpc,
   WsVcsListRefsRpc,
   WsVcsCreateWorktreeRpc,

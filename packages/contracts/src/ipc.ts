@@ -15,6 +15,8 @@ import type {
   GitPreparePullRequestThreadResult,
   GitPullRequestRefInput,
   GitResolvePullRequestResult,
+  GitIssueRefInput,
+  GitResolveIssueResult,
   VcsStatusInput,
   VcsStatusResult,
 } from "./git.ts";
@@ -1210,6 +1212,7 @@ export interface EnvironmentApi {
   };
   git: {
     resolvePullRequest: (input: GitPullRequestRefInput) => Promise<GitResolvePullRequestResult>;
+    resolveIssue: (input: GitIssueRefInput) => Promise<GitResolveIssueResult>;
     preparePullRequestThread: (
       input: GitPreparePullRequestThreadInput,
     ) => Promise<GitPreparePullRequestThreadResult>;
