@@ -223,9 +223,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             workspaceRoot={props.project.workspaceRoot}
           />
         ) : null}
-        {/* "project · machine" share one truncating line — both answer
-            "where does this thread live", and pairing them keeps the
-            meta row down to branch + PR + provider. */}
         <Text
           className={cn(
             "flex-1 text-sm font-t3-medium",
@@ -234,17 +231,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           numberOfLines={1}
         >
           {props.project?.title ?? ""}
-          {props.environmentLabel ? (
-            <Text
-              className={cn(
-                "text-sm",
-                selected ? "text-user-bubble-foreground-muted" : "text-foreground-tertiary",
-              )}
-            >
-              {"  ·  "}
-              {props.environmentLabel}
-            </Text>
-          ) : null}
         </Text>
         <Text
           className={cn(
@@ -277,16 +263,39 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           >
             {thread.session.lastError}
           </Text>
-        ) : thread.branch ? (
+        ) : thread.branch || props.environmentLabel ? (
+          /* "branch · machine" share one truncating line. The machine sits
+             last so a tight fit cuts the repetitive label, not the branch —
+             and machine-only fills the row for non-git projects. */
           <Text
             className={cn(
               "flex-1 text-xs",
               selected ? "text-user-bubble-foreground-muted" : "text-foreground-muted",
             )}
             numberOfLines={1}
-            style={{ fontFamily: MONO_FONT }}
           >
-            {thread.branch}
+            {thread.branch ? (
+              <Text
+                className={cn(
+                  "text-xs",
+                  selected ? "text-user-bubble-foreground-muted" : "text-foreground-muted",
+                )}
+                style={{ fontFamily: MONO_FONT }}
+              >
+                {thread.branch}
+              </Text>
+            ) : null}
+            {thread.branch && props.environmentLabel ? "  ·  " : null}
+            {props.environmentLabel ? (
+              <Text
+                className={cn(
+                  "text-xs",
+                  selected ? "text-user-bubble-foreground-muted" : "text-foreground-tertiary",
+                )}
+              >
+                {props.environmentLabel}
+              </Text>
+            ) : null}
           </Text>
         ) : (
           <View className="flex-1" />
