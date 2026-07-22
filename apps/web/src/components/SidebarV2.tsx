@@ -324,7 +324,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   const rowClassName = cn(
     "group/v2-row relative w-full cursor-pointer select-none rounded-md text-left",
     props.isActive
-      ? "bg-background text-foreground shadow-xs/5 ring-1 ring-inset ring-border dark:bg-white/[0.11] dark:shadow-none dark:ring-0"
+      ? "bg-background text-foreground shadow-xs ring-1 ring-inset ring-black/[0.13] dark:bg-white/[0.11] dark:shadow-none dark:ring-0"
       : isSelected
         ? "bg-muted text-foreground dark:bg-white/[0.07]"
         : "hover:bg-accent/65",
@@ -479,17 +479,18 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
         tabIndex={0}
         data-testid="sidebar-v2-row-card"
         className={cn(
-          // Light cards sit just above the zinc rail instead of tinting it
-          // darker. Active/selected rows then add only a restrained neutral
-          // fill. Dark mode keeps the original graphite treatments.
+          // Light cards are white objects lifted off the zinc rail: hairline
+          // rings carry the resting/active hierarchy (hover deepens the ring,
+          // active deepens it further and adds a shadow). Dark mode keeps the
+          // original graphite fills where rings would glow too hard.
           "group/v2-row relative w-full cursor-pointer select-none overflow-hidden rounded-lg text-left transition-colors",
           props.isActive
-            ? "bg-background text-foreground shadow-xs/5 ring-1 ring-inset ring-border dark:bg-white/[0.11] dark:shadow-none dark:ring-0"
+            ? "bg-background text-foreground shadow-xs ring-1 ring-inset ring-black/[0.13] dark:bg-white/[0.11] dark:shadow-none dark:ring-0"
             : isSelected
-              ? "bg-muted text-foreground dark:bg-white/[0.07]"
+              ? "bg-muted text-foreground ring-1 ring-inset ring-black/[0.05] dark:bg-white/[0.07] dark:ring-0"
               : shouldRecede
-                ? "bg-background/50 hover:bg-accent/45 dark:bg-white/[0.025]"
-                : "bg-background hover:bg-accent/65 dark:bg-white/[0.035]",
+                ? "bg-background/70 ring-1 ring-inset ring-black/[0.045] hover:bg-background hover:ring-black/[0.08] dark:bg-white/[0.025] dark:ring-0 dark:hover:bg-accent/45"
+                : "bg-background shadow-xs/5 ring-1 ring-inset ring-black/[0.06] hover:ring-black/[0.11] dark:bg-white/[0.035] dark:shadow-none dark:ring-0 dark:hover:bg-accent/65",
         )}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
@@ -1471,8 +1472,8 @@ export default function SidebarV2() {
                     className={cn(
                       "shrink-0 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors",
                       projectScopeKey === null
-                        ? "border-foreground/15 bg-accent text-foreground"
-                        : "border-border bg-background/60 text-muted-foreground hover:border-input hover:bg-background hover:text-foreground dark:border-white/15 dark:bg-transparent dark:hover:border-white/40 dark:hover:bg-transparent",
+                        ? "border-foreground/20 bg-background text-foreground shadow-xs/5 dark:border-foreground/15 dark:bg-accent dark:shadow-none"
+                        : "border-border bg-transparent text-muted-foreground hover:border-input hover:bg-background hover:text-foreground dark:border-white/15 dark:hover:border-white/40 dark:hover:bg-transparent",
                     )}
                   >
                     All
@@ -1491,8 +1492,8 @@ export default function SidebarV2() {
                       className={cn(
                         "flex shrink-0 items-center gap-1.5 rounded-md border py-1 pl-1.5 pr-2.5 text-[11px] font-medium transition-colors",
                         isScoped
-                          ? "border-foreground/15 bg-accent text-foreground"
-                          : "border-border bg-background/60 text-muted-foreground hover:border-input hover:bg-background hover:text-foreground dark:border-white/15 dark:bg-transparent dark:hover:border-white/40 dark:hover:bg-transparent",
+                          ? "border-foreground/20 bg-background text-foreground shadow-xs/5 dark:border-foreground/15 dark:bg-accent dark:shadow-none"
+                          : "border-border bg-transparent text-muted-foreground hover:border-input hover:bg-background hover:text-foreground dark:border-white/15 dark:hover:border-white/40 dark:hover:bg-transparent",
                       )}
                     >
                       <ProjectFavicon

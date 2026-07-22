@@ -469,21 +469,23 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 }
 
 /* Give the navigation rail its own surface instead of borrowing the workspace
-   card color. Light mode uses an airy three-surface hierarchy: a zinc-25 rail,
-   white controls and thread cards, then a restrained neutral tint for hover
-   and selection. The scoped semantic tokens keep sidebar v2's palette from
-   changing v1 or the settings nav. */
+   card color. Light mode is a three-surface hierarchy: a light zinc rail
+   (--card), white cards and controls lifted off it (--background), and
+   restrained neutral tints for hover/selection. The rail must sit far enough
+   below white that cards read as objects without heavy borders. The scoped
+   semantic tokens keep sidebar v2's palette from changing v1 or the settings
+   nav. */
 .app-sidebar {
   --background: oklch(1 0 0);
-  --foreground: oklch(0.23 0 0);
-  --card: oklch(0.992 0 0);
+  --foreground: oklch(0.25 0.008 265);
+  --card: oklch(0.972 0.003 265);
   --card-foreground: var(--foreground);
-  --accent: oklch(0.975 0 0);
-  --accent-foreground: oklch(0.2 0 0);
-  --muted: oklch(0.985 0 0);
-  --muted-foreground: oklch(0.45 0 0);
-  --border: oklch(0.9 0 0 / 70%);
-  --input: oklch(0.84 0 0 / 70%);
+  --accent: oklch(0.938 0.005 265);
+  --accent-foreground: oklch(0.2 0.008 265);
+  --muted: oklch(0.936 0.005 265);
+  --muted-foreground: oklch(0.46 0.012 265);
+  --border: oklch(0 0 0 / 10%);
+  --input: oklch(0 0 0 / 16%);
   --sidebar-stage-fade: var(--card);
   background-color: var(--card);
 }
