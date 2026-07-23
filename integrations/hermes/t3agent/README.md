@@ -1,5 +1,9 @@
 # T3 Agent Hermes platform plugin
 
+Product-level conversation and lifecycle semantics are documented in the
+[T3 Agent architecture](../../../docs/architecture/t3-agent.md). This README
+documents only the plugin's installation, wire protocol, and operations.
+
 This directory is the Hermes-native half of the T3 Agent gateway. Hermes stays
 Hermes: it owns conversations, models, tools, cron jobs, approvals, and async
 work. The T3 fork is a thread-native client and durable delivery surface.

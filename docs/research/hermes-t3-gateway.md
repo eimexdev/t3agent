@@ -1,5 +1,11 @@
 # T3 Code as a Hermes gateway channel
 
+> **Decision note:** This is a pinned research snapshot. The implemented
+> product no longer exposes projects or per-thread working directories as core
+> Hermes concepts. See the authoritative
+> [T3 Agent product architecture](../architecture/t3-agent.md) and
+> [roadmap](../project/t3-agent-roadmap.md) for current decisions.
+
 Research snapshot: T3 Code commit [`9a0a07167f0623c3a7db0ffeff2e3939760309df`](https://github.com/pingdotgg/t3code/tree/9a0a07167f0623c3a7db0ffeff2e3939760309df) and Hermes Agent commit [`e0b9ab5ac5d0b593df4f4a289200fcc116d5f75f`](https://github.com/NousResearch/hermes-agent/tree/e0b9ab5ac5d0b593df4f4a289200fcc116d5f75f), inspected 2026-07-22.
 
 ## Corrected conclusion
@@ -26,13 +32,13 @@ Hermes remains the source of truth for agent execution, conversation memory, gat
 
 This is a materially different architecture from the ACP-provider approach:
 
-| Concern | ACP provider integration | Gateway/channel integration |
-|---|---|---|
-| Agent owner | T3 starts an ACP subprocess per provider lifecycle | The long-running Hermes gateway owns the agent |
-| Hermes CLI/gateway continuity | Separate surface/session path | Same Hermes state, tools, cron, memory, and gateway behavior |
-| Proactive delivery | Not inherent | Native platform-adapter responsibility |
-| Cron | Must be recreated or separately imported | Existing Hermes scheduler delivers to `t3` |
-| Correct fit for this goal | No | Yes |
+| Concern                       | ACP provider integration                           | Gateway/channel integration                                  |
+| ----------------------------- | -------------------------------------------------- | ------------------------------------------------------------ |
+| Agent owner                   | T3 starts an ACP subprocess per provider lifecycle | The long-running Hermes gateway owns the agent               |
+| Hermes CLI/gateway continuity | Separate surface/session path                      | Same Hermes state, tools, cron, memory, and gateway behavior |
+| Proactive delivery            | Not inherent                                       | Native platform-adapter responsibility                       |
+| Cron                          | Must be recreated or separately imported           | Existing Hermes scheduler delivers to `t3`                   |
+| Correct fit for this goal     | No                                                 | Yes                                                          |
 
 ## Why this fits Hermes' existing architecture
 
