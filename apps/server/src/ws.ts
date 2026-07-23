@@ -1689,18 +1689,33 @@ const makeWsRpcLayer = (
                 createdAt,
               });
 
-              const fork = yield* client.forkSession({
-                protocolVersion: HERMES_BRIDGE_PROTOCOL_VERSION,
-                requestId: HermesBridgeRequestId.make(
-                  `conversation-fork:${source.sessionId}:${threadId}`,
-                ),
-                type: "session.fork",
-                sourceSessionId: source.sessionId,
-                targetThreadId: threadId,
-                ...(input.userTurnCount !== undefined
-                  ? { userTurnCount: input.userTurnCount }
-                  : {}),
-              });
+              const fork = yield* client
+                .forkSession({
+                  protocolVersion: HERMES_BRIDGE_PROTOCOL_VERSION,
+                  requestId: HermesBridgeRequestId.make(
+                    `conversation-fork:${source.sessionId}:${threadId}`,
+                  ),
+                  type: "session.fork",
+                  sourceSessionId: source.sessionId,
+                  targetThreadId: threadId,
+                  ...(input.userTurnCount !== undefined
+                    ? { userTurnCount: input.userTurnCount }
+                    : {}),
+                })
+                .pipe(
+                  Effect.onError(() =>
+                    serverCommandId("hermes-conversation-fork-cleanup").pipe(
+                      Effect.flatMap((commandId) =>
+                        orchestrationEngine.dispatch({
+                          type: "thread.delete",
+                          commandId,
+                          threadId,
+                        }),
+                      ),
+                      Effect.ignoreCause({ log: true }),
+                    ),
+                  ),
+                );
               yield* orchestrationEngine.dispatch({
                 type: "thread.meta.update",
                 commandId: yield* serverCommandId("hermes-conversation-fork-title"),

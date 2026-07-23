@@ -100,7 +100,15 @@ const mergeProviderModels = (
   previousModels: ReadonlyArray<ServerProvider["models"][number]>,
   nextModels: ReadonlyArray<ServerProvider["models"][number]>,
 ): ReadonlyArray<ServerProvider["models"][number]> => {
-  const shouldRetainMissingModels = shouldRetainMissingProviderModels(provider);
+  // Hermes' provider-qualified catalog is a complete snapshot. Once it
+  // arrives, discard fallback/legacy pseudo-models hydrated from the cache.
+  // A fallback-only refresh still retains the previous catalog so a temporary
+  // bridge failure does not empty the picker.
+  const hasAuthoritativeHermesInventory =
+    provider.driver === ProviderDriverKind.make("hermes") &&
+    nextModels.some((model) => model.slug.includes("::"));
+  const shouldRetainMissingModels =
+    !hasAuthoritativeHermesInventory && shouldRetainMissingProviderModels(provider);
 
   if (shouldRetainMissingModels && nextModels.length === 0 && previousModels.length > 0) {
     return previousModels;

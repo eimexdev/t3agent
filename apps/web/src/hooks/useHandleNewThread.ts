@@ -26,6 +26,7 @@ import { primaryServerSettingsAtom } from "../state/server";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
+import { IS_T3_AGENT_MODE } from "../productMode";
 
 export function useNewThreadHandler() {
   const projects = useProjects();
@@ -178,7 +179,9 @@ export function useNewThreadHandler() {
             }),
           runtimeMode: DEFAULT_RUNTIME_MODE,
         });
-        applyStickyState(draftId);
+        if (!IS_T3_AGENT_MODE) {
+          applyStickyState(draftId);
+        }
 
         await router.navigate({
           to: "/draft/$draftId",

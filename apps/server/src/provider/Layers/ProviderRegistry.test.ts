@@ -611,6 +611,52 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
         ]);
       });
 
+      it("drops legacy Hermes pseudo-models when the authoritative inventory arrives", () => {
+        const previousProvider = {
+          instanceId: ProviderInstanceId.make("hermes"),
+          driver: ProviderDriverKind.make("hermes"),
+          status: "ready",
+          enabled: true,
+          installed: true,
+          auth: { status: "authenticated" },
+          checkedAt: "2026-07-23T00:00:00.000Z",
+          version: null,
+          models: [
+            {
+              slug: "active",
+              name: "Active Hermes model",
+              isCustom: true,
+              capabilities: null,
+            },
+            {
+              slug: "gpt-5.6-sol",
+              name: "gpt-5.6-sol",
+              isCustom: true,
+              capabilities: null,
+            },
+          ],
+          slashCommands: [],
+          skills: [],
+        } as const satisfies ServerProvider;
+        const refreshedProvider = {
+          ...previousProvider,
+          checkedAt: "2026-07-23T00:01:00.000Z",
+          models: [
+            {
+              slug: "openai-codex::gpt-5.6-sol",
+              name: "gpt-5.6-sol",
+              subProvider: "openai-codex",
+              isCustom: true,
+              capabilities: null,
+            },
+          ],
+        } satisfies ServerProvider;
+
+        assert.deepStrictEqual(mergeProviderSnapshot(previousProvider, refreshedProvider).models, [
+          ...refreshedProvider.models,
+        ]);
+      });
+
       it("retains stale OpenCode models when a refresh fails", () => {
         const previousProvider = {
           instanceId: ProviderInstanceId.make("opencode"),

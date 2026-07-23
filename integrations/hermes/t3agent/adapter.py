@@ -1067,7 +1067,10 @@ class T3AgentAdapter(BasePlatformAdapter):
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             child_session_id = f"{timestamp}_{secrets.token_hex(3)}"
-            source_title = str(source_session.get("title") or "Conversation").strip()
+            source_title = (
+                str(source_session.get("title") or "Conversation").strip()
+                or "Conversation"
+            )
             child_title = await asyncio.to_thread(db.get_next_title_in_lineage, source_title)
             await session_db.create_session(
                 session_id=child_session_id,

@@ -5,7 +5,7 @@ import {
   type ServerProviderSkill,
   type TurnId,
 } from "@t3tools/contracts";
-import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
+import { parseScopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import {
   createContext,
@@ -61,6 +61,7 @@ import {
   WrenchIcon,
   XIcon,
   ZapIcon,
+  GitForkIcon,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
@@ -103,6 +104,10 @@ import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatShortTimestamp } from "../../timestampFormat";
+import { formatHermesLineageLabel, parseHermesLineageMessage } from "../../hermesLineage";
+import { Link } from "@tanstack/react-router";
+import { buildThreadRouteParams } from "../../threadRoutes";
+import { useThreadShell } from "../../state/entities";
 
 import {
   buildInlineTerminalContextText,
@@ -137,6 +142,7 @@ interface TimelineRowSharedState {
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onForkAssistantMessage?: (messageId: MessageId) => void;
   onToggleTurnFold: (turnId: TurnId) => void;
   onToggleWorkGroup: (groupId: string, anchorElement?: HTMLElement) => void;
 }
@@ -169,6 +175,7 @@ interface MessagesTimelineProps {
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
   routeThreadKey: string;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onForkAssistantMessage?: (messageId: MessageId) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
   isRevertingCheckpoint: boolean;
@@ -204,6 +211,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   turnDiffSummaryByAssistantMessageId,
   routeThreadKey,
   onOpenTurnDiff,
+  onForkAssistantMessage,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
   isRevertingCheckpoint,
@@ -431,6 +439,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
+      ...(onForkAssistantMessage ? { onForkAssistantMessage } : {}),
       onToggleTurnFold,
       onToggleWorkGroup,
     }),
@@ -445,6 +454,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
+      onForkAssistantMessage,
       onToggleTurnFold,
       onToggleWorkGroup,
     ],
@@ -862,11 +872,53 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "message" && row.message.role === "assistant" ? (
         <AssistantTimelineRow row={row} />
       ) : null}
+      {row.kind === "message" && row.message.role === "system" ? (
+        <SystemTimelineRow row={row} />
+      ) : null}
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
     </div>
   );
 });
+
+function SystemTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
+  const ctx = use(TimelineRowCtx);
+  const lineage = parseHermesLineageMessage(row.message.text);
+  const sourceThreadRef = useMemo(
+    () =>
+      lineage?.sourceThreadId
+        ? scopeThreadRef(ctx.activeThreadEnvironmentId, lineage.sourceThreadId)
+        : null,
+    [ctx.activeThreadEnvironmentId, lineage?.sourceThreadId],
+  );
+  const sourceThread = useThreadShell(sourceThreadRef);
+  if (!lineage) return null;
+
+  const content = (
+    <>
+      <GitForkIcon className="size-3.5" />
+      <span>{formatHermesLineageLabel(lineage)}</span>
+    </>
+  );
+
+  return (
+    <div className="flex items-center gap-3 px-1 py-1 text-muted-foreground/75 text-xs">
+      <div className="h-px min-w-6 flex-1 bg-border/55" />
+      {sourceThreadRef && sourceThread ? (
+        <Link
+          to="/$environmentId/$threadId"
+          params={buildThreadRouteParams(sourceThreadRef)}
+          className="flex items-center gap-1.5 transition-colors hover:text-foreground"
+        >
+          {content}
+        </Link>
+      ) : (
+        <span className="flex items-center gap-1.5">{content}</span>
+      )}
+      <div className="h-px min-w-6 flex-1 bg-border/55" />
+    </div>
+  );
+}
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
@@ -1020,6 +1072,24 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
         {row.showAssistantMeta ? (
           <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
             <AssistantCopyButton row={row} />
+            {ctx.onForkAssistantMessage && !row.message.streaming ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      type="button"
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label="Fork conversation from this response"
+                      onClick={() => ctx.onForkAssistantMessage?.(row.message.id)}
+                    />
+                  }
+                >
+                  <GitForkIcon className="size-3.5" />
+                </TooltipTrigger>
+                <TooltipPopup>Fork from this response</TooltipPopup>
+              </Tooltip>
+            ) : null}
             {!row.message.streaming && (
               <Tooltip>
                 <TooltipTrigger

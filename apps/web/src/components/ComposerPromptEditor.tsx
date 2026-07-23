@@ -883,6 +883,7 @@ interface ComposerPromptEditorProps {
   skills: ReadonlyArray<ServerProviderSkill>;
   disabled: boolean;
   placeholder: string;
+  ghostHint?: string | null;
   className?: string;
   onRemoveTerminalContext: (contextId: string) => void;
   onChange: (
@@ -1532,6 +1533,7 @@ function ComposerPromptEditorInner({
   skills,
   disabled,
   placeholder,
+  ghostHint,
   className,
   onRemoveTerminalContext,
   onChange,
@@ -1770,6 +1772,18 @@ function ComposerPromptEditorInner({
           }
           ErrorBoundary={LexicalErrorBoundary}
         />
+        {value.length > 0 && ghostHint ? (
+          <div
+            aria-hidden="true"
+            className={cn(
+              "pointer-events-none absolute inset-x-0 top-0 max-h-50 min-h-17.5 overflow-hidden whitespace-pre-wrap wrap-break-word bg-transparent text-[16px] leading-relaxed sm:text-[14px]",
+              className,
+            )}
+          >
+            <span className="invisible">{value}</span>
+            <span className="text-muted-foreground/40">{ghostHint}</span>
+          </div>
+        ) : null}
         <OnChangePlugin onChange={handleEditorChange} />
         <ComposerCommandKeyPlugin {...(onCommandKeyDown ? { onCommandKeyDown } : {})} />
         <ComposerSurroundSelectionPlugin terminalContexts={terminalContexts} skills={skills} />
@@ -1792,6 +1806,7 @@ export function ComposerPromptEditor({
   skills,
   disabled,
   placeholder,
+  ghostHint,
   className,
   onRemoveTerminalContext,
   onChange,
@@ -1830,6 +1845,7 @@ export function ComposerPromptEditor({
         skills={skills}
         disabled={disabled}
         placeholder={placeholder}
+        {...(ghostHint !== undefined ? { ghostHint } : {})}
         onRemoveTerminalContext={onRemoveTerminalContext}
         onChange={onChange}
         onPaste={onPaste}

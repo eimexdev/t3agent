@@ -188,6 +188,7 @@ import {
   isT3AgentProviderInstance,
   T3_AGENT_PROVIDER_INSTANCE_ID,
 } from "../../productMode";
+import { resolveCommandGhostHint } from "../../hermesCommands";
 import { type AppModelOption, getAppModelOptionsForInstance } from "../../modelSelection";
 import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import type { SessionPhase, Thread } from "../../types";
@@ -873,6 +874,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     () => selectedProviderEntry?.snapshot ?? null,
     [selectedProviderEntry],
   );
+  const commandGhostHint = useMemo(
+    () => resolveCommandGhostHint(prompt, selectedProviderStatus?.slashCommands ?? []),
+    [prompt, selectedProviderStatus?.slashCommands],
+  );
   const selectedProviderModels = useMemo<ReadonlyArray<ServerProvider["models"][number]>>(
     () => selectedProviderEntry?.models ?? [],
     [selectedProviderEntry],
@@ -1043,29 +1048,33 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }));
     }
     if (composerTrigger.kind === "slash-command") {
-      const builtInSlashCommandItems = [
-        {
-          id: "slash:model",
-          type: "slash-command",
-          command: "model",
-          label: "/model",
-          description: "Switch response model for this thread",
-        },
-        {
-          id: "slash:plan",
-          type: "slash-command",
-          command: "plan",
-          label: "/plan",
-          description: "Switch this thread into plan mode",
-        },
-        {
-          id: "slash:default",
-          type: "slash-command",
-          command: "default",
-          label: "/default",
-          description: "Switch this thread back to normal build mode",
-        },
-      ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
+      const builtInSlashCommandItems = (
+        IS_T3_AGENT_MODE
+          ? []
+          : [
+              {
+                id: "slash:model",
+                type: "slash-command",
+                command: "model",
+                label: "/model",
+                description: "Switch response model for this thread",
+              },
+              {
+                id: "slash:plan",
+                type: "slash-command",
+                command: "plan",
+                label: "/plan",
+                description: "Switch this thread into plan mode",
+              },
+              {
+                id: "slash:default",
+                type: "slash-command",
+                command: "default",
+                label: "/default",
+                description: "Switch this thread back to normal build mode",
+              },
+            ]
+      ) satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const providerSlashCommandItems = (selectedProviderStatus?.slashCommands ?? []).map(
         (command) => ({
           id: `provider-slash-command:${selectedProvider}:${command.name}`,
@@ -2602,6 +2611,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                   ? "Ask for follow-up changes or attach images"
                                   : "Ask anything, @tag files/folders, $use skills, or / for commands"
                 }
+                ghostHint={commandGhostHint}
                 disabled={isConnecting || isComposerApprovalState || projectSelectionRequired}
               />
               {showMobilePendingAnswerActions ? (
@@ -2667,13 +2677,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     <CircleAlertIcon className="size-4" />
                     No provider available
                   </Button>
-                ) : IS_T3_AGENT_MODE ? (
-                  <span
-                    className="shrink-0 px-2 text-sm text-muted-foreground"
-                    title="Current Hermes model"
-                  >
-                    {selectedModelForPickerWithCustomFallback}
-                  </span>
                 ) : (
                   <ProviderModelPicker
                     compact={isComposerFooterCompact}
@@ -2700,7 +2703,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   />
                 )}
 
-                {IS_T3_AGENT_MODE ? null : isComposerFooterCompact ? (
+                {IS_T3_AGENT_MODE ? (
+                  providerTraitsPicker ? (
+                    <>
+                      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+                      {providerTraitsPicker}
+                    </>
+                  ) : null
+                ) : isComposerFooterCompact ? (
                   <CompactComposerControlsMenu
                     activePlan={showPlanSidebarToggle}
                     interactionMode={interactionMode}

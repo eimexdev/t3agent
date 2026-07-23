@@ -107,6 +107,8 @@ import {
 import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import { prStatusIndicator, resolveThreadPr } from "./ThreadStatusIndicators";
 import { ProjectFavicon } from "./ProjectFavicon";
+import { HermesIcon } from "./Icons";
+import { IS_T3_AGENT_MODE, isT3AgentThread } from "../productMode";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelLabel } from "./chat/providerIconUtils";
 import { deriveProviderInstanceEntries, type ProviderInstanceEntry } from "../providerInstances";
@@ -625,12 +627,16 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                   "opacity-40 grayscale group-hover/v2-row:opacity-100 group-hover/v2-row:grayscale-0",
               )}
             >
-              <ProjectFavicon
-                environmentId={thread.environmentId}
-                cwd={props.projectCwd ?? ""}
-                className="size-4"
-                fallbackIcon={MessageSquareIcon}
-              />
+              {IS_T3_AGENT_MODE ? (
+                <HermesIcon className="size-4" />
+              ) : (
+                <ProjectFavicon
+                  environmentId={thread.environmentId}
+                  cwd={props.projectCwd ?? ""}
+                  className="size-4"
+                  fallbackIcon={MessageSquareIcon}
+                />
+              )}
             </span>
             {title}
             {/* The PR badge stays outside the hover-fading slot: it must
@@ -697,11 +703,15 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
         >
           <div className="relative z-10 h-[4.875rem] px-2.5 py-2">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
-              <ProjectFavicon
-                environmentId={thread.environmentId}
-                cwd={props.projectCwd ?? ""}
-                className="size-4 shrink-0"
-              />
+              {IS_T3_AGENT_MODE ? (
+                <HermesIcon className="size-4 shrink-0" />
+              ) : (
+                <ProjectFavicon
+                  environmentId={thread.environmentId}
+                  cwd={props.projectCwd ?? ""}
+                  className="size-4 shrink-0"
+                />
+              )}
               {props.projectTitle ? (
                 <span
                   className={cn(
@@ -810,7 +820,11 @@ function latestTurnDiff(
 export default function SidebarV2() {
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
-  const threads = useThreadShells();
+  const allThreads = useThreadShells();
+  const threads = useMemo(
+    () => (IS_T3_AGENT_MODE ? allThreads.filter(isT3AgentThread) : allThreads),
+    [allThreads],
+  );
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -1799,7 +1813,7 @@ export default function SidebarV2() {
             </div>
           </div>
         </SidebarGroup>
-        {projectGroups.length > 0 ? (
+        {!IS_T3_AGENT_MODE && projectGroups.length > 0 ? (
           <SidebarGroup className="px-2 pb-2 pt-0">
             <div className="flex items-center gap-1">
               <Menu open={projectScopeMenuOpen} onOpenChange={setProjectScopeMenuOpen}>
@@ -1939,11 +1953,17 @@ export default function SidebarV2() {
                     currentEnvironmentId={primaryEnvironmentId}
                     environmentLabel={environmentLabelById.get(thread.environmentId) ?? null}
                     projectCwd={
-                      projectCwdByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
+                      IS_T3_AGENT_MODE
+                        ? null
+                        : (projectCwdByKey.get(`${thread.environmentId}:${thread.projectId}`) ??
+                          null)
                     }
                     projectTitle={
-                      projectDisplayNameByKey.get(`${thread.environmentId}:${thread.projectId}`) ??
-                      null
+                      IS_T3_AGENT_MODE
+                        ? null
+                        : (projectDisplayNameByKey.get(
+                            `${thread.environmentId}:${thread.projectId}`,
+                          ) ?? null)
                     }
                     providerEntryByInstanceId={providerEntryByInstanceId}
                     onThreadClick={handleThreadClick}
@@ -1999,7 +2019,9 @@ export default function SidebarV2() {
           </TooltipProvider>
           {orderedThreads.length === 0 ? (
             <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
-              {projects.length === 0 ? (
+              {IS_T3_AGENT_MODE ? (
+                "No conversations yet"
+              ) : projects.length === 0 ? (
                 <>
                   <span>No projects yet</span>
                   <button

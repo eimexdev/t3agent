@@ -22,32 +22,32 @@ Implemented on the T3 Agent feature branch:
 
 ### Hermes-native controls
 
-- [ ] Replace the Pi placeholder with a real Hermes glyph.
-- [ ] Show the effective Hermes model.
-- [ ] Add a prominent per-thread reasoning selector, using T3 Code's polished compact interaction, with inherited `Default` and every Hermes-supported effort level.
-- [ ] Add provider-aware per-thread model switching that shows every model reported by Hermes, grouped by authenticated provider.
-- [ ] Retain T3 Code's fuzzy search, provider navigation, favorites, virtualization, and keyboard-selection behavior in the model picker.
-- [ ] Initialize every new thread from Hermes's configured model and reasoning defaults rather than sticky values from another thread.
+- [x] Replace the Pi placeholder with a real Hermes glyph.
+- [x] Show the effective Hermes model.
+- [x] Add a prominent per-thread reasoning selector, using T3 Code's polished compact interaction, with inherited `Default` and every Hermes-supported effort level.
+- [x] Add provider-aware per-thread model switching that shows every model reported by Hermes, grouped by authenticated provider.
+- [x] Retain T3 Code's fuzzy search, provider navigation, favorites, virtualization, and keyboard-selection behavior in the model picker.
+- [x] Initialize every new thread from Hermes's configured model and reasoning defaults rather than sticky values from another thread.
 - [ ] Later, add an explicit user preference for overriding new-thread defaults.
 - [ ] Render quiet timeline metadata when a thread's model or reasoning effort changes.
-- [ ] Keep expensive-model confirmations and provider-specific validation Hermes-owned.
+- [x] Keep expensive-model confirmations and provider-specific validation Hermes-owned.
 
 ### Commands and conversation lifecycle
 
-- [ ] Render command argument hints as non-message gray ghost text.
-- [ ] Add the completed-run fork icon beside copy/timestamp controls.
-- [ ] Add a bridge primitive that forks Hermes history through a completed run without rebinding the source thread.
-- [ ] Make `/fork` use that primitive at the latest completed run.
-- [ ] Give `/new`, `/sessions`, and `/resume` T3-native navigation semantics.
-- [ ] Make `/sessions` and `/resume` open the same subtly grouped browser of T3 Agent and other Hermes sessions.
-- [ ] Navigate directly to an existing thread when a T3 Agent session is selected.
-- [ ] Immediately import and open a selected cross-gateway session as a child session and new T3 Agent thread, without a preview or confirmation and without changing the source.
-- [ ] Reopen the existing T3 Agent copy when its external source is selected again, with a secondary “Import another copy” action.
-- [ ] Add a subtle timeline lineage marker at the boundary between inherited history and new messages.
-- [ ] Label imports “Imported from [provider]” and forks “Continued from [source thread].”
-- [ ] Link fork lineage markers back to the original T3 Agent thread.
+- [x] Render command argument hints as non-message gray ghost text.
+- [x] Add the completed-run fork icon beside copy/timestamp controls.
+- [x] Add a bridge primitive that forks Hermes history through a completed run without rebinding the source thread.
+- [x] Make `/fork` use that primitive at the latest completed run.
+- [x] Give `/new`, `/sessions`, and `/resume` T3-native navigation semantics.
+- [x] Make `/sessions` and `/resume` open the same subtly grouped browser of T3 Agent and other Hermes sessions.
+- [x] Navigate directly to an existing thread when a T3 Agent session is selected.
+- [x] Immediately import and open a selected cross-gateway session as a child session and new T3 Agent thread, without a preview or confirmation and without changing the source.
+- [x] Reopen the existing T3 Agent copy when its external source is selected again, with a secondary “Import another copy” action.
+- [x] Add a subtle timeline lineage marker at the boundary between inherited history and new messages.
+- [x] Label imports “Imported from [provider]” and forks “Continued from [source thread].”
+- [x] Link fork lineage markers back to the original T3 Agent thread.
 - [ ] Link imported-session markers to their external source when a stable address is available.
-- [ ] Preserve lineage as non-clickable history when its source is deleted or inaccessible.
+- [x] Preserve lineage as non-clickable history when its source is deleted or inaccessible.
 
 ### Voice notes
 

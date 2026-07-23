@@ -154,6 +154,7 @@ import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
 import { NO_PROVIDER_MODEL_SELECTION } from "../providerInstances";
 import { useEnvironmentSettings } from "../hooks/useSettings";
+import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
 import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
@@ -161,7 +162,7 @@ import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
 } from "../logicalProject";
-import { buildDraftThreadRouteParams } from "../threadRoutes";
+import { buildDraftThreadRouteParams, buildThreadRouteParams } from "../threadRoutes";
 import {
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
@@ -205,7 +206,9 @@ import {
 } from "../state/entities";
 import { environmentShell } from "../state/shell";
 import { IS_T3_AGENT_MODE, T3_AGENT_PROVIDER_INSTANCE_ID } from "../productMode";
+import { parseT3AgentLifecycleCommand } from "../hermesCommands";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
+import { HermesSessionBrowser } from "./hermes/HermesSessionBrowser";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
@@ -1138,6 +1141,9 @@ function ChatViewContent(props: ChatViewProps) {
   const revertThreadCheckpoint = useAtomCommand(threadEnvironment.revertCheckpoint, {
     reportFailure: false,
   });
+  const forkHermesConversationCommand = useAtomCommand(serverEnvironment.hermesConversationFork, {
+    reportFailure: false,
+  });
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
   const closePreview = useAtomCommand(previewEnvironment.close, "preview close");
   const { environments } = useEnvironments();
@@ -1165,6 +1171,7 @@ function ChatViewContent(props: ChatViewProps) {
   const timestampFormat = settings.timestampFormat;
   const autoOpenPlanSidebar = settings.autoOpenPlanSidebar;
   const navigate = useNavigate();
+  const handleNewThread = useNewThreadHandler();
   const { resolvedTheme } = useTheme();
   // Granular store selectors — avoid subscribing to prompt changes.
   const composerRuntimeMode = useComposerDraftStore(
@@ -1217,6 +1224,7 @@ function ChatViewContent(props: ChatViewProps) {
   const composerRef = useComposerHandleContext() ?? localComposerRef;
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
+  const [hermesSessionBrowserOpen, setHermesSessionBrowserOpen] = useState(false);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
   optimisticUserMessagesRef.current = optimisticUserMessages;
@@ -2462,6 +2470,50 @@ function ChatViewContent(props: ChatViewProps) {
       });
     },
     [draftId, routeThreadKey, routeThreadRef, serverThread],
+  );
+  const forkHermesConversation = useCallback(
+    async (userTurnCount?: number) => {
+      if (!IS_T3_AGENT_MODE || !activeThread) return;
+      setThreadError(activeThread.id, null);
+      const result = await forkHermesConversationCommand({
+        environmentId,
+        input: {
+          sourceThreadId: activeThread.id,
+          ...(userTurnCount !== undefined ? { userTurnCount } : {}),
+        },
+      });
+      if (result._tag === "Failure") {
+        const cause = squashAtomCommandFailure(result);
+        setThreadError(
+          activeThread.id,
+          cause instanceof Error ? cause.message : "Unable to fork this Hermes conversation.",
+        );
+        return;
+      }
+      await navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(
+          scopeThreadRef(activeThread.environmentId, result.value.threadId),
+        ),
+      });
+    },
+    [activeThread, environmentId, forkHermesConversationCommand, navigate, setThreadError],
+  );
+  const forkHermesAtAssistantMessage = useCallback(
+    (messageId: MessageId) => {
+      let userTurnCount = 0;
+      for (const entry of timelineEntries) {
+        if (entry.kind !== "message") continue;
+        if (entry.message.role === "user") {
+          userTurnCount += 1;
+        }
+        if (entry.message.id === messageId) {
+          void forkHermesConversation(userTurnCount);
+          return;
+        }
+      }
+    },
+    [forkHermesConversation, timelineEntries],
   );
 
   const focusComposer = useCallback(() => {
@@ -4269,7 +4321,7 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
     const sendCtx = composerRef.current?.getSendContext();
-    if (!sendCtx?.providerAvailable) return;
+    if (!sendCtx) return;
     const {
       images: composerImages,
       terminalContexts: composerTerminalContexts,
@@ -4281,8 +4333,39 @@ function ChatViewContent(props: ChatViewProps) {
       selectedProviderModels: ctxSelectedProviderModels,
       selectedPromptEffort: ctxSelectedPromptEffort,
       selectedModelSelection: ctxSelectedModelSelection,
+      providerAvailable,
     } = sendCtx;
     const promptForSend = promptRef.current;
+    const lifecycleCommand = IS_T3_AGENT_MODE ? parseT3AgentLifecycleCommand(promptForSend) : null;
+    if (
+      lifecycleCommand &&
+      composerImages.length === 0 &&
+      composerTerminalContexts.length === 0 &&
+      composerElementContexts.length === 0 &&
+      composerPreviewAnnotations.length === 0 &&
+      composerReviewComments.length === 0
+    ) {
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState();
+      switch (lifecycleCommand) {
+        case "new":
+          if (activeProjectRef) {
+            await handleNewThread(activeProjectRef);
+          } else {
+            setThreadError(activeThread.id, "T3 Agent's conversation workspace is unavailable.");
+          }
+          return;
+        case "sessions":
+        case "resume":
+          setHermesSessionBrowserOpen(true);
+          return;
+        case "fork":
+          await forkHermesConversation();
+          return;
+      }
+    }
+    if (!providerAvailable) return;
     const {
       trimmedPrompt: trimmed,
       sendableTerminalContexts: sendableComposerTerminalContexts,
@@ -5518,6 +5601,9 @@ function ChatViewContent(props: ChatViewProps) {
                 activeThreadEnvironmentId={activeThread.environmentId}
                 routeThreadKey={routeThreadKey}
                 onOpenTurnDiff={onOpenTurnDiff}
+                {...(IS_T3_AGENT_MODE
+                  ? { onForkAssistantMessage: forkHermesAtAssistantMessage }
+                  : {})}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}
@@ -5829,6 +5915,13 @@ function ChatViewContent(props: ChatViewProps) {
           onClose={closeExpandedImage}
         />
       )}
+      {IS_T3_AGENT_MODE ? (
+        <HermesSessionBrowser
+          environmentId={environmentId}
+          open={hermesSessionBrowserOpen}
+          onOpenChange={setHermesSessionBrowserOpen}
+        />
+      ) : null}
     </div>
   );
 }

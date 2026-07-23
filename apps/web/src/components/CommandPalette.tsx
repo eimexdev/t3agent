@@ -52,6 +52,7 @@ import { readLocalApi } from "../localApi";
 import { desktopLocalBackendId } from "../connection/desktopLocal";
 import { filesystemEnvironment } from "../state/filesystem";
 import { projectEnvironment } from "../state/projects";
+import { IS_T3_AGENT_MODE, isT3AgentThread } from "../productMode";
 import { useEnvironmentQuery } from "../state/query";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -500,7 +501,11 @@ function OpenCommandPaletteDialog(props: {
     useHandleNewThread();
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
-  const threads = useThreadShells();
+  const allThreads = useThreadShells();
+  const threads = useMemo(
+    () => (IS_T3_AGENT_MODE ? allThreads.filter(isT3AgentThread) : allThreads),
+    [allThreads],
+  );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const providers = useAtomValue(primaryServerProvidersAtom);
   const [viewStack, setViewStack] = useState<CommandPaletteView[]>([]);
@@ -1124,6 +1129,9 @@ function OpenCommandPaletteDialog(props: {
       return;
     }
     clearOpenIntent();
+    if (IS_T3_AGENT_MODE) {
+      return;
+    }
     openAddProjectFlow();
   }, [clearOpenIntent, openAddProjectFlow, openIntent]);
 
@@ -1165,7 +1173,24 @@ function OpenCommandPaletteDialog(props: {
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
-  if (projects.length > 0) {
+  if (IS_T3_AGENT_MODE && defaultProjectRef) {
+    actionItems.push({
+      kind: "action",
+      value: "action:new-thread",
+      searchTerms: ["new conversation", "new thread", "chat", "create"],
+      title: "New conversation",
+      icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "chat.new",
+      run: async () => {
+        await startNewThreadFromContext({
+          activeDraftThread,
+          activeThread: activeThread ?? undefined,
+          defaultProjectRef,
+          handleNewThread,
+        });
+      },
+    });
+  } else if (projects.length > 0) {
     const activeProjectTitle =
       projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
       (currentProjectId ? (projectTitleById.get(currentProjectId) ?? null) : null);
@@ -1204,48 +1229,49 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  actionItems.push({
-    kind: "action",
-    value: "action:add-project",
-    searchTerms: [
-      "add project",
-      "folder",
-      "directory",
-      "browse",
-      "clone",
-      "remote",
-      "repository",
-      "repo",
-      "git",
-      "github",
-      "gitlab",
-      "bitbucket",
-      "azure",
-      "devops",
-      "url",
-      "environment",
-    ],
-    title: "Add project",
-    icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
-    keepOpen: true,
-    run: async () => {
-      openAddProjectFlow();
-    },
-  });
-
-  if (wslAddProjectEnvironmentOption) {
+  if (!IS_T3_AGENT_MODE) {
     actionItems.push({
       kind: "action",
-      value: "action:add-project:wsl-folder",
-      searchTerms: ["add project", "open", "wsl", "linux", "folder", "directory"],
-      title: "Open WSL folder",
-      description: wslAddProjectEnvironmentOption.label,
+      value: "action:add-project",
+      searchTerms: [
+        "add project",
+        "folder",
+        "directory",
+        "browse",
+        "clone",
+        "remote",
+        "repository",
+        "repo",
+        "git",
+        "github",
+        "gitlab",
+        "bitbucket",
+        "azure",
+        "devops",
+        "url",
+        "environment",
+      ],
+      title: "Add project",
       icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
       keepOpen: true,
       run: async () => {
-        startAddProjectBrowse(wslAddProjectEnvironmentOption.environmentId);
+        openAddProjectFlow();
       },
     });
+    if (wslAddProjectEnvironmentOption) {
+      actionItems.push({
+        kind: "action",
+        value: "action:add-project:wsl-folder",
+        searchTerms: ["add project", "open", "wsl", "linux", "folder", "directory"],
+        title: "Open WSL folder",
+        description: wslAddProjectEnvironmentOption.label,
+        icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
+        keepOpen: true,
+        run: async () => {
+          startAddProjectBrowse(wslAddProjectEnvironmentOption.environmentId);
+        },
+      });
+    }
   }
 
   actionItems.push({
@@ -1276,7 +1302,7 @@ function OpenCommandPaletteDialog(props: {
     activeGroups,
     query: deferredQuery,
     isInSubmenu: currentView !== null,
-    projectSearchItems: projectSearchItems,
+    projectSearchItems: IS_T3_AGENT_MODE ? [] : projectSearchItems,
     threadSearchItems: allThreadItems,
   });
 

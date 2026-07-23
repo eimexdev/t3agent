@@ -19,6 +19,7 @@ import { APP_DISPLAY_NAME } from "~/branding";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { cn } from "~/lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
+import { IS_T3_AGENT_MODE } from "~/productMode";
 
 function ChatIndexRouteView() {
   const { authGateState } = Route.useRouteContext();
@@ -80,7 +81,22 @@ function IndexDraftLanding() {
       />
     ) : null;
   }
-  return <NoProjectsHero />;
+  return IS_T3_AGENT_MODE ? <NoHermesWorkspaceHero /> : <NoProjectsHero />;
+}
+
+function NoHermesWorkspaceHero() {
+  return (
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+      <Empty className="flex-1">
+        <EmptyHeader className="max-w-md">
+          <EmptyTitle className="text-foreground text-xl">Hermes workspace unavailable</EmptyTitle>
+          <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
+            Restart T3 Agent so it can restore its internal conversation workspace.
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    </SidebarInset>
+  );
 }
 
 function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {

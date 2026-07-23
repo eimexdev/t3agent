@@ -3034,7 +3034,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
 
         {projectsLength === 0 && (
           <div className="px-2 pt-4 text-center text-xs text-muted-foreground/60">
-            No projects yet
+            {IS_T3_AGENT_MODE ? "Hermes workspace unavailable" : "No projects yet"}
           </div>
         )}
       </SidebarGroup>
