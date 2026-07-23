@@ -1,6 +1,12 @@
 import * as Schema from "effect/Schema";
 
-import { MessageId, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import {
+  IsoDateTime,
+  MessageId,
+  NonNegativeInt,
+  ThreadId,
+  TrimmedNonEmptyString,
+} from "./baseSchemas.ts";
 
 export const HERMES_BRIDGE_MAX_IMAGES = 8;
 export const HERMES_BRIDGE_MAX_IMAGE_DATA_URL_CHARS = 14_000_000;
@@ -374,3 +380,80 @@ export const HermesBridgeThreadCreateResponse = openStruct({
   threadId: HermesBridgeThreadId,
 });
 export type HermesBridgeThreadCreateResponse = typeof HermesBridgeThreadCreateResponse.Type;
+
+export const HermesBridgeSessionSummary = openStruct({
+  sessionId: TrimmedNonEmptyString,
+  source: TrimmedNonEmptyString,
+  title: Schema.optionalKey(TrimmedNonEmptyString),
+  model: Schema.optionalKey(TrimmedNonEmptyString),
+  threadId: Schema.optionalKey(ThreadId),
+  parentSessionId: Schema.optionalKey(TrimmedNonEmptyString),
+  startedAt: IsoDateTime,
+  endedAt: Schema.optionalKey(IsoDateTime),
+  messageCount: NonNegativeInt,
+  importedThreadIds: Schema.optionalKey(Schema.Array(ThreadId)),
+});
+export type HermesBridgeSessionSummary = typeof HermesBridgeSessionSummary.Type;
+
+export const HermesBridgeSessionListResponse = openStruct({
+  ...RequestFields,
+  sessions: Schema.Array(HermesBridgeSessionSummary),
+});
+export type HermesBridgeSessionListResponse = typeof HermesBridgeSessionListResponse.Type;
+
+export const HermesBridgeSessionForkRequest = openStruct({
+  ...RequestFields,
+  type: Schema.Literal("session.fork"),
+  sourceSessionId: TrimmedNonEmptyString,
+  targetThreadId: ThreadId,
+  userTurnCount: Schema.optionalKey(NonNegativeInt),
+});
+export type HermesBridgeSessionForkRequest = typeof HermesBridgeSessionForkRequest.Type;
+
+export const HermesBridgeHistoryMessage = openStruct({
+  role: Schema.Literals(["user", "assistant", "system"]),
+  content: Schema.String,
+  createdAt: IsoDateTime,
+});
+export type HermesBridgeHistoryMessage = typeof HermesBridgeHistoryMessage.Type;
+
+export const HermesBridgeSessionForkResponse = openStruct({
+  ...RequestFields,
+  sourceSessionId: TrimmedNonEmptyString,
+  childSessionId: TrimmedNonEmptyString,
+  targetThreadId: ThreadId,
+  source: TrimmedNonEmptyString,
+  title: TrimmedNonEmptyString,
+  messages: Schema.Array(HermesBridgeHistoryMessage),
+});
+export type HermesBridgeSessionForkResponse = typeof HermesBridgeSessionForkResponse.Type;
+
+export const HermesConversationForkInput = Schema.Struct({
+  sourceThreadId: Schema.optional(ThreadId),
+  sourceSessionId: Schema.optional(TrimmedNonEmptyString),
+  userTurnCount: Schema.optional(NonNegativeInt),
+  forceNew: Schema.optional(Schema.Boolean),
+});
+export type HermesConversationForkInput = typeof HermesConversationForkInput.Type;
+
+export const HermesConversationForkResult = Schema.Struct({
+  threadId: ThreadId,
+  existing: Schema.Boolean,
+});
+export type HermesConversationForkResult = typeof HermesConversationForkResult.Type;
+
+export const HermesLineageMetadata = Schema.Struct({
+  kind: Schema.Literals(["fork", "import"]),
+  label: TrimmedNonEmptyString,
+  sourceProvider: TrimmedNonEmptyString,
+  sourceSessionId: TrimmedNonEmptyString,
+  sourceThreadId: Schema.optional(ThreadId),
+});
+export type HermesLineageMetadata = typeof HermesLineageMetadata.Type;
+
+export class HermesLifecycleError extends Schema.TaggedErrorClass<HermesLifecycleError>()(
+  "HermesLifecycleError",
+  {
+    message: TrimmedNonEmptyString,
+  },
+) {}

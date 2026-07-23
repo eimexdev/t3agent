@@ -2,6 +2,9 @@ import {
   HERMES_BRIDGE_PROTOCOL_VERSION,
   HermesBridgeAcknowledgement,
   HermesBridgeCapabilitiesResponse,
+  HermesBridgeSessionForkRequest,
+  HermesBridgeSessionForkResponse,
+  HermesBridgeSessionListResponse,
   type HermesBridgeT3ToHermesRequest,
 } from "@t3tools/contracts/hermesBridge";
 import * as Effect from "effect/Effect";
@@ -19,6 +22,13 @@ export interface HermesBridgeClient {
   readonly send: (
     request: HermesBridgeT3ToHermesRequest,
   ) => Effect.Effect<HermesBridgeAcknowledgement, ProviderAdapterRequestError>;
+  readonly listSessions: Effect.Effect<
+    HermesBridgeSessionListResponse,
+    ProviderAdapterRequestError
+  >;
+  readonly forkSession: (
+    request: HermesBridgeSessionForkRequest,
+  ) => Effect.Effect<HermesBridgeSessionForkResponse, ProviderAdapterRequestError>;
 }
 
 function requestPath(request: HermesBridgeT3ToHermesRequest): string {
@@ -76,6 +86,29 @@ export function makeHermesBridgeClient(input: {
     Effect.mapError(mapRequestError("capabilities")),
   );
 
+  const sessionQuery = new URLSearchParams({
+    protocolVersion: String(HERMES_BRIDGE_PROTOCOL_VERSION),
+    requestId: "sessions-list",
+  });
+  const listSessions = HttpClientRequest.get(
+    `${baseUrl}/v1/sessions?${sessionQuery.toString()}`,
+  ).pipe(
+    authorize,
+    execute.execute,
+    Effect.flatMap(HttpClientResponse.schemaBodyJson(HermesBridgeSessionListResponse)),
+    Effect.mapError(mapRequestError("sessions.list")),
+  );
+
+  const forkSession: HermesBridgeClient["forkSession"] = (request) =>
+    HttpClientRequest.post(`${baseUrl}/v1/sessions/fork`).pipe(
+      authorize,
+      HttpClientRequest.setHeader("idempotency-key", request.requestId),
+      HttpClientRequest.bodyJsonUnsafe(request),
+      execute.execute,
+      Effect.flatMap(HttpClientResponse.schemaBodyJson(HermesBridgeSessionForkResponse)),
+      Effect.mapError(mapRequestError("session.fork")),
+    );
+
   const send: HermesBridgeClient["send"] = (request) =>
     HttpClientRequest.post(`${baseUrl}${requestPath(request)}`).pipe(
       authorize,
@@ -86,5 +119,5 @@ export function makeHermesBridgeClient(input: {
       Effect.mapError(mapRequestError(request.type)),
     );
 
-  return { getCapabilities, send };
+  return { getCapabilities, listSessions, forkSession, send };
 }

@@ -4,6 +4,7 @@ import {
   TextGenerationError,
   type HermesBridgeCapabilitiesResponse,
   type ServerProvider,
+  type ServerProviderSlashCommand,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
@@ -35,6 +36,34 @@ const decodeSettings = Schema.decodeSync(HermesSettings);
 
 function reasoningLabel(value: string): string {
   return value === "none" ? "None" : value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+const T3_AGENT_LIFECYCLE_COMMANDS: ReadonlyArray<ServerProviderSlashCommand> = [
+  { name: "new", description: "Start a new T3 Agent conversation" },
+  { name: "sessions", description: "Browse Hermes conversations" },
+  { name: "resume", description: "Open or import a Hermes conversation" },
+  { name: "fork", description: "Fork this conversation at its latest response" },
+];
+
+function hermesSlashCommands(
+  capabilities: HermesBridgeCapabilitiesResponse | undefined,
+): ReadonlyArray<ServerProviderSlashCommand> {
+  const lifecycleNames = new Set(T3_AGENT_LIFECYCLE_COMMANDS.map((command) => command.name));
+  const bridgeCommands = (capabilities?.commands ?? []).flatMap((command) =>
+    [command.name, ...(command.aliases ?? [])].flatMap((name) => {
+      const normalizedName = name.replace(/^\/+/, "");
+      return lifecycleNames.has(normalizedName)
+        ? []
+        : [
+            {
+              name: normalizedName,
+              ...(command.description ? { description: command.description } : {}),
+              ...(command.inputHint ? { input: { hint: command.inputHint } } : {}),
+            },
+          ];
+    }),
+  );
+  return [...T3_AGENT_LIFECYCLE_COMMANDS, ...bridgeCommands];
 }
 
 export function makeHermesProviderSnapshot(input: {
@@ -118,13 +147,7 @@ export function makeHermesProviderSnapshot(input: {
     ...(input.error ? { message: input.error } : {}),
     availability: "available",
     models,
-    slashCommands: (input.capabilities?.commands ?? []).flatMap((command) =>
-      [command.name, ...(command.aliases ?? [])].map((name) => ({
-        name: name.replace(/^\/+/, ""),
-        ...(command.description ? { description: command.description } : {}),
-        ...(command.inputHint ? { input: { hint: command.inputHint } } : {}),
-      })),
-    ),
+    slashCommands: hermesSlashCommands(input.capabilities),
     skills: [],
     continuation: { groupKey: `hermes:instance:${input.instanceId}` },
   };
@@ -193,6 +216,7 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
     yield* HermesBridgeRegistry.register(instanceId, {
       token: config.callbackToken,
       receive: adapter.receiveCallback,
+      client,
     });
     yield* Effect.addFinalizer(() => HermesBridgeRegistry.unregister(instanceId));
 

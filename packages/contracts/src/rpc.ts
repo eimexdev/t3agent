@@ -146,6 +146,12 @@ import {
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
+import {
+  HermesBridgeSessionListResponse,
+  HermesConversationForkInput,
+  HermesConversationForkResult,
+  HermesLifecycleError,
+} from "./hermesBridge.ts";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -218,6 +224,8 @@ export const WS_METHODS = {
   serverGetProcessDiagnostics: "server.getProcessDiagnostics",
   serverGetProcessResourceHistory: "server.getProcessResourceHistory",
   serverSignalProcess: "server.signalProcess",
+  hermesSessionsList: "hermes.sessions.list",
+  hermesConversationFork: "hermes.conversation.fork",
 
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
@@ -332,6 +340,18 @@ export const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess,
   payload: ServerSignalProcessInput,
   success: ServerSignalProcessResult,
   error: EnvironmentAuthorizationError,
+});
+
+export const WsHermesSessionsListRpc = Rpc.make(WS_METHODS.hermesSessionsList, {
+  payload: Schema.Struct({}),
+  success: HermesBridgeSessionListResponse,
+  error: Schema.Union([HermesLifecycleError, EnvironmentAuthorizationError]),
+});
+
+export const WsHermesConversationForkRpc = Rpc.make(WS_METHODS.hermesConversationFork, {
+  payload: HermesConversationForkInput,
+  success: HermesConversationForkResult,
+  error: Schema.Union([HermesLifecycleError, EnvironmentAuthorizationError]),
 });
 
 export const WsCloudGetRelayClientStatusRpc = Rpc.make(WS_METHODS.cloudGetRelayClientStatus, {
@@ -713,6 +733,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetProcessDiagnosticsRpc,
   WsServerGetProcessResourceHistoryRpc,
   WsServerSignalProcessRpc,
+  WsHermesSessionsListRpc,
+  WsHermesConversationForkRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
   WsSourceControlLookupRepositoryRpc,

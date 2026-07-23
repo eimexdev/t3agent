@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import type { ProviderAdapterError } from "../Errors.ts";
+import type { HermesBridgeClient } from "./HermesBridgeClient.ts";
 
 export class HermesBridgeRegistryError extends Schema.TaggedErrorClass<HermesBridgeRegistryError>()(
   "HermesBridgeRegistryError",
@@ -16,6 +17,7 @@ export class HermesBridgeRegistryError extends Schema.TaggedErrorClass<HermesBri
 export interface HermesBridgeReceiver {
   readonly token: string;
   readonly receive: (payload: unknown) => Effect.Effect<unknown, ProviderAdapterError>;
+  readonly client?: Pick<HermesBridgeClient, "listSessions" | "forkSession">;
 }
 
 const receivers = new Map<ProviderInstanceId, HermesBridgeReceiver>();
@@ -37,6 +39,27 @@ export const register = (instanceId: ProviderInstanceId, receiver: HermesBridgeR
 export const unregister = (instanceId: ProviderInstanceId) =>
   Effect.sync(() => {
     receivers.delete(instanceId);
+  });
+
+export const getClient = (
+  instanceId: ProviderInstanceId,
+): Effect.Effect<
+  Pick<HermesBridgeClient, "listSessions" | "forkSession">,
+  HermesBridgeRegistryError
+> =>
+  Effect.suspend(() => {
+    const receiver = receivers.get(instanceId);
+    return receiver?.client
+      ? Effect.succeed(receiver.client)
+      : Effect.fail(
+          new HermesBridgeRegistryError({
+            operation: "lookup",
+            instanceId,
+            detail: receiver
+              ? "Hermes provider lifecycle client is unavailable."
+              : "Hermes provider instance is not registered.",
+          }),
+        );
   });
 
 export const receive = (

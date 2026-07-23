@@ -61,6 +61,8 @@ const testLayer = Layer.effect(
             status: "accepted" as const,
           };
         }),
+      listSessions: Effect.die("not used by adapter tests"),
+      forkSession: () => Effect.die("not used by adapter tests"),
     };
     const adapter = yield* makeHermesAdapter({
       instanceId: ProviderInstanceId.make("hermes-test"),

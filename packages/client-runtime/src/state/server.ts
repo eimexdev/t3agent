@@ -315,6 +315,22 @@ export function createServerEnvironmentAtoms<R, E>(
         key: ({ environmentId }) => environmentId,
       },
     }),
+    hermesSessionsList: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:hermes-sessions-list",
+      tag: WS_METHODS.hermesSessionsList,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId }) => environmentId,
+      },
+    }),
+    hermesConversationFork: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:hermes-conversation-fork",
+      tag: WS_METHODS.hermesConversationFork,
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId }) => environmentId,
+      },
+    }),
     updateProvider: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:update-provider",
       tag: WS_METHODS.serverUpdateProvider,

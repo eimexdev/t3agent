@@ -2,7 +2,9 @@ import { assert, describe, it, vi } from "@effect/vitest";
 import {
   HermesBridgeT3ToHermesRequest,
   HERMES_BRIDGE_PROTOCOL_VERSION,
+  HermesBridgeRequestId,
 } from "@t3tools/contracts/hermesBridge";
+import { ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
@@ -74,6 +76,84 @@ describe("HermesBridgeClient", () => {
       assert.strictEqual(request.headers.authorization, "Bearer bridge-secret");
       assert.strictEqual(request.headers.accept, "application/json");
       assert.strictEqual(request.headers["user-agent"], "t3-agent-hermes-bridge/1");
+    });
+  });
+
+  it.effect("lists Hermes sessions with import linkage", () => {
+    const importedThreadId = "00000000-0000-4000-8000-000000000001";
+    const { client, execute } = makeClient(() =>
+      Response.json({
+        protocolVersion: 1,
+        requestId: "sessions-list",
+        sessions: [
+          {
+            sessionId: "discord-source",
+            source: "discord",
+            title: "Planning",
+            startedAt: "2026-07-23T10:00:00.000Z",
+            messageCount: 8,
+            importedThreadIds: [importedThreadId],
+          },
+        ],
+      }),
+    );
+
+    return Effect.gen(function* () {
+      const result = yield* client.listSessions;
+
+      assert.strictEqual(result.sessions[0]?.source, "discord");
+      assert.strictEqual(result.sessions[0]?.importedThreadIds?.[0], importedThreadId);
+      const request = execute.mock.calls[0]![0];
+      assert.strictEqual(request.method, "GET");
+      assert.strictEqual(new URL(request.url).pathname, "/v1/sessions");
+      assert.strictEqual(new URL(request.url).searchParams.get("requestId"), "sessions-list");
+    });
+  });
+
+  it.effect("creates a child Hermes session for a T3 conversation", () => {
+    const targetThreadId = ThreadId.make("00000000-0000-4000-8000-000000000002");
+    const { client, execute } = makeClient(() =>
+      Response.json({
+        protocolVersion: 1,
+        requestId: "fork-request",
+        sourceSessionId: "discord-source",
+        childSessionId: "t3-child",
+        targetThreadId,
+        source: "discord",
+        title: "Planning #2",
+        messages: [
+          {
+            role: "user",
+            content: "Continue this",
+            createdAt: "2026-07-23T10:00:00.000Z",
+          },
+        ],
+      }),
+    );
+
+    return Effect.gen(function* () {
+      const result = yield* client.forkSession({
+        protocolVersion: 1,
+        requestId: HermesBridgeRequestId.make("fork-request"),
+        type: "session.fork",
+        sourceSessionId: "discord-source",
+        targetThreadId,
+        userTurnCount: 1,
+      });
+
+      assert.strictEqual(result.childSessionId, "t3-child");
+      const request = execute.mock.calls[0]![0];
+      assert.strictEqual(request.method, "POST");
+      assert.strictEqual(new URL(request.url).pathname, "/v1/sessions/fork");
+      assert.strictEqual(request.headers["idempotency-key"], "fork-request");
+      assert.deepStrictEqual(jsonBody(request), {
+        protocolVersion: 1,
+        requestId: "fork-request",
+        type: "session.fork",
+        sourceSessionId: "discord-source",
+        targetThreadId,
+        userTurnCount: 1,
+      });
     });
   });
 

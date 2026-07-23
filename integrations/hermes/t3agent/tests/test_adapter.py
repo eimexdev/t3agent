@@ -43,6 +43,8 @@ async def make_ingress_client(
     app = web.Application(client_max_size=adapter.max_body_bytes)
     app.router.add_get("/v1/health", adapter._health)
     app.router.add_get("/v1/capabilities", adapter._capabilities)
+    app.router.add_get("/v1/sessions", adapter._list_sessions)
+    app.router.add_post("/v1/sessions/fork", adapter._fork_session)
     app.router.add_post("/v1/messages", adapter._submit_message)
     app.router.add_post("/v1/interrupt", adapter._interrupt_turn)
     app.router.add_post("/v1/approvals", adapter._respond_approval)
@@ -193,6 +195,150 @@ async def test_message_submit_applies_model_and_reasoning_before_dispatch(
         assert calls[1][0] == "reasoning"
         assert calls[1][-1] == "high"
         assert calls[2] == ("message", "hello")
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_sessions_list_groups_existing_t3_imports_with_their_source(
+    fake_platform: SimpleNamespace,
+) -> None:
+    adapter = adapter_module.T3AgentAdapter(make_config())
+
+    class FakeDB:
+        def list_sessions_rich(self, **_: Any) -> List[Dict[str, Any]]:
+            return [
+                {
+                    "id": "discord-source",
+                    "source": "discord",
+                    "title": "Planning",
+                    "model": "gpt-5.6-sol",
+                    "started_at": 1_700_000_000,
+                    "message_count": 8,
+                },
+                {
+                    "id": "t3-child",
+                    "source": "t3agent",
+                    "title": "Planning #2",
+                    "parent_session_id": "discord-source",
+                    "thread_id": "00000000-0000-4000-8000-000000000001",
+                    "started_at": 1_700_000_100,
+                    "message_count": 8,
+                },
+            ]
+
+    adapter.gateway_runner = SimpleNamespace(
+        _session_db=SimpleNamespace(_db=FakeDB())
+    )
+    client = await make_ingress_client(adapter)
+    try:
+        response = await client.get(
+            "/v1/sessions?protocolVersion=1&requestId=list-sessions",
+            headers={"Authorization": f"Bearer {adapter.ingress_token}"},
+        )
+        assert response.status == 200
+        payload = await response.json()
+        assert payload["requestId"] == "list-sessions"
+        source = payload["sessions"][0]
+        assert source["source"] == "discord"
+        assert source["importedThreadIds"] == [
+            "00000000-0000-4000-8000-000000000001"
+        ]
+        assert payload["sessions"][1]["threadId"] == (
+            "00000000-0000-4000-8000-000000000001"
+        )
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_session_fork_creates_child_copy_and_binds_target_thread(
+    fake_platform: SimpleNamespace,
+) -> None:
+    adapter = adapter_module.T3AgentAdapter(make_config())
+    created: List[Dict[str, Any]] = []
+    replacements: List[Any] = []
+    titles: List[Any] = []
+    switches: List[Any] = []
+
+    class FakeDB:
+        def get_session(self, session_id: str) -> Dict[str, Any]:
+            assert session_id == "discord-source"
+            return {
+                "id": session_id,
+                "source": "discord",
+                "title": "Planning",
+                "model": "gpt-5.6-sol",
+                "system_prompt": "Be useful",
+            }
+
+        def get_messages(self, session_id: str) -> List[Dict[str, Any]]:
+            assert session_id == "discord-source"
+            return [
+                {"role": "user", "content": "[Ada] first", "timestamp": 10},
+                {"role": "assistant", "content": "first answer", "timestamp": 11},
+                {"role": "user", "content": "[Ada] second", "timestamp": 12},
+                {"role": "assistant", "content": "second answer", "timestamp": 13},
+            ]
+
+        def get_next_title_in_lineage(self, title: str) -> str:
+            assert title == "Planning"
+            return "Planning #2"
+
+        def replace_messages(
+            self, session_id: str, messages: List[Dict[str, Any]]
+        ) -> None:
+            replacements.append((session_id, messages))
+
+    class FakeAsyncDB:
+        def __init__(self) -> None:
+            self._db = FakeDB()
+
+        async def create_session(self, **kwargs: Any) -> None:
+            created.append(kwargs)
+
+        async def set_session_title(self, session_id: str, title: str) -> None:
+            titles.append((session_id, title))
+
+    class FakeStore:
+        async def switch_session(self, key: str, session_id: str) -> object:
+            switches.append((key, session_id))
+            return object()
+
+    adapter.gateway_runner = SimpleNamespace(
+        _session_db=FakeAsyncDB(),
+        async_session_store=FakeStore(),
+    )
+    client = await make_ingress_client(adapter)
+    target_thread_id = "00000000-0000-4000-8000-000000000002"
+    try:
+        response = await client.post(
+            "/v1/sessions/fork",
+            headers={"Authorization": f"Bearer {adapter.ingress_token}"},
+            json={
+                "protocolVersion": 1,
+                "requestId": "fork-session",
+                "type": "session.fork",
+                "sourceSessionId": "discord-source",
+                "targetThreadId": target_thread_id,
+                "userTurnCount": 1,
+            },
+        )
+        assert response.status == 201
+        payload = await response.json()
+        assert payload["sourceSessionId"] == "discord-source"
+        assert payload["targetThreadId"] == target_thread_id
+        assert payload["title"] == "Planning #2"
+        assert [message["content"] for message in payload["messages"]] == [
+            "first",
+            "first answer",
+        ]
+        assert created[0]["source"] == "t3agent"
+        assert created[0]["parent_session_id"] == "discord-source"
+        assert replacements[0][1][-1]["content"] == "first answer"
+        assert titles[0][1] == "Planning #2"
+        assert switches[0][1] == payload["childSessionId"]
+        assert target_thread_id in switches[0][0]
     finally:
         await client.close()
 

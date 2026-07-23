@@ -21,7 +21,9 @@ import logging
 import mimetypes
 import os
 from pathlib import Path
+import re
 import secrets
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote, unquote_to_bytes, urlparse
 
@@ -398,6 +400,15 @@ def _current_reasoning_effort(model: str = "") -> Optional[str]:
         return None
 
 
+def _iso_timestamp(value: Any) -> str:
+    try:
+        return datetime.fromtimestamp(float(value), tz=timezone.utc).isoformat().replace(
+            "+00:00", "Z"
+        )
+    except (TypeError, ValueError, OSError):
+        return datetime.now(tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 class T3AgentAdapter(BasePlatformAdapter):
     """Bridge a local T3 Agent server into Hermes as platform ``t3agent``."""
 
@@ -733,6 +744,8 @@ class T3AgentAdapter(BasePlatformAdapter):
         app = web.Application(client_max_size=self.max_body_bytes)
         app.router.add_get("/v1/health", self._health)
         app.router.add_get("/v1/capabilities", self._capabilities)
+        app.router.add_get("/v1/sessions", self._list_sessions)
+        app.router.add_post("/v1/sessions/fork", self._fork_session)
         app.router.add_post("/v1/messages", self._submit_message)
         app.router.add_post("/v1/interrupt", self._interrupt_turn)
         app.router.add_post("/v1/approvals", self._respond_approval)
@@ -936,6 +949,191 @@ class T3AgentAdapter(BasePlatformAdapter):
                 **_runtime_identity(),
             }
         )
+
+    async def _list_sessions(self, request: web.Request) -> web.Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        request_id, error = self._discovery_identity(request)
+        if error is not None:
+            return error
+        gateway_runner = getattr(self, "gateway_runner", None)
+        session_db = getattr(gateway_runner, "_session_db", None)
+        db = getattr(session_db, "_db", session_db)
+        if db is None:
+            return web.json_response(
+                {"error": "Hermes session database is unavailable"}, status=503
+            )
+
+        try:
+            rows = await asyncio.to_thread(
+                db.list_sessions_rich,
+                exclude_sources=["tool", "subagent"],
+                limit=200,
+                include_children=True,
+                min_message_count=1,
+                order_by_last_active=True,
+            )
+        except Exception:
+            logger.exception("[t3agent] failed to list Hermes sessions")
+            return web.json_response({"error": "Unable to list Hermes sessions"}, status=500)
+
+        imported_threads_by_parent: Dict[str, List[str]] = {}
+        for row in rows:
+            if str(row.get("source") or "") != "t3agent":
+                continue
+            parent_id = str(row.get("parent_session_id") or "").strip()
+            thread_id = str(row.get("thread_id") or "").strip()
+            if parent_id and thread_id:
+                imported_threads_by_parent.setdefault(parent_id, []).append(thread_id)
+
+        sessions: List[Dict[str, Any]] = []
+        for row in rows:
+            session_id = str(row.get("id") or "").strip()
+            source = str(row.get("source") or "unknown").strip() or "unknown"
+            if not session_id:
+                continue
+            item: Dict[str, Any] = {
+                "sessionId": session_id,
+                "source": source,
+                "startedAt": _iso_timestamp(row.get("started_at")),
+                "messageCount": max(0, int(row.get("message_count") or 0)),
+            }
+            for source_key, target_key in (
+                ("title", "title"),
+                ("model", "model"),
+                ("parent_session_id", "parentSessionId"),
+            ):
+                value = str(row.get(source_key) or "").strip()
+                if value:
+                    item[target_key] = value
+            thread_id = str(row.get("thread_id") or "").strip()
+            if source == "t3agent" and thread_id:
+                item["threadId"] = thread_id
+            if row.get("ended_at") is not None:
+                item["endedAt"] = _iso_timestamp(row.get("ended_at"))
+            imported_thread_ids = imported_threads_by_parent.get(session_id, [])
+            if imported_thread_ids:
+                item["importedThreadIds"] = imported_thread_ids
+            sessions.append(item)
+        return web.json_response(
+            {
+                "protocolVersion": PROTOCOL_VERSION,
+                "requestId": request_id,
+                "sessions": sessions,
+            }
+        )
+
+    async def _fork_session(self, request: web.Request) -> web.Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        try:
+            payload = await self._read_frame(request, "session.fork")
+            request_id = _require_string(payload, "requestId")
+            source_session_id = _require_string(payload, "sourceSessionId")
+            target_thread_id = _require_string(payload, "targetThreadId")
+            raw_turn_count = payload.get("userTurnCount")
+            if raw_turn_count is not None and (
+                not isinstance(raw_turn_count, int) or raw_turn_count < 0
+            ):
+                raise ValueError("userTurnCount must be a non-negative integer")
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
+        async def fork() -> Tuple[int, Dict[str, Any]]:
+            gateway_runner = getattr(self, "gateway_runner", None)
+            session_db = getattr(gateway_runner, "_session_db", None)
+            async_store = getattr(gateway_runner, "async_session_store", None)
+            db = getattr(session_db, "_db", session_db)
+            if session_db is None or async_store is None or db is None:
+                raise RuntimeError("Hermes session database is unavailable")
+            source_session = await asyncio.to_thread(db.get_session, source_session_id)
+            if not source_session:
+                return 404, {
+                    "protocolVersion": PROTOCOL_VERSION,
+                    "requestId": request_id,
+                    "error": f"Hermes session not found: {source_session_id}",
+                }
+
+            messages = await asyncio.to_thread(db.get_messages, source_session_id)
+            copied_messages: List[Dict[str, Any]] = []
+            user_turns = 0
+            for message in messages:
+                role = str(message.get("role") or "")
+                if role == "user":
+                    user_turns += 1
+                    if raw_turn_count is not None and user_turns > raw_turn_count:
+                        break
+                copied_messages.append(message)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            child_session_id = f"{timestamp}_{secrets.token_hex(3)}"
+            source_title = str(source_session.get("title") or "Conversation").strip()
+            child_title = await asyncio.to_thread(db.get_next_title_in_lineage, source_title)
+            await session_db.create_session(
+                session_id=child_session_id,
+                source="t3agent",
+                model=source_session.get("model"),
+                model_config={"_t3agent_imported_from": source_session_id},
+                system_prompt=source_session.get("system_prompt"),
+                parent_session_id=source_session_id,
+            )
+            await asyncio.to_thread(db.replace_messages, child_session_id, copied_messages)
+            await session_db.set_session_title(child_session_id, child_title)
+
+            target_source = self.build_source(
+                chat_id=CANONICAL_CHAT_ID,
+                chat_name=target_thread_id,
+                chat_type="thread",
+                user_id="owner",
+                user_name="Owner",
+                thread_id=target_thread_id,
+            )
+            target_session_key = build_session_key(
+                target_source,
+                group_sessions_per_user=self.config.extra.get(
+                    "group_sessions_per_user", True
+                ),
+                thread_sessions_per_user=self.config.extra.get(
+                    "thread_sessions_per_user", False
+                ),
+            )
+            switched = await async_store.switch_session(
+                target_session_key, child_session_id
+            )
+            if switched is None:
+                raise RuntimeError("Unable to bind the child Hermes session")
+
+            history: List[Dict[str, Any]] = []
+            for message in copied_messages:
+                role = str(message.get("role") or "")
+                content = message.get("content")
+                if role not in {"user", "assistant", "system"} or not isinstance(
+                    content, str
+                ):
+                    continue
+                history.append(
+                    {
+                        "role": role,
+                        "content": (
+                            re.sub(r"^\[[^\]\n]{1,80}\]\s+", "", content)
+                            if role == "user"
+                            else content
+                        ),
+                        "createdAt": _iso_timestamp(message.get("timestamp")),
+                    }
+                )
+            return 201, {
+                "protocolVersion": PROTOCOL_VERSION,
+                "requestId": request_id,
+                "sourceSessionId": source_session_id,
+                "childSessionId": child_session_id,
+                "targetThreadId": target_thread_id,
+                "source": str(source_session.get("source") or "unknown"),
+                "title": child_title,
+                "messages": history,
+            }
+
+        return await self._run_once(request_id, fork, accepted_status=201)
 
     async def _submit_message(self, request: web.Request) -> web.Response:
         if not self._authorized(request):

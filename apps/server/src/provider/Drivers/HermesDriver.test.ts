@@ -102,6 +102,7 @@ it("surfaces the active Hermes identity and canonical commands plus aliases", ()
   ]);
   assert.deepEqual(
     snapshot.slashCommands.map(({ name }) => name),
-    ["new", "reset"],
+    ["new", "sessions", "resume", "fork", "reset"],
   );
+  assert.equal(snapshot.slashCommands[0]?.input, undefined);
 });
