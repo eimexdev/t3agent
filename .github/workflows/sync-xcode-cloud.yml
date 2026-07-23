@@ -1,0 +1,40 @@
+name: Sync Xcode Cloud branch
+
+on:
+  schedule:
+    - cron: "17 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-xcode-cloud
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the Xcode Cloud branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/xcode-cloud
+          fetch-depth: 0
+
+      - name: Merge current upstream main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/pingdotgg/t3code.git
+          git fetch upstream main
+
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "codex/xcode-cloud already contains upstream/main"
+            exit 0
+          fi
+
+          git merge --no-edit upstream/main
+          git push origin HEAD:codex/xcode-cloud
