@@ -696,3 +696,17 @@ export const PiAgentIcon: Icon = ({ className, ...props }) => (
     <path fill="#fff" d="M517.36 400H634.72V634.72H517.36Z" />
   </svg>
 );
+
+/** Hermes' canonical monochrome glyph from the Hermes ACP registry. */
+export const HermesIcon: Icon = ({ className, ...props }) => (
+  <svg {...props} viewBox="0 0 16 16" fill="none" className={cn("text-foreground", className)}>
+    <path
+      d="M8 1.5v13M8 3.25c-2.35-1.4-4.7-.95-6.25.35 1.85-.2 3.8.2 5.55 1.55M8 3.25c2.35-1.4 4.7-.95 6.25.35-1.85-.2-3.8.2-5.55 1.55M8 13.25c-2.3-1-3.05-2.65-1.35-4.15-2 .8-2.35 2.95-.35 4M8 13.25c2.3-1 3.05-2.65 1.35-4.15 2 .8 2.35 2.95.35 4"
+      stroke="currentColor"
+      strokeWidth="1.1"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <circle cx="8" cy="1.8" r="1.1" fill="currentColor" />
+  </svg>
+);

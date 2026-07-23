@@ -47,6 +47,38 @@ const callbackFields = {
   deliveryId: "delivery-1",
 } as const;
 
+it("decodes model inventory and effective reasoning from capabilities", () => {
+  const decoded = decodeCapabilitiesResponse({
+    ...requestFields,
+    capabilities: {
+      asynchronousDelivery: true,
+      imageAttachments: true,
+      interrupts: true,
+      approvals: true,
+      clarifications: true,
+      slashConfirmations: true,
+      threadCreation: true,
+      commandCatalog: true,
+    },
+    commands: [],
+    provider: "openai-codex",
+    model: "gpt-5.6-sol",
+    reasoningEffort: "high",
+    models: [
+      {
+        provider: "openai-codex",
+        slug: "gpt-5.6-sol",
+        isDefault: true,
+        reasoningEfforts: ["none", "low", "medium", "high"],
+        defaultReasoningEffort: "medium",
+      },
+    ],
+  });
+
+  expect(decoded.models?.[0]?.slug).toBe("gpt-5.6-sol");
+  expect(decoded.reasoningEffort).toBe("high");
+});
+
 describe("Hermes bridge T3 to Hermes requests", () => {
   it("decodes an image-bearing inbound message and preserves future fields", () => {
     const decoded = decodeInboundMessage({
@@ -61,6 +93,9 @@ describe("Hermes bridge T3 to Hermes requests", () => {
         futureUserField: "preserved",
       },
       content: "Inspect this image",
+      model: "gpt-5.6-sol",
+      modelProvider: "openai-codex",
+      reasoningEffort: "high",
       images: [
         {
           type: "image",
@@ -83,6 +118,9 @@ describe("Hermes bridge T3 to Hermes requests", () => {
     expect(decoded.user.futureUserField).toBe("preserved");
     expect(decoded.images?.[0]?.futureImageField).toBe(1);
     expect(decoded.images?.[0]?.source.futureSourceField).toBe(true);
+    expect(decoded.model).toBe("gpt-5.6-sol");
+    expect(decoded.modelProvider).toBe("openai-codex");
+    expect(decoded.reasoningEffort).toBe("high");
   });
 
   it("accepts every T3 to Hermes request discriminant", () => {

@@ -52,6 +52,7 @@ import {
 } from "../Errors.ts";
 import type { ProviderAdapterShape, ProviderThreadSnapshot } from "../Services/ProviderAdapter.ts";
 import type { HermesBridgeClient } from "../hermes/HermesBridgeClient.ts";
+import { decodeHermesModelSlug } from "../hermes/HermesModel.ts";
 
 const PROVIDER = ProviderDriverKind.make("hermes");
 const RESUME_SCHEMA_VERSION = 1 as const;
@@ -771,6 +772,12 @@ export const makeHermesAdapter = Effect.fn("makeHermesAdapter")(function* (
       payload: {},
     });
     const requestId = HermesBridgeRequestId.make(`turn:${turnId}`);
+    const requestedModel = input.modelSelection
+      ? decodeHermesModelSlug(input.modelSelection.model)
+      : undefined;
+    const reasoningEffort = input.modelSelection?.options?.find(
+      (option) => option.id === "reasoningEffort" && typeof option.value === "string",
+    )?.value;
     yield* options.client
       .send({
         protocolVersion: HERMES_BRIDGE_PROTOCOL_VERSION,
@@ -781,6 +788,10 @@ export const makeHermesAdapter = Effect.fn("makeHermesAdapter")(function* (
         threadId: HermesBridgeThreadId.make(input.threadId),
         user: { id: "owner", name: "Owner" },
         content: input.input ?? "",
+        ...(requestedModel
+          ? { model: requestedModel.model, modelProvider: requestedModel.provider }
+          : {}),
+        ...(typeof reasoningEffort === "string" ? { reasoningEffort } : {}),
         ...(images.length > 0 ? { images } : {}),
       })
       .pipe(
@@ -958,7 +969,7 @@ export const makeHermesAdapter = Effect.fn("makeHermesAdapter")(function* (
 
   const adapter: HermesAdapter = {
     provider: PROVIDER,
-    capabilities: { sessionModelSwitch: "unsupported" },
+    capabilities: { sessionModelSwitch: "in-session" },
     startSession,
     sendTurn,
     interruptTurn,

@@ -101,6 +101,35 @@ it.layer(testLayer)("HermesAdapter", (it) => {
     }),
   );
 
+  it.effect("forwards provider-aware model and reasoning selections", () =>
+    Effect.gen(function* () {
+      const { adapter, sent } = yield* HermesAdapterTestHarness;
+      sent.length = 0;
+      const threadId = ThreadId.make("hermes-model-thread");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("hermes"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "use these controls",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("hermes-test"),
+          model: "openai-codex::gpt-5.6-sol",
+          options: [{ id: "reasoningEffort", value: "high" }],
+        },
+      });
+
+      const request = sent[0];
+      NodeAssert.equal(request?.type, "message.submit");
+      if (request?.type !== "message.submit") return;
+      NodeAssert.equal(request.modelProvider, "openai-codex");
+      NodeAssert.equal(request.model, "gpt-5.6-sol");
+      NodeAssert.equal(request.reasoningEffort, "high");
+    }),
+  );
+
   it.effect("emits only cumulative text deltas and completes the active turn", () =>
     Effect.gen(function* () {
       const { adapter, sent } = yield* HermesAdapterTestHarness;

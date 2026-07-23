@@ -315,6 +315,89 @@ def _runtime_identity() -> Dict[str, str]:
     return identity
 
 
+def _model_inventory() -> List[Dict[str, Any]]:
+    """Return Hermes' authenticated model catalog with picker capabilities."""
+    try:
+        from hermes_cli.inventory import build_models_payload, load_picker_context
+
+        payload = build_models_payload(
+            load_picker_context(),
+            explicit_only=True,
+            picker_hints=True,
+            canonical_order=True,
+            capabilities=True,
+            probe_custom_providers=False,
+            probe_current_custom_provider=False,
+            max_models=None,
+        )
+        current = _runtime_identity()
+        result: List[Dict[str, Any]] = []
+        for provider in payload.get("providers", []):
+            provider_slug = str(provider.get("slug") or "").strip()
+            if not provider_slug or provider.get("authenticated") is False:
+                continue
+            capabilities = provider.get("capabilities") or {}
+            for raw_model in provider.get("models") or []:
+                if isinstance(raw_model, dict):
+                    model_slug = str(raw_model.get("slug") or raw_model.get("id") or "").strip()
+                    model_name = str(raw_model.get("name") or model_slug).strip()
+                else:
+                    model_slug = str(raw_model).strip()
+                    model_name = model_slug
+                if not model_slug:
+                    continue
+                model_capabilities = capabilities.get(model_slug) or {}
+                reasoning = model_capabilities.get("reasoning")
+                entry: Dict[str, Any] = {
+                    "provider": provider_slug,
+                    "slug": model_slug,
+                    "name": model_name,
+                    "isDefault": (
+                        provider_slug == current.get("provider")
+                        and model_slug == current.get("model")
+                    ),
+                }
+                if reasoning is True:
+                    from hermes_constants import VALID_REASONING_EFFORTS
+
+                    normalized_reasoning = ["none", *VALID_REASONING_EFFORTS]
+                elif isinstance(reasoning, list):
+                    normalized_reasoning = [
+                        str(level).strip() for level in reasoning if str(level).strip()
+                    ]
+                else:
+                    normalized_reasoning = []
+                if normalized_reasoning:
+                    entry["reasoningEfforts"] = normalized_reasoning
+                default_reasoning = (
+                    model_capabilities.get("default_reasoning")
+                    or _current_reasoning_effort(model_slug)
+                )
+                if default_reasoning:
+                    entry["defaultReasoningEffort"] = str(default_reasoning)
+                result.append(entry)
+        return result
+    except Exception:
+        logger.debug("[t3agent] could not read Hermes model inventory", exc_info=True)
+        return []
+
+
+def _current_reasoning_effort(model: str = "") -> Optional[str]:
+    try:
+        from hermes_cli.config import load_config_readonly
+        from hermes_constants import resolve_reasoning_config
+
+        config = resolve_reasoning_config(load_config_readonly(), model)
+        if config is None:
+            return "medium"
+        if config.get("enabled") is False:
+            return "none"
+        value = config.get("effort")
+        return str(value).strip() if value else "medium"
+    except Exception:
+        return None
+
+
 class T3AgentAdapter(BasePlatformAdapter):
     """Bridge a local T3 Agent server into Hermes as platform ``t3agent``."""
 
@@ -844,6 +927,12 @@ class T3AgentAdapter(BasePlatformAdapter):
                     "commandCatalog": True,
                 },
                 "commands": _command_catalog(),
+                "models": _model_inventory(),
+                **(
+                    {"reasoningEffort": _current_reasoning_effort()}
+                    if _current_reasoning_effort()
+                    else {}
+                ),
                 **_runtime_identity(),
             }
         )
@@ -858,6 +947,11 @@ class T3AgentAdapter(BasePlatformAdapter):
             chat_id = _require_string(payload, "chatId")
             thread_id = _optional_string(payload, "threadId")
             content = _require_string(payload, "content", allow_empty=True)
+            model = _optional_string(payload, "model")
+            model_provider = _optional_string(payload, "modelProvider")
+            reasoning_effort = _optional_string(payload, "reasoningEffort")
+            if model is not None and model_provider is None:
+                raise ValueError("modelProvider is required when model is provided")
             user = payload.get("user")
             if not isinstance(user, dict):
                 raise ValueError("user must be an object")
@@ -894,6 +988,34 @@ class T3AgentAdapter(BasePlatformAdapter):
                     "t3agent": True,
                 },
             )
+            session_key = build_session_key(
+                source,
+                group_sessions_per_user=self.config.extra.get(
+                    "group_sessions_per_user", True
+                ),
+                thread_sessions_per_user=self.config.extra.get(
+                    "thread_sessions_per_user", False
+                ),
+            )
+            gateway_runner = getattr(self, "gateway_runner", None)
+            if gateway_runner is not None and model is not None and model_provider is not None:
+                model_event = MessageEvent(
+                    text=f"/model {model} --session --provider {model_provider}",
+                    message_type=MessageType.TEXT,
+                    source=source,
+                    raw_message=payload,
+                    message_id=f"{message_id}:model",
+                    metadata={"t3agent": True},
+                )
+                await gateway_runner._handle_model_command(model_event)
+            if gateway_runner is not None and reasoning_effort is not None:
+                from gateway.run import _platform_config_key
+
+                gateway_runner._apply_reasoning_selection(
+                    session_key,
+                    _platform_config_key(source.platform),
+                    reasoning_effort,
+                )
             await self.handle_message(event)
             return 202, _ack(request_id, "accepted")
 

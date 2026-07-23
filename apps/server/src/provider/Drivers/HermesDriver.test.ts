@@ -25,6 +25,22 @@ it("surfaces the active Hermes identity and canonical commands plus aliases", ()
       },
       provider: "openrouter",
       model: "anthropic/claude-sonnet-4",
+      reasoningEffort: "high",
+      models: [
+        {
+          provider: "openrouter",
+          slug: "anthropic/claude-sonnet-4",
+          isDefault: true,
+          reasoningEfforts: ["none", "medium", "high"],
+          defaultReasoningEffort: "medium",
+        },
+        {
+          provider: "openai-codex",
+          slug: "gpt-5.6-sol",
+          reasoningEfforts: ["low", "high"],
+          defaultReasoningEffort: "low",
+        },
+      ],
       profile: "default",
       commands: [
         {
@@ -41,12 +57,47 @@ it("surfaces the active Hermes identity and canonical commands plus aliases", ()
   assert.equal(snapshot.auth.label, "default");
   assert.deepEqual(snapshot.models, [
     {
-      slug: "anthropic/claude-sonnet-4",
+      slug: "openrouter::anthropic/claude-sonnet-4",
       name: "anthropic/claude-sonnet-4",
       subProvider: "openrouter",
       isCustom: true,
       isDefault: true,
-      capabilities: null,
+      capabilities: {
+        optionDescriptors: [
+          {
+            id: "reasoningEffort",
+            label: "Reasoning",
+            type: "select",
+            options: [
+              { id: "none", label: "None" },
+              { id: "medium", label: "Medium", isDefault: true },
+              { id: "high", label: "High" },
+            ],
+            currentValue: "high",
+          },
+        ],
+      },
+    },
+    {
+      slug: "openai-codex::gpt-5.6-sol",
+      name: "gpt-5.6-sol",
+      subProvider: "openai-codex",
+      isCustom: true,
+      isDefault: false,
+      capabilities: {
+        optionDescriptors: [
+          {
+            id: "reasoningEffort",
+            label: "Reasoning",
+            type: "select",
+            options: [
+              { id: "low", label: "Low", isDefault: true },
+              { id: "high", label: "High" },
+            ],
+            currentValue: "low",
+          },
+        ],
+      },
     },
   ]);
   assert.deepEqual(

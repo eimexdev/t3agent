@@ -27,10 +27,15 @@ import {
 } from "../ProviderDriver.ts";
 import { makeHermesBridgeClient } from "../hermes/HermesBridgeClient.ts";
 import * as HermesBridgeRegistry from "../hermes/HermesBridgeRegistry.ts";
+import { encodeHermesModelSlug } from "../hermes/HermesModel.ts";
 import type { ServerProviderShape } from "../Services/ServerProvider.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("hermes");
 const decodeSettings = Schema.decodeSync(HermesSettings);
+
+function reasoningLabel(value: string): string {
+  return value === "none" ? "None" : value.charAt(0).toUpperCase() + value.slice(1);
+}
 
 export function makeHermesProviderSnapshot(input: {
   readonly instanceId: ProviderInstance["instanceId"];
@@ -42,7 +47,56 @@ export function makeHermesProviderSnapshot(input: {
   readonly checkedAt: string;
 }): ServerProvider {
   const activeModel = input.capabilities?.model?.trim() || "active";
-  const provider = input.capabilities?.provider?.trim();
+  const activeProvider = input.capabilities?.provider?.trim();
+  const inventory = input.capabilities?.models ?? [];
+  const models =
+    inventory.length > 0
+      ? inventory.map((model) => {
+          const reasoningEfforts = model.reasoningEfforts ?? [];
+          return {
+            slug: encodeHermesModelSlug(model.provider, model.slug),
+            name: model.name ?? model.slug,
+            subProvider: model.provider,
+            isCustom: true,
+            isDefault:
+              model.isDefault === true ||
+              (model.provider === activeProvider && model.slug === activeModel),
+            capabilities:
+              reasoningEfforts.length > 0
+                ? {
+                    optionDescriptors: [
+                      {
+                        id: "reasoningEffort",
+                        label: "Reasoning",
+                        type: "select" as const,
+                        options: reasoningEfforts.map((effort) => ({
+                          id: effort,
+                          label: reasoningLabel(effort),
+                          ...(effort === model.defaultReasoningEffort ? { isDefault: true } : {}),
+                        })),
+                        ...(model.provider === activeProvider &&
+                        model.slug === activeModel &&
+                        input.capabilities?.reasoningEffort
+                          ? { currentValue: input.capabilities.reasoningEffort }
+                          : model.defaultReasoningEffort
+                            ? { currentValue: model.defaultReasoningEffort }
+                            : {}),
+                      },
+                    ],
+                  }
+                : null,
+          };
+        })
+      : [
+          {
+            slug: activeProvider ? encodeHermesModelSlug(activeProvider, activeModel) : activeModel,
+            name: activeModel === "active" ? "Active Hermes model" : activeModel,
+            ...(activeProvider ? { subProvider: activeProvider } : {}),
+            isCustom: true,
+            isDefault: true,
+            capabilities: null,
+          },
+        ];
   return {
     instanceId: input.instanceId,
     driver: DRIVER_KIND,
@@ -63,16 +117,7 @@ export function makeHermesProviderSnapshot(input: {
     checkedAt: input.checkedAt,
     ...(input.error ? { message: input.error } : {}),
     availability: "available",
-    models: [
-      {
-        slug: activeModel,
-        name: activeModel === "active" ? "Active Hermes model" : activeModel,
-        ...(provider ? { subProvider: provider } : {}),
-        isCustom: true,
-        isDefault: true,
-        capabilities: null,
-      },
-    ],
+    models,
     slashCommands: (input.capabilities?.commands ?? []).flatMap((command) =>
       [command.name, ...(command.aliases ?? [])].map((name) => ({
         name: name.replace(/^\/+/, ""),

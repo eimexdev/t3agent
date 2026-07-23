@@ -145,6 +145,59 @@ async def test_message_submit_builds_normal_event_and_is_idempotent(
 
 
 @pytest.mark.asyncio
+async def test_message_submit_applies_model_and_reasoning_before_dispatch(
+    fake_platform: SimpleNamespace,
+) -> None:
+    adapter = adapter_module.T3AgentAdapter(make_config())
+    calls: List[Any] = []
+
+    class FakeRunner:
+        async def _handle_model_command(self, event: Any) -> None:
+            calls.append(("model", event.text))
+
+        def _apply_reasoning_selection(
+            self, session_key: str, platform_key: str, value: str
+        ) -> None:
+            calls.append(("reasoning", session_key, platform_key, value))
+
+    adapter.gateway_runner = FakeRunner()  # type: ignore[attr-defined]
+
+    async def capture(event: Any) -> None:
+        calls.append(("message", event.text))
+
+    adapter.handle_message = capture  # type: ignore[method-assign]
+    client = await make_ingress_client(adapter)
+    try:
+        response = await client.post(
+            "/v1/messages",
+            headers=auth_headers(),
+            json={
+                "protocolVersion": 1,
+                "requestId": "model-request",
+                "type": "message.submit",
+                "messageId": "model-message",
+                "chatId": "t3agent",
+                "threadId": "thread-model",
+                "user": {"id": "owner", "name": "Owner"},
+                "content": "hello",
+                "model": "gpt-5.6-sol",
+                "modelProvider": "openai-codex",
+                "reasoningEffort": "high",
+            },
+        )
+        assert response.status == 202
+        assert calls[0] == (
+            "model",
+            "/model gpt-5.6-sol --session --provider openai-codex",
+        )
+        assert calls[1][0] == "reasoning"
+        assert calls[1][-1] == "high"
+        assert calls[2] == ("message", "hello")
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_ingress_idempotency_survives_adapter_restart(
     fake_platform: SimpleNamespace,
     tmp_path: Any,

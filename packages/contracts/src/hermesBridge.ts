@@ -114,6 +114,9 @@ export const HermesBridgeInboundMessageRequest = openStruct({
   threadId: Schema.optionalKey(HermesBridgeThreadId),
   user: HermesBridgeUser,
   content: Schema.String,
+  model: Schema.optionalKey(TrimmedNonEmptyString),
+  modelProvider: Schema.optionalKey(TrimmedNonEmptyString),
+  reasoningEffort: Schema.optionalKey(TrimmedNonEmptyString),
   images: Schema.optionalKey(
     Schema.Array(HermesBridgeImageAttachment).check(Schema.isMaxLength(HERMES_BRIDGE_MAX_IMAGES)),
   ),
@@ -334,12 +337,24 @@ export const HermesBridgeCommandCatalogResponse = openStruct({
 });
 export type HermesBridgeCommandCatalogResponse = typeof HermesBridgeCommandCatalogResponse.Type;
 
+export const HermesBridgeModel = openStruct({
+  provider: TrimmedNonEmptyString,
+  slug: TrimmedNonEmptyString,
+  name: Schema.optionalKey(TrimmedNonEmptyString),
+  isDefault: Schema.optionalKey(Schema.Boolean),
+  reasoningEfforts: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
+  defaultReasoningEffort: Schema.optionalKey(TrimmedNonEmptyString),
+});
+export type HermesBridgeModel = typeof HermesBridgeModel.Type;
+
 export const HermesBridgeCapabilitiesResponse = openStruct({
   ...RequestFields,
   capabilities: HermesBridgeCapabilities,
   commands: Schema.Array(HermesBridgeCommand),
   provider: Schema.optionalKey(TrimmedNonEmptyString),
   model: Schema.optionalKey(TrimmedNonEmptyString),
+  models: Schema.optionalKey(Schema.Array(HermesBridgeModel)),
+  reasoningEffort: Schema.optionalKey(TrimmedNonEmptyString),
   profile: Schema.optionalKey(TrimmedNonEmptyString),
 });
 export type HermesBridgeCapabilitiesResponse = typeof HermesBridgeCapabilitiesResponse.Type;
