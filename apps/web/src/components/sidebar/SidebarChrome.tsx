@@ -4,6 +4,7 @@ import { memo, useCallback } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 
 import { APP_STAGE_LABEL } from "../../branding";
+import { IS_T3_AGENT_MODE } from "../../productMode";
 import { cn } from "../../lib/utils";
 import { primaryServerConfigAtom } from "../../state/server";
 import { resolveSidebarStageBadgeLabel } from "../Sidebar.logic";
@@ -64,7 +65,7 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
           onBackdrop ? "text-white/70" : "text-muted-foreground",
         )}
       >
-        Code
+        {IS_T3_AGENT_MODE ? "Agent" : "Code"}
       </span>
     </Link>
   );
@@ -108,7 +109,7 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
 
   return (
     <SidebarFooter className="p-2">
-      <SidebarProviderUpdatePill />
+      {IS_T3_AGENT_MODE ? null : <SidebarProviderUpdatePill />}
       <SidebarUpdatePill />
       <SidebarMenu>
         <SidebarMenuItem>

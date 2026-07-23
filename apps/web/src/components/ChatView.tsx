@@ -203,6 +203,7 @@ import {
   useThreadRefs,
 } from "../state/entities";
 import { environmentShell } from "../state/shell";
+import { IS_T3_AGENT_MODE, T3_AGENT_PROVIDER_INSTANCE_ID } from "../productMode";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
@@ -2273,12 +2274,13 @@ function ChatViewContent(props: ChatViewProps) {
   const selectedProviderInstanceId =
     providerStatuses.find((status) => status.instanceId === selectedProviderByThreadId)
       ?.instanceId ?? null;
-  const activeProviderInstanceId =
-    selectedProviderInstanceId ??
-    activeThread?.session?.providerInstanceId ??
-    activeThread?.modelSelection.instanceId ??
-    activeProject?.defaultModelSelection?.instanceId ??
-    null;
+  const activeProviderInstanceId = IS_T3_AGENT_MODE
+    ? T3_AGENT_PROVIDER_INSTANCE_ID
+    : (selectedProviderInstanceId ??
+      activeThread?.session?.providerInstanceId ??
+      activeThread?.modelSelection.instanceId ??
+      activeProject?.defaultModelSelection?.instanceId ??
+      null);
   const activeProviderStatus = useMemo(() => {
     if (activeProviderInstanceId) {
       return (
@@ -5216,7 +5218,7 @@ function ChatViewContent(props: ChatViewProps) {
             COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
           )}
         >
-          {!rightPanelOpen ? panelLayoutControls : null}
+          {!IS_T3_AGENT_MODE && !rightPanelOpen ? panelLayoutControls : null}
           <ChatHeader
             activeThreadEnvironmentId={activeThread.environmentId}
             activeThreadId={activeThread.id}
@@ -5233,6 +5235,9 @@ function ChatViewContent(props: ChatViewProps) {
             availableEditors={availableEditors}
             rightPanelOpen={rightPanelOpen}
             gitCwd={gitCwd}
+            hermesConnectionState={
+              activeProviderStatus?.status === "ready" ? "connected" : "unavailable"
+            }
             onRunProjectScript={runProjectScript}
             onAddProjectScript={saveProjectScript}
             onUpdateProjectScript={updateProjectScript}
@@ -5456,7 +5461,7 @@ function ChatViewContent(props: ChatViewProps) {
                             : "pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]",
                         )}
                       >
-                        {isGitRepo && (
+                        {isGitRepo && !IS_T3_AGENT_MODE && (
                           <div className="pointer-events-auto">
                             <BranchToolbar
                               environmentId={activeThread.environmentId}

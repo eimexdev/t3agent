@@ -88,6 +88,7 @@ import {
 } from "./settingsLayout";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { IS_T3_AGENT_MODE, isT3AgentProviderInstance } from "../../productMode";
 
 const THEME_OPTIONS = [
   {
@@ -988,7 +989,10 @@ export function GeneralSettingsPanel() {
 export function ProviderSettingsPanel() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
-  const serverProviders = useAtomValue(primaryServerProvidersAtom);
+  const allServerProviders = useAtomValue(primaryServerProvidersAtom);
+  const serverProviders = IS_T3_AGENT_MODE
+    ? allServerProviders.filter((provider) => isT3AgentProviderInstance(provider.instanceId))
+    : allServerProviders;
   const primaryEnvironment = usePrimaryEnvironment();
   const refreshServerProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
@@ -1012,14 +1016,18 @@ export function ProviderSettingsPanel() {
     () => new Map(providerUpdateCandidates.map((candidate) => [candidate.instanceId, candidate])),
     [providerUpdateCandidates],
   );
-  const visibleProviderSettings = PROVIDER_SETTINGS.filter(
-    (providerSettings) =>
+  const visibleProviderSettings = PROVIDER_SETTINGS.filter((providerSettings) => {
+    if (IS_T3_AGENT_MODE) {
+      return providerSettings.provider === ProviderDriverKind.make("hermes");
+    }
+    return (
       providerSettings.provider !== "cursor" ||
       serverProviders.some(
         (provider) =>
           provider.instanceId === defaultInstanceIdForDriver(ProviderDriverKind.make("cursor")),
-      ),
-  );
+      )
+    );
+  });
   const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
   const textGenInstanceId = textGenerationModelSelection.instanceId;
   const lastCheckedAt =
@@ -1170,6 +1178,7 @@ export function ProviderSettingsPanel() {
   }
   for (const [driver, list] of instancesByDriver) {
     if (visibleDriverKinds.has(driver)) continue;
+    if (IS_T3_AGENT_MODE) continue;
     for (const [id, instance] of list) {
       rows.push({
         instanceId: id,
@@ -1283,22 +1292,24 @@ export function ProviderSettingsPanel() {
         headerAction={
           <div className="flex items-center gap-1.5">
             <ProviderLastChecked lastCheckedAt={lastCheckedAt} />
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
-                    onClick={() => setIsAddInstanceDialogOpen(true)}
-                    aria-label="Add provider instance"
-                  >
-                    <PlusIcon className="size-3" />
-                  </Button>
-                }
-              />
-              <TooltipPopup side="top">Add provider instance</TooltipPopup>
-            </Tooltip>
+            {IS_T3_AGENT_MODE ? null : (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
+                      onClick={() => setIsAddInstanceDialogOpen(true)}
+                      aria-label="Add provider instance"
+                    >
+                      <PlusIcon className="size-3" />
+                    </Button>
+                  }
+                />
+                <TooltipPopup side="top">Add provider instance</TooltipPopup>
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger
                 render={

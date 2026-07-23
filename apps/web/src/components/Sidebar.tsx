@@ -210,6 +210,7 @@ import {
   selectProjectGroupingSettings,
 } from "../logicalProject";
 import type { SidebarThreadSummary } from "../types";
+import { IS_T3_AGENT_MODE, isT3AgentThread } from "../productMode";
 import {
   buildPhysicalToLogicalProjectKeyMap,
   buildSidebarProjectSnapshots,
@@ -1170,7 +1171,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     },
   });
   const openPrLink = useOpenPrLink();
-  const sidebarThreads = useThreadShellsForProjectRefs(project.memberProjectRefs);
+  const allSidebarThreads = useThreadShellsForProjectRefs(project.memberProjectRefs);
+  const sidebarThreads = useMemo(
+    () => (IS_T3_AGENT_MODE ? allSidebarThreads.filter(isT3AgentThread) : allSidebarThreads),
+    [allSidebarThreads],
+  );
   const sidebarThreadByKey = useMemo(
     () =>
       new Map(
@@ -1188,9 +1193,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   sidebarThreadByKeyRef.current = sidebarThreadByKey;
   const projectThreads = sidebarThreads;
   const projectPreferenceKeys = useMemo(() => projectExpansionPreferenceKeys(project), [project]);
-  const projectExpanded = useUiStateStore((state) =>
+  const storedProjectExpanded = useUiStateStore((state) =>
     resolveProjectExpanded(state.projectExpandedById, projectPreferenceKeys),
   );
+  const projectExpanded = IS_T3_AGENT_MODE || storedProjectExpanded;
   const threadLastVisitedAts = useUiStateStore(
     useShallow((state) =>
       projectThreads.map(
@@ -2241,7 +2247,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
   return (
     <>
-      <div className="group/project-header relative">
+      <div className={`group/project-header relative ${IS_T3_AGENT_MODE ? "hidden" : ""}`}>
         <SidebarMenuButton
           ref={isManualProjectSorting ? dragHandleProps?.setActivatorNodeRef : undefined}
           size="sm"
@@ -2625,7 +2631,6 @@ function ProjectSortMenu({
     },
     [onThreadPreviewCountChange, threadPreviewCount],
   );
-
   return (
     <Menu>
       <Tooltip>
@@ -2882,6 +2887,15 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     },
     [updateSettings],
   );
+  const t3AgentCompatibilityProject = sortedProjects[0]?.memberProjects[0] ?? null;
+  const handleCreateT3AgentThread = useCallback(() => {
+    if (!t3AgentCompatibilityProject) {
+      return;
+    }
+    void handleNewThread(
+      scopeProjectRef(t3AgentCompatibilityProject.environmentId, t3AgentCompatibilityProject.id),
+    );
+  }, [handleNewThread, t3AgentCompatibilityProject]);
 
   return (
     <SidebarContent className="gap-0">
@@ -2935,36 +2949,55 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
       <SidebarGroup className="px-2 py-2">
         <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
           <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
-            Projects
+            {IS_T3_AGENT_MODE ? "Conversations" : "Projects"}
           </span>
-          <div className="flex items-center gap-1">
-            <ProjectSortMenu
-              projectSortOrder={projectSortOrder}
-              threadSortOrder={threadSortOrder}
-              projectGroupingMode={projectGroupingMode}
-              threadPreviewCount={threadPreviewCount}
-              onProjectSortOrderChange={handleProjectSortOrderChange}
-              onThreadSortOrderChange={handleThreadSortOrderChange}
-              onProjectGroupingModeChange={handleProjectGroupingModeChange}
-              onThreadPreviewCountChange={handleThreadPreviewCountChange}
-            />
+          {IS_T3_AGENT_MODE ? (
             <Tooltip>
               <TooltipTrigger
                 render={
                   <button
                     type="button"
-                    aria-label="Add project"
-                    data-testid="sidebar-add-project-trigger"
-                    className="inline-flex h-6 min-w-6 cursor-pointer items-center justify-center rounded-md px-[calc(--spacing(1)-1px)] text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
-                    onClick={openAddProject}
+                    aria-label="New Hermes conversation"
+                    className="inline-flex h-6 min-w-6 cursor-pointer items-center justify-center rounded-md px-[calc(--spacing(1)-1px)] text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={t3AgentCompatibilityProject === null}
+                    onClick={handleCreateT3AgentThread}
                   />
                 }
               >
-                <FolderPlusIcon className="size-3.5" />
+                <SquarePenIcon className="size-3.5" />
               </TooltipTrigger>
-              <TooltipPopup side="right">Add project</TooltipPopup>
+              <TooltipPopup side="right">New conversation</TooltipPopup>
             </Tooltip>
-          </div>
+          ) : (
+            <div className="flex items-center gap-1">
+              <ProjectSortMenu
+                projectSortOrder={projectSortOrder}
+                threadSortOrder={threadSortOrder}
+                projectGroupingMode={projectGroupingMode}
+                threadPreviewCount={threadPreviewCount}
+                onProjectSortOrderChange={handleProjectSortOrderChange}
+                onThreadSortOrderChange={handleThreadSortOrderChange}
+                onProjectGroupingModeChange={handleProjectGroupingModeChange}
+                onThreadPreviewCountChange={handleThreadPreviewCountChange}
+              />
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label="Add project"
+                      data-testid="sidebar-add-project-trigger"
+                      className="inline-flex h-6 min-w-6 cursor-pointer items-center justify-center rounded-md px-[calc(--spacing(1)-1px)] text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
+                      onClick={openAddProject}
+                    />
+                  }
+                >
+                  <FolderPlusIcon className="size-3.5" />
+                </TooltipTrigger>
+                <TooltipPopup side="right">Add project</TooltipPopup>
+              </Tooltip>
+            </div>
+          )}
         </div>
 
         {isManualProjectSorting ? (
@@ -3052,7 +3085,11 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
 
 export default function Sidebar() {
   const projects = useProjects();
-  const sidebarThreads = useThreadShells();
+  const allSidebarThreads = useThreadShells();
+  const sidebarThreads = useMemo(
+    () => (IS_T3_AGENT_MODE ? allSidebarThreads.filter(isT3AgentThread) : allSidebarThreads),
+    [allSidebarThreads],
+  );
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const reorderProjects = useUiStateStore((store) => store.reorderProjects);

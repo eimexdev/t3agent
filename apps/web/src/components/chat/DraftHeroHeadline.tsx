@@ -5,6 +5,7 @@ import { useCallback, useMemo } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
 import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
+import { IS_T3_AGENT_MODE } from "~/productMode";
 import { useProjects, useThreadShells } from "~/state/entities";
 import { sortScopedProjectsForSidebar } from "../Sidebar.logic";
 import {
@@ -52,6 +53,14 @@ export function DraftHeroHeadline({
   const hasResolvedProject = activeProjectTitle !== null;
   const canChooseProject = orderedProjects.length > 0;
   const shouldShowProjectMenu = canChooseProject;
+
+  if (IS_T3_AGENT_MODE) {
+    return (
+      <h1 className="mx-auto w-full max-w-5xl text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
+        What can Hermes help with?
+      </h1>
+    );
+  }
 
   const projectSelector = shouldShowProjectMenu ? (
     <Menu>

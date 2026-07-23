@@ -123,6 +123,11 @@ import {
   sortProviderInstanceEntries,
   type ProviderInstanceEntry,
 } from "../../providerInstances";
+import {
+  IS_T3_AGENT_MODE,
+  isT3AgentProviderInstance,
+  T3_AGENT_PROVIDER_INSTANCE_ID,
+} from "../../productMode";
 import { type AppModelOption, getAppModelOptionsForInstance } from "../../modelSelection";
 import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import type { SessionPhase, Thread } from "../../types";
@@ -682,13 +687,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Instance-aware projection of the wire provider list. One entry per
   // configured instance (default built-in + any custom `providerInstances.*`),
   // sorted default-first per driver kind for a stable picker order.
-  const providerInstanceEntries = useMemo<ReadonlyArray<ProviderInstanceEntry>>(
-    () =>
-      sortProviderInstanceEntries(
-        applyProviderInstanceSettings(deriveProviderInstanceEntries(providerStatuses), settings),
-      ),
-    [providerStatuses, settings],
-  );
+  const providerInstanceEntries = useMemo<ReadonlyArray<ProviderInstanceEntry>>(() => {
+    const entries = sortProviderInstanceEntries(
+      applyProviderInstanceSettings(deriveProviderInstanceEntries(providerStatuses), settings),
+    );
+    return IS_T3_AGENT_MODE
+      ? entries.filter((entry) => isT3AgentProviderInstance(entry.instanceId))
+      : entries;
+  }, [providerStatuses, settings]);
   const selectedProviderByThreadId = composerDraft.activeProvider ?? null;
   const threadProvider =
     activeThread?.session?.providerInstanceId ??
@@ -734,6 +740,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   //
   const selectedInstanceId = useMemo<ProviderInstanceId>(() => {
     const candidates: Array<string | null | undefined> = [
+      IS_T3_AGENT_MODE ? T3_AGENT_PROVIDER_INSTANCE_ID : null,
       composerDraft.activeProvider,
       activeThread?.session?.providerInstanceId,
       activeThreadModelSelection?.instanceId,
@@ -2530,10 +2537,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                 environmentUnavailable.connection,
                               )}`
                             : noProviderAvailable
-                              ? "Enable a provider in Settings to send a message"
-                              : phase === "disconnected"
-                                ? "Ask for follow-up changes or attach images"
-                                : "Ask anything, @tag files/folders, $use skills, or / for commands"
+                              ? "Hermes is unavailable. Check the connection in Settings."
+                              : IS_T3_AGENT_MODE
+                                ? "Message Hermes, attach images, or type / for commands"
+                                : phase === "disconnected"
+                                  ? "Ask for follow-up changes or attach images"
+                                  : "Ask anything, @tag files/folders, $use skills, or / for commands"
                 }
                 disabled={isConnecting || isComposerApprovalState || projectSelectionRequired}
               />
@@ -2600,6 +2609,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     <CircleAlertIcon className="size-4" />
                     No provider available
                   </Button>
+                ) : IS_T3_AGENT_MODE ? (
+                  <span
+                    className="shrink-0 px-2 text-sm text-muted-foreground"
+                    title="Current Hermes model"
+                  >
+                    {selectedModelForPickerWithCustomFallback}
+                  </span>
                 ) : (
                   <ProviderModelPicker
                     compact={isComposerFooterCompact}
@@ -2626,7 +2642,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   />
                 )}
 
-                {isComposerFooterCompact ? (
+                {IS_T3_AGENT_MODE ? null : isComposerFooterCompact ? (
                   <CompactComposerControlsMenu
                     activePlan={showPlanSidebarToggle}
                     interactionMode={interactionMode}
