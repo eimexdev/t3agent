@@ -11,6 +11,7 @@ from gateway.stream_consumer import GatewayStreamConsumer, StreamConsumerConfig
 from gateway.session import SessionSource, build_session_key
 import pytest
 
+from integrations.hermes import t3agent as plugin_package
 from integrations.hermes.t3agent import adapter as adapter_module
 
 
@@ -54,6 +55,10 @@ async def make_ingress_client(
 
 def auth_headers() -> Dict[str, str]:
     return {"Authorization": "Bearer ingress-secret"}
+
+
+def test_plugin_package_exports_register() -> None:
+    assert plugin_package.register is adapter_module.register
 
 
 async def wait_until(predicate: Any, *, timeout: float = 2.0) -> None:
