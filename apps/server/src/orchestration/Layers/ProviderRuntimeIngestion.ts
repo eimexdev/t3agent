@@ -1,6 +1,8 @@
 import {
   ApprovalRequestId,
   type AssistantDeliveryMode,
+  ChatAttachment,
+  type ChatAttachment as ChatAttachmentType,
   CommandId,
   MessageId,
   type OrchestrationEvent,
@@ -24,6 +26,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
@@ -41,6 +44,25 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerTaskKey = (threadId: ThreadId, taskId: string) => `${threadId}:${taskId}`;
+const isChatAttachment = Schema.is(ChatAttachment);
+
+function attachmentsFromItemData(data: unknown): ReadonlyArray<ChatAttachmentType> | undefined {
+  if (typeof data !== "object" || data === null || !("attachments" in data)) {
+    return undefined;
+  }
+  const attachments = (data as { readonly attachments?: unknown }).attachments;
+  if (!Array.isArray(attachments)) {
+    return undefined;
+  }
+  const parsed = attachments.filter(isChatAttachment);
+  return parsed.length > 0 ? parsed : undefined;
+}
+
+function finalTextFromItemData(data: unknown): string | undefined {
+  if (typeof data !== "object" || data === null || !("finalText" in data)) return undefined;
+  const finalText = (data as { readonly finalText?: unknown }).finalText;
+  return typeof finalText === "string" ? finalText : undefined;
+}
 
 // Fallback when the in-memory description cache no longer has the task name
 // (server restart, session-exit sweep, TTL/capacity eviction): earlier
@@ -694,9 +716,7 @@ const make = Effect.gen(function* () {
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
   const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
-    crypto.randomUUIDv4.pipe(
-      Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
-    );
+    Effect.succeed(CommandId.make(`provider:${event.eventId}:${tag}`));
 
   const turnMessageIdsByTurnKey = yield* Cache.make<string, Set<MessageId>>({
     capacity: TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY,
@@ -1006,6 +1026,8 @@ const make = Effect.gen(function* () {
     commandTag: string;
     finalDeltaCommandTag: string;
     fallbackText?: string;
+    finalText?: string;
+    attachments?: ReadonlyArray<ChatAttachmentType>;
     hasProjectedMessage?: boolean;
   }) =>
     Effect.gen(function* () {
@@ -1030,12 +1052,14 @@ const make = Effect.gen(function* () {
         });
       }
 
-      if (input.hasProjectedMessage || hasRenderableText) {
+      if (input.hasProjectedMessage || hasRenderableText || (input.attachments?.length ?? 0) > 0) {
         yield* orchestrationEngine.dispatch({
           type: "thread.message.assistant.complete",
           commandId: yield* providerCommandId(input.event, input.commandTag),
           threadId: input.threadId,
           messageId: input.messageId,
+          ...(input.finalText !== undefined ? { text: input.finalText } : {}),
+          ...(input.attachments !== undefined ? { attachments: input.attachments } : {}),
           ...(input.turnId ? { turnId: input.turnId } : {}),
           createdAt: input.createdAt,
         });
@@ -1558,6 +1582,8 @@ const make = Effect.gen(function* () {
                 `assistant:${event.itemId ?? event.turnId ?? event.eventId}`,
               ),
               fallbackText: event.payload.detail,
+              finalText: finalTextFromItemData(event.payload.data) ?? event.payload.detail,
+              attachments: attachmentsFromItemData(event.payload.data),
             }
           : undefined;
       const proposedPlanCompletion =
@@ -1608,6 +1634,12 @@ const make = Effect.gen(function* () {
             hasProjectedMessage: existingAssistantMessage !== undefined,
             ...(assistantCompletion.fallbackText !== undefined && shouldApplyFallbackCompletionText
               ? { fallbackText: assistantCompletion.fallbackText }
+              : {}),
+            ...(assistantCompletion.finalText !== undefined
+              ? { finalText: assistantCompletion.finalText }
+              : {}),
+            ...(assistantCompletion.attachments !== undefined
+              ? { attachments: assistantCompletion.attachments }
               : {}),
           });
 

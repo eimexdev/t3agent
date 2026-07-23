@@ -16,8 +16,10 @@ import ProjectScriptsControl, {
 } from "../ProjectScriptsControl";
 import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../state/environments";
+import { useT3ProjectFileScripts } from "~/hooks/useT3ProjectFileScripts";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { cn } from "~/lib/utils";
+import { IS_T3_AGENT_MODE } from "~/productMode";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -33,6 +35,7 @@ interface ChatHeaderProps {
   availableEditors: ReadonlyArray<EditorId>;
   rightPanelOpen: boolean;
   gitCwd: string | null;
+  hermesConnectionState: "connected" | "unavailable";
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
   onUpdateProjectScript: (
@@ -68,12 +71,17 @@ export const ChatHeader = memo(function ChatHeader({
   availableEditors,
   rightPanelOpen,
   gitCwd,
+  hermesConnectionState,
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
   onDeleteProjectScript,
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const fileScripts = useT3ProjectFileScripts(
+    activeThreadEnvironmentId,
+    activeProjectScripts ? activeProjectCwd : null,
+  );
   const showOpenInPicker = shouldShowOpenInPicker({
     activeProjectName,
     activeThreadEnvironmentId,
@@ -85,7 +93,21 @@ export const ChatHeader = memo(function ChatHeader({
         {/* The project always leads the header: knowing which project a
             thread lives in is priority zero, and the thread title alone
             doesn't answer it. */}
-        {activeProjectName ? (
+        {IS_T3_AGENT_MODE ? (
+          <span className="inline-flex shrink-0 items-center gap-2 text-sm font-medium">
+            <span
+              aria-hidden
+              className={cn(
+                "size-2 rounded-full",
+                hermesConnectionState === "connected" ? "bg-success" : "bg-destructive",
+              )}
+            />
+            <span>Hermes</span>
+            <span className="text-xs font-normal text-muted-foreground">
+              {hermesConnectionState === "connected" ? "Connected" : "Unavailable"}
+            </span>
+          </span>
+        ) : activeProjectName ? (
           <span className="inline-flex shrink-0 items-center gap-2">
             <span className="inline-flex min-w-0 items-center gap-1.5">
               <ProjectFavicon
@@ -123,9 +145,10 @@ export const ChatHeader = memo(function ChatHeader({
           rightPanelOpen ? "pr-0" : "pr-16",
         )}
       >
-        {activeProjectScripts && (
+        {!IS_T3_AGENT_MODE && activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}
+            fileScripts={fileScripts}
             keybindings={keybindings}
             preferredScriptId={preferredScriptId}
             onRunScript={onRunProjectScript}
@@ -134,7 +157,7 @@ export const ChatHeader = memo(function ChatHeader({
             onDeleteScript={onDeleteProjectScript}
           />
         )}
-        {showOpenInPicker && (
+        {!IS_T3_AGENT_MODE && showOpenInPicker && (
           <OpenInPicker
             environmentId={activeThreadEnvironmentId}
             keybindings={keybindings}
@@ -142,7 +165,7 @@ export const ChatHeader = memo(function ChatHeader({
             openInCwd={openInCwd}
           />
         )}
-        {activeProjectName && (
+        {!IS_T3_AGENT_MODE && activeProjectName && (
           <GitActionsControl
             gitCwd={gitCwd}
             activeThreadRef={scopeThreadRef(activeThreadEnvironmentId, activeThreadId)}

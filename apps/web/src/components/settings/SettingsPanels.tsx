@@ -1,5 +1,6 @@
 import { ArchiveIcon, ArchiveX, LoaderIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
 import { Link } from "@tanstack/react-router";
+import type { CSSProperties } from "react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -10,6 +11,7 @@ import {
   type ProviderInstanceConfig,
   type ProviderInstanceId,
   type ScopedThreadRef,
+  type SidebarProjectGroupingMode,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
@@ -18,7 +20,11 @@ import {
   settlePromise,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import {
+  DEFAULT_UNIFIED_SETTINGS,
+  MAX_GLASS_OPACITY,
+  MIN_GLASS_OPACITY,
+} from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
 import * as Arr from "effect/Array";
 import * as Duration from "effect/Duration";
@@ -78,6 +84,10 @@ import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
 import {
   buildProviderInstanceUpdatePatch,
   formatDiagnosticsDescription,
+  isProjectGroupingEnabled,
+  projectGroupingModeFromToggle,
+  readLastEnabledProjectGroupingMode,
+  rememberEnabledProjectGroupingMode,
 } from "./SettingsPanels.logic";
 import {
   SettingResetButton,
@@ -88,6 +98,7 @@ import {
 } from "./settingsLayout";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { IS_T3_AGENT_MODE, isT3AgentProviderInstance } from "../../productMode";
 
 const THEME_OPTIONS = [
   {
@@ -228,6 +239,7 @@ function AboutVersionSection() {
       const confirmed = window.confirm(
         getDesktopUpdateInstallConfirmationMessage(
           updateState ?? { availableVersion: null, downloadedVersion: null },
+          navigator.platform,
         ),
       );
       if (!confirmed) return;
@@ -389,11 +401,16 @@ export function useSettingsRestore(onRestored?: () => void) {
   const changedSettingLabels = useMemo(
     () => [
       ...(theme !== "system" ? ["Theme"] : []),
+      ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["Glass opacity"] : []),
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
         : []),
       ...(settings.sidebarThreadPreviewCount !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount
         ? ["Visible threads"]
+        : []),
+      ...(settings.sidebarProjectGroupingMode !==
+      DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode
+        ? ["Project Grouping"]
         : []),
       ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
       ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
@@ -440,9 +457,11 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.defaultThreadEnvMode,
       settings.newWorktreesStartFromOrigin,
       settings.diffIgnoreWhitespace,
+      settings.glassOpacity,
       settings.automaticGitFetchInterval,
       settings.enableAssistantStreaming,
       settings.enableProviderUpdateChecks,
+      settings.sidebarProjectGroupingMode,
       settings.sidebarThreadPreviewCount,
       settings.timestampFormat,
       settings.wordWrap,
@@ -465,7 +484,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
+      glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
+      sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
       enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
@@ -490,8 +511,17 @@ export function GeneralSettingsPanel() {
   const { theme, setTheme } = useTheme();
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
+  const lastEnabledProjectGroupingMode = useRef<SidebarProjectGroupingMode>(
+    readLastEnabledProjectGroupingMode(),
+  );
   const observability = useAtomValue(primaryServerObservabilityAtom);
   const serverProviders = useAtomValue(primaryServerProvidersAtom);
+  const glassOpacityRatio =
+    (settings.glassOpacity - MIN_GLASS_OPACITY) / (MAX_GLASS_OPACITY - MIN_GLASS_OPACITY);
+  const glassOpacitySliderStyle = {
+    "--glass-slider-progress": `${glassOpacityRatio * 100}%`,
+    "--glass-slider-fill-offset": `${0.5 - glassOpacityRatio}rem`,
+  } as CSSProperties;
   const diagnosticsDescription = formatDiagnosticsDescription({
     localTracingEnabled: observability?.localTracingEnabled ?? false,
     otlpTracesEnabled: observability?.otlpTracesEnabled ?? false,
@@ -556,6 +586,88 @@ export function GeneralSettingsPanel() {
                 ))}
               </SelectPopup>
             </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Glass opacity"
+          description="Control how transparent glass surfaces are. Higher values make menus, dialogs, and the composer more solid."
+          resetAction={
+            settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? (
+              <SettingResetButton
+                label="glass opacity"
+                onClick={() =>
+                  updateSettings({ glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity })
+                }
+              />
+            ) : null
+          }
+          control={
+            <div className="flex w-full items-center gap-3 sm:w-52">
+              <output
+                className="min-w-12 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
+                htmlFor="glass-opacity"
+              >
+                {settings.glassOpacity}%
+              </output>
+              <input
+                aria-label="Glass opacity"
+                className="glass-opacity-slider min-w-0 flex-1"
+                id="glass-opacity"
+                max={MAX_GLASS_OPACITY}
+                min={MIN_GLASS_OPACITY}
+                onChange={(event) => {
+                  const glassOpacity = Number(event.currentTarget.value);
+                  if (
+                    Number.isInteger(glassOpacity) &&
+                    glassOpacity >= MIN_GLASS_OPACITY &&
+                    glassOpacity <= MAX_GLASS_OPACITY
+                  ) {
+                    updateSettings({ glassOpacity });
+                  }
+                }}
+                step={5}
+                style={glassOpacitySliderStyle}
+                type="range"
+                value={settings.glassOpacity}
+              />
+            </div>
+          }
+        />
+
+        <SettingsRow
+          title="Project Grouping"
+          description="Combine matching repositories across environments."
+          resetAction={
+            settings.sidebarProjectGroupingMode !==
+            DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode ? (
+              <SettingResetButton
+                label="project grouping"
+                onClick={() =>
+                  updateSettings({
+                    sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={isProjectGroupingEnabled(settings.sidebarProjectGroupingMode)}
+              onCheckedChange={(checked) => {
+                if (!checked && settings.sidebarProjectGroupingMode !== "separate") {
+                  lastEnabledProjectGroupingMode.current = settings.sidebarProjectGroupingMode;
+                  rememberEnabledProjectGroupingMode(settings.sidebarProjectGroupingMode);
+                }
+                updateSettings({
+                  sidebarProjectGroupingMode: projectGroupingModeFromToggle(
+                    checked,
+                    lastEnabledProjectGroupingMode.current,
+                  ),
+                });
+              }}
+              aria-label="Project Grouping"
+            />
           }
         />
 
@@ -988,7 +1100,10 @@ export function GeneralSettingsPanel() {
 export function ProviderSettingsPanel() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
-  const serverProviders = useAtomValue(primaryServerProvidersAtom);
+  const allServerProviders = useAtomValue(primaryServerProvidersAtom);
+  const serverProviders = IS_T3_AGENT_MODE
+    ? allServerProviders.filter((provider) => isT3AgentProviderInstance(provider.instanceId))
+    : allServerProviders;
   const primaryEnvironment = usePrimaryEnvironment();
   const refreshServerProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
@@ -1012,14 +1127,18 @@ export function ProviderSettingsPanel() {
     () => new Map(providerUpdateCandidates.map((candidate) => [candidate.instanceId, candidate])),
     [providerUpdateCandidates],
   );
-  const visibleProviderSettings = PROVIDER_SETTINGS.filter(
-    (providerSettings) =>
+  const visibleProviderSettings = PROVIDER_SETTINGS.filter((providerSettings) => {
+    if (IS_T3_AGENT_MODE) {
+      return providerSettings.provider === ProviderDriverKind.make("hermes");
+    }
+    return (
       providerSettings.provider !== "cursor" ||
       serverProviders.some(
         (provider) =>
           provider.instanceId === defaultInstanceIdForDriver(ProviderDriverKind.make("cursor")),
-      ),
-  );
+      )
+    );
+  });
   const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
   const textGenInstanceId = textGenerationModelSelection.instanceId;
   const lastCheckedAt =
@@ -1170,6 +1289,7 @@ export function ProviderSettingsPanel() {
   }
   for (const [driver, list] of instancesByDriver) {
     if (visibleDriverKinds.has(driver)) continue;
+    if (IS_T3_AGENT_MODE) continue;
     for (const [id, instance] of list) {
       rows.push({
         instanceId: id,
@@ -1283,22 +1403,24 @@ export function ProviderSettingsPanel() {
         headerAction={
           <div className="flex items-center gap-1.5">
             <ProviderLastChecked lastCheckedAt={lastCheckedAt} />
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
-                    onClick={() => setIsAddInstanceDialogOpen(true)}
-                    aria-label="Add provider instance"
-                  >
-                    <PlusIcon className="size-3" />
-                  </Button>
-                }
-              />
-              <TooltipPopup side="top">Add provider instance</TooltipPopup>
-            </Tooltip>
+            {IS_T3_AGENT_MODE ? null : (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
+                      onClick={() => setIsAddInstanceDialogOpen(true)}
+                      aria-label="Add provider instance"
+                    >
+                      <PlusIcon className="size-3" />
+                    </Button>
+                  }
+                />
+                <TooltipPopup side="top">Add provider instance</TooltipPopup>
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger
                 render={

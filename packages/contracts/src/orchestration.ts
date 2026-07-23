@@ -117,6 +117,7 @@ export type ModelSelection = typeof ModelSelection.Type;
 export const RuntimeMode = Schema.Literals([
   "approval-required",
   "auto-accept-edits",
+  "auto",
   "full-access",
 ]);
 export type RuntimeMode = typeof RuntimeMode.Type;
@@ -784,6 +785,8 @@ const ThreadMessageAssistantCompleteCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   messageId: MessageId,
+  text: Schema.optional(Schema.String),
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
   turnId: Schema.optional(TurnId),
   createdAt: IsoDateTime,
 });
@@ -972,6 +975,7 @@ export const ThreadMessageSentPayload = Schema.Struct({
   messageId: MessageId,
   role: OrchestrationMessageRole,
   text: Schema.String,
+  replaceText: Schema.optional(Schema.Boolean),
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
   turnId: Schema.NullOr(TurnId),
   streaming: Schema.Boolean,

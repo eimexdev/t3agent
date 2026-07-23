@@ -37,6 +37,17 @@ describe("ProviderSettingsForm helpers", () => {
     });
   });
 
+  it("exposes Hermes bridge credentials without exposing its enabled flag", () => {
+    const hermes = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("hermes")];
+
+    expect(hermes).toBeDefined();
+    expect(deriveProviderSettingsFields(hermes!).map((field) => field.key)).toEqual([
+      "bridgeUrl",
+      "ingressToken",
+      "callbackToken",
+    ]);
+  });
+
   it("preserves unknown config keys while omitting empty configurable fields", () => {
     const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")];
     expect(opencode).toBeDefined();

@@ -1,50 +1,119 @@
 # T3 Agent
 
-T3 Agent is the working name for a rich Hermes-native conversation surface and gateway. Hermes remains the agent runtime and source of agent behavior.
+T3 Agent is a rich, thread-native conversation surface for Hermes. This glossary names the product concepts shared by its clients, gateway, and Hermes integration.
 
-## Current product boundaries
+## Product
 
-- The first deployment runs T3 Agent and Hermes on the same machine.
-- Hermes is independently managed and already running. T3 Agent attaches to it; T3 Agent does not own the Hermes process lifecycle.
-- Linux is the first execution-host and desktop target. macOS clients should reach that Linux host through Tailscale or the hosted web client using the same environment protocol.
-- Remote clients should ultimately use an operator-owned T3 Connect deployment. Tailscale remains a useful development or fallback access path, not the primary product architecture.
-- A new T3 Agent thread creates a normal Hermes conversation; projects and working directories are not part of the initial thread-creation flow.
-- T3 Code's provider architecture should remain reusable, but the initial product exposes only Hermes.
-- Coding, project, workspace, and specialized sidebar integrations are later capabilities. Existing T3 Code implementations should initially be hidden rather than treated as the core product.
-- V1 targets Discord-like Hermes gateway parity before notification work: Hermes slash commands, streaming and interruption, approvals, clarifications, reconnect/restart recovery, and other core conversational gateway behavior must work end to end.
-- Gateway-visible commands come from Hermes' command/skill/plugin registry. T3 Agent provides searchable `/` autocomplete and forwards the selected command and arguments unchanged; Hermes remains the command implementation.
-- V1 background-agent support is command-level parity (`/background`, `/agents`, queue/steer, and result delivery). A dedicated background-agent visualizer is not required; T3 Agent can inherit or adapt T3 Code's planned upstream visualizer later.
-- Discord-specific rich formatting and live voice-channel mechanics are not parity requirements. T3 Agent uses its native rich conversation renderer.
-- Images are a V1 gateway capability in both directions. Hermes image results should use structured attachments rendered inline on web and mobile rather than depending only on Markdown image URLs.
-- Voice-message recording/upload and Hermes transcription are the first post-v1 capability. Outbound Hermes TTS is separate and may follow it.
-- Notifications and T3 Connect rollout follow gateway parity rather than compensating for an incomplete interactive surface.
+**T3 Agent**:
+The product surface through which a person converses with Hermes and receives its proactive work.
+_Avoid_: T3 Code provider, Hermes replacement
 
-## Language
+**Hermes runtime**:
+The independently managed agent system that owns reasoning, tools, memory, models, sessions, scheduled work, and background work.
+_Avoid_: T3 Agent backend, embedded agent
 
-**T3 Agent Thread**:
-A Hermes conversation created in or proactively delivered to T3 Agent. Initially, it does not include conversations belonging to CLI, Discord, or another Hermes gateway.
-_Avoid_: Project thread, global Hermes session
+**T3 Agent gateway**:
+The boundary that presents T3 Agent as a Hermes messaging surface while preserving Hermes behavior.
+_Avoid_: Hermes CLI wrapper, ACP agent
+
+**Gateway parity**:
+Behavioral parity with using Hermes through a mature messaging gateway, including commands and interactive agent requests without copying that gateway's visual design.
+_Avoid_: Discord clone, basic chat support
+
+## Conversations
+
+**T3 Agent thread**:
+A visible T3 Agent conversation backed by one Hermes session.
+_Avoid_: Project thread, workspace, channel
+
+**Hermes session**:
+The durable Hermes-owned conversation context that the agent continues across turns.
+_Avoid_: T3 transcript, project
 
 **Cross-gateway conversation**:
-A Hermes conversation originating from a surface other than T3 Agent. Browsing or handing off these conversations is a later capability, not part of the initial scope.
+A Hermes session that originated from the CLI or another messaging surface rather than T3 Agent.
 _Avoid_: Synced thread
 
+**Session browser**:
+A grouped view of T3 Agent threads and cross-gateway Hermes sessions available to resume or import.
+_Avoid_: Thread list, T3-only history
+
+**Session import**:
+A new T3 Agent thread and child Hermes session copied from a cross-gateway conversation while leaving the source session unchanged.
+_Avoid_: Attach, move, sync
+
+**Thread lineage**:
+The provenance relationship connecting an imported or forked T3 Agent thread to its source conversation.
+_Avoid_: Referral, synchronization
+
+**Agent run**:
+One bounded unit of Hermes work that reaches a terminal outcome and produces a completion point in a thread.
+_Avoid_: Chat, session
+
+**Fork**:
+A new T3 Agent thread and child Hermes session whose history ends at a selected completed agent run.
+_Avoid_: Git branch, copied transcript
+
+**Resume**:
+Returning to an existing T3 Agent thread, or importing a selected cross-gateway conversation into a new thread.
+_Avoid_: Replace thread context, attach
+
+## Interaction
+
+**Hermes command**:
+A slash command whose meaning and execution are owned by Hermes, even when T3 Agent provides discovery or argument guidance.
+_Avoid_: T3 action
+
+**Lifecycle command**:
+A Hermes command such as new, fork, sessions, or resume whose T3 Agent presentation must preserve thread-to-session identity.
+_Avoid_: Passthrough command
+
+**Command hint**:
+Non-message guidance that shows the next expected command argument without becoming part of the submitted text.
+_Avoid_: Autofill, command form
+
 **Active Hermes model**:
-The model currently backing a T3 Agent thread. It should be visible as read-only product context initially; changing it per thread through Hermes model-selection behavior is a later capability.
+The effective model backing a T3 Agent thread.
 _Avoid_: T3 provider selection
 
+**Reasoning effort**:
+The effective Hermes thinking level inherited or selected for a thread.
+_Avoid_: T3 reasoning mode
+
+**Session-setting change**:
+A point in a thread's history where its active Hermes model or reasoning effort changes.
+_Avoid_: System message, global configuration
+
+**Approval**:
+A blocking Hermes request for permission to perform a consequential action.
+_Avoid_: Confirmation, clarification
+
+**Clarification**:
+A blocking Hermes request for information needed to continue an agent run.
+_Avoid_: Approval, follow-up message
+
+**Voice note**:
+A recorded user message delivered to Hermes as speech for automatic transcription.
+_Avoid_: Audio file, voice channel
+
+**Voice draft**:
+A completed but unsent voice recording available for replay, discard, or delivery.
+_Avoid_: Paused recording, attachment
+
+**Voice transcript**:
+The Hermes-produced text associated with a specific voice note.
+_Avoid_: Assistant reply, caption
+
+## Automation and remote access
+
 **Cron execution session**:
-The fresh, isolated Hermes agent session created for one scheduled run. It does not inherit the full history of the T3 Agent thread that receives its result.
+The fresh, isolated Hermes session created for one scheduled run.
 _Avoid_: Cron thread
 
 **Cron delivery thread**:
-The T3 Agent conversation where a cron result is shown and may be continued. Depending on the job's delivery policy, this may be the originating thread, a fresh thread for each run, or a persistent thread created for the job.
+The T3 Agent thread where scheduled output appears and may be continued.
 _Avoid_: Cron session
 
 **Operator-owned T3 Connect**:
-Our deployment of the checked-in T3 Connect control plane and notification stack. In the current upstream architecture this is deployed into Cloudflare, PlanetScale, Clerk, Axiom, and Apple APNs accounts; it is not a sidecar on the Hermes machine.
-_Avoid_: Local relay
-
-**Gateway parity**:
-Behavioral parity with using Hermes through a mature messaging gateway such as Discord. It includes Hermes-owned commands and interaction semantics; it does not mean copying Discord's visual design or Discord-specific social features.
-_Avoid_: Basic chat support
+The operator's deployment of the T3 Connect control plane and notification stack.
+_Avoid_: Local relay, Tailscale

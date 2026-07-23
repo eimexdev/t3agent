@@ -1,0 +1,3 @@
+# Import cross-gateway sessions as child copies
+
+The Hermes session browser shows both T3 Agent and cross-gateway sessions, separated with restrained origin metadata. Selecting a new cross-gateway session immediately creates and opens a child Hermes session and new T3 Agent thread while leaving the source session unchanged; selecting it again reopens that copy unless the user explicitly chooses “Import another copy.” The imported thread records its lineage at the continuation boundary. T3 Agent does not attach as a second live gateway because concurrent surfaces could steer one context unpredictably and break the visible thread-to-session identity.

@@ -178,6 +178,35 @@ describe("derivePendingApprovals", () => {
 });
 
 describe("derivePendingUserInputs", () => {
+  it("keeps freeform-only prompts that do not provide choices", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "user-input-freeform",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "user-input.requested",
+        summary: "User input requested",
+        tone: "info",
+        payload: {
+          requestId: "req-user-input-freeform",
+          questions: [
+            {
+              id: "details",
+              header: "Clarification",
+              question: "What should the agent do next?",
+              options: [],
+              multiSelect: false,
+            },
+          ],
+        },
+      }),
+    ];
+
+    expect(derivePendingUserInputs(activities)[0]?.questions[0]).toMatchObject({
+      id: "details",
+      options: [],
+    });
+  });
+
   it("tracks open structured prompts and removes resolved ones", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

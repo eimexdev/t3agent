@@ -856,6 +856,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               if (event.payload.streaming) {
                 return `${message.text}${event.payload.text}`;
               }
+              if (event.payload.replaceText) {
+                return event.payload.text;
+              }
               if (event.payload.text.length === 0) {
                 return message.text;
               }

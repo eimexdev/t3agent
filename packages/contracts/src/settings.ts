@@ -48,6 +48,16 @@ export const SidebarAutoSettleAfterDays = Schema.Number.check(
 );
 export type SidebarAutoSettleAfterDays = typeof SidebarAutoSettleAfterDays.Type;
 export const DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS: SidebarAutoSettleAfterDays = 3;
+export const MIN_GLASS_OPACITY = 40;
+export const MAX_GLASS_OPACITY = 100;
+export const GlassOpacity = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_GLASS_OPACITY,
+    maximum: MAX_GLASS_OPACITY,
+  }),
+);
+export type GlassOpacity = typeof GlassOpacity.Type;
+export const DEFAULT_GLASS_OPACITY: GlassOpacity = 80;
 
 export const ClientSettingsSchema = Schema.Struct({
   autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -57,6 +67,9 @@ export const ClientSettingsSchema = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   diffIgnoreWhitespace: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  glassOpacity: GlassOpacity.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_GLASS_OPACITY)),
+  ),
   // Model favorites. Historically keyed by provider kind, now
   // widened to `ProviderInstanceId` so users can favorite a specific model
   // on a custom provider instance (e.g. "Codex Personal · gpt-5") without
@@ -376,6 +389,58 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
 );
 export type OpenCodeSettings = typeof OpenCodeSettings.Type;
 
+export const HermesSettings = makeProviderSettingsSchema(
+  {
+    enabled: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(true)),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    bridgeUrl: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("http://127.0.0.1:8789")),
+      Schema.annotateKey({
+        title: "Hermes bridge URL",
+        description: "Loopback URL exposed by the independently managed Hermes T3 Agent plugin.",
+        providerSettingsForm: {
+          placeholder: "http://127.0.0.1:8789",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    ingressToken: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Hermes ingress token",
+        description: "Secret T3 Agent uses when sending requests to the local Hermes plugin.",
+        providerSettingsForm: {
+          control: "password",
+          placeholder: "Required",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    callbackToken: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "T3 callback token",
+        description: "Secret Hermes uses when delivering replies and background work to T3 Agent.",
+        providerSettingsForm: {
+          control: "password",
+          placeholder: "Required",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    customModels: Schema.Array(Schema.String).pipe(
+      Schema.withDecodingDefault(Effect.succeed([])),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+  },
+  {
+    order: ["bridgeUrl", "ingressToken", "callbackToken"],
+  },
+);
+export type HermesSettings = typeof HermesSettings.Type;
+
 export const ObservabilitySettings = Schema.Struct({
   otlpTracesUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   otlpMetricsUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
@@ -420,6 +485,7 @@ export const ServerSettings = Schema.Struct({
     cursor: CursorSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     grok: GrokSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     opencode: OpenCodeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+    hermes: HermesSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   // New driver-agnostic instance map. Keyed by `ProviderInstanceId`; values
   // are `ProviderInstanceConfig` envelopes. The driver-specific config blob
@@ -523,6 +589,14 @@ const OpenCodeSettingsPatch = Schema.Struct({
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
+const HermesSettingsPatch = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  bridgeUrl: Schema.optionalKey(TrimmedString),
+  ingressToken: Schema.optionalKey(TrimmedString),
+  callbackToken: Schema.optionalKey(TrimmedString),
+  customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+});
+
 export const ServerSettingsPatch = Schema.Struct({
   // Server settings
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
@@ -545,6 +619,7 @@ export const ServerSettingsPatch = Schema.Struct({
       cursor: Schema.optionalKey(CursorSettingsPatch),
       grok: Schema.optionalKey(GrokSettingsPatch),
       opencode: Schema.optionalKey(OpenCodeSettingsPatch),
+      hermes: Schema.optionalKey(HermesSettingsPatch),
     }),
   ),
   // Whole-map replacement for the new instance config. Patching individual
@@ -560,6 +635,7 @@ export const ClientSettingsPatch = Schema.Struct({
   confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
   diffIgnoreWhitespace: Schema.optionalKey(Schema.Boolean),
+  glassOpacity: Schema.optionalKey(GlassOpacity),
   favorites: Schema.optionalKey(
     Schema.Array(
       Schema.Struct({

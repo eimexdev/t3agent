@@ -1,0 +1,64 @@
+name: t3agent-platform
+label: T3 Agent
+kind: platform
+version: 0.1.0
+description: >
+  Thread-native T3 Agent surface for Hermes. Starts an authenticated,
+  loopback-only HTTP ingress and delivers live replies, background work,
+  approvals, clarifications, handoffs, and cron output to a self-hosted T3
+  server bridge.
+author: T3 Agent
+requires_env:
+  - name: T3_AGENT_INSTANCE_ID
+    description: "Stable ID for this Hermes installation"
+    prompt: "T3 Agent instance ID"
+    password: false
+  - name: T3_AGENT_BRIDGE_URL
+    description: "T3 server origin, for example http://127.0.0.1:3000"
+    prompt: "T3 Agent bridge URL"
+    password: false
+  - name: T3_AGENT_INGRESS_TOKEN
+    description: "Bearer token the T3 server uses to call Hermes"
+    prompt: "T3 Agent ingress token"
+    password: true
+  - name: T3_AGENT_BRIDGE_TOKEN
+    description: "Bearer token Hermes uses to call the T3 server"
+    prompt: "T3 Agent bridge token"
+    password: true
+optional_env:
+  - name: T3_AGENT_INGRESS_HOST
+    description: "Loopback ingress host (default: 127.0.0.1; non-loopback is rejected)"
+    prompt: "T3 Agent ingress host"
+    password: false
+  - name: T3_AGENT_INGRESS_PORT
+    description: "Loopback ingress port (default: 8789)"
+    prompt: "T3 Agent ingress port"
+    password: false
+  - name: T3_AGENT_HOME_CHAT
+    description: "Canonical Hermes chat namespace; set to t3agent for cron delivery"
+    prompt: "T3 Agent home chat"
+    password: false
+  - name: T3_AGENT_HOME_CHAT_THREAD_ID
+    description: "Existing T3 thread ID for home cron delivery"
+    prompt: "T3 Agent home thread ID"
+    password: false
+  - name: T3_AGENT_HOME_CHAT_NAME
+    description: "Display name for the default cron thread"
+    prompt: "T3 Agent home chat name"
+    password: false
+  - name: T3_AGENT_BRIDGE_TIMEOUT_SECONDS
+    description: "Outbound callback timeout in seconds (default: 30)"
+    prompt: "T3 Agent callback timeout"
+    password: false
+  - name: T3_AGENT_MAX_BODY_BYTES
+    description: "Maximum ingress JSON body size (default: 16777216)"
+    prompt: "T3 Agent maximum body bytes"
+    password: false
+  - name: T3_AGENT_INGRESS_LEDGER_PATH
+    description: "Durable ingress idempotency ledger path (defaults under Hermes state)"
+    prompt: "T3 Agent ingress ledger path"
+    password: false
+  - name: T3_AGENT_OUTBOX_PATH
+    description: "Durable turn-completion outbox path (defaults under Hermes state)"
+    prompt: "T3 Agent completion outbox path"
+    password: false

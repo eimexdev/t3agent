@@ -4,6 +4,7 @@ import { memo, useCallback } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 
 import { APP_STAGE_LABEL } from "../../branding";
+import { IS_T3_AGENT_MODE } from "../../productMode";
 import { cn } from "../../lib/utils";
 import { primaryServerConfigAtom } from "../../state/server";
 import { resolveSidebarStageBadgeLabel } from "../Sidebar.logic";
@@ -39,7 +40,8 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
       <SidebarTrigger
         className={cn(
           "relative z-10 md:hidden",
-          backdropVariant && "hover:bg-white/15 [&_svg]:text-white/85! [&_svg]:hover:text-white!",
+          backdropVariant &&
+            "[:hover,[data-pressed]]:bg-white/15 focus-visible:ring-white/90 focus-visible:ring-offset-blue-700 [&_svg]:stroke-white/90! [&_svg]:opacity-100! [&_svg]:hover:stroke-white!",
         )}
       />
       <SidebarBrand onBackdrop={backdropVariant !== null} />
@@ -64,7 +66,7 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
           onBackdrop ? "text-white/70" : "text-muted-foreground",
         )}
       >
-        Code
+        {IS_T3_AGENT_MODE ? "Agent" : "Code"}
       </span>
     </Link>
   );
@@ -108,17 +110,17 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
 
   return (
     <SidebarFooter className="p-2">
-      <SidebarProviderUpdatePill />
+      {IS_T3_AGENT_MODE ? null : <SidebarProviderUpdatePill />}
       <SidebarUpdatePill />
       <SidebarMenu>
         <SidebarMenuItem>
           <SidebarMenuButton
             size="sm"
-            className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
+            className="h-8 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground/80 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
             onClick={handleSettingsClick}
           >
-            <SettingsIcon className="size-3.5" />
-            <span className="text-xs">Settings</span>
+            <SettingsIcon className="size-4.5 shrink-0" />
+            <span>Settings</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>

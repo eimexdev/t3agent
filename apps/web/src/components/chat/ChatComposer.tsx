@@ -26,6 +26,7 @@ import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import {
   memo,
+  type ReactNode,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -34,6 +35,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   clampCollapsedComposerCursor,
   type ComposerTrigger,
@@ -81,7 +83,10 @@ import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
-import { searchSlashCommandItems } from "./composerSlashCommandSearch";
+import {
+  mergeSlashCommandItemsWithProviderPrecedence,
+  searchSlashCommandItems,
+} from "./composerSlashCommandSearch";
 import {
   getComposerPromptInjectionState,
   getComposerProviderState,
@@ -93,13 +98,70 @@ import { buildExpandedImagePreview, type ExpandedImagePreview } from "./Expanded
 import { basenameOfPath } from "../../pierre-icons";
 import { cn, randomUUID } from "~/lib/utils";
 import { Separator } from "../ui/separator";
+
+function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children: ReactNode }) {
+  const [position, setPosition] = useState<{
+    bottom: number;
+    left: number;
+    maxHeight: number;
+    width: number;
+  } | null>(null);
+
+  useLayoutEffect(() => {
+    const anchor = props.anchor;
+    if (!anchor) {
+      setPosition(null);
+      return;
+    }
+
+    const updatePosition = () => {
+      const rect = anchor.getBoundingClientRect();
+      setPosition({
+        bottom: window.innerHeight - rect.top + 8,
+        left: rect.left,
+        maxHeight: Math.max(96, rect.top - 24),
+        width: rect.width,
+      });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updatePosition);
+    observer?.observe(anchor);
+
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [props.anchor]);
+
+  if (!position) return null;
+
+  return createPortal(
+    <div
+      className="pointer-events-auto fixed z-[70]"
+      style={{
+        bottom: position.bottom,
+        left: position.left,
+        maxHeight: position.maxHeight,
+        width: position.width,
+      }}
+    >
+      {props.children}
+    </div>,
+    document.body,
+  );
+}
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import {
   BotIcon,
-  CheckIcon,
   CircleAlertIcon,
   ListTodoIcon,
   PencilRulerIcon,
@@ -107,6 +169,7 @@ import {
   LockIcon,
   LockOpenIcon,
   PenLineIcon,
+  SparklesIcon,
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
@@ -120,6 +183,11 @@ import {
   sortProviderInstanceEntries,
   type ProviderInstanceEntry,
 } from "../../providerInstances";
+import {
+  IS_T3_AGENT_MODE,
+  isT3AgentProviderInstance,
+  T3_AGENT_PROVIDER_INSTANCE_ID,
+} from "../../productMode";
 import { type AppModelOption, getAppModelOptionsForInstance } from "../../modelSelection";
 import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import type { SessionPhase, Thread } from "../../types";
@@ -149,6 +217,11 @@ const runtimeModeConfig: Record<
     label: "Auto-accept edits",
     description: "Auto-approve edits, ask before other actions.",
     icon: PenLineIcon,
+  },
+  auto: {
+    label: "Auto",
+    description: "An AI reviewer approves routine actions; risky ones still ask.",
+    icon: SparklesIcon,
   },
   "full-access": {
     label: "Full access",
@@ -280,7 +353,6 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             {runtimeModeOptions.map((mode) => {
               const option = runtimeModeConfig[mode];
               const OptionIcon = option.icon;
-              const isSelected = props.runtimeMode === mode;
               return (
                 <SelectItem key={mode} value={mode} hideIndicator className="min-w-64 py-2">
                   <div className="flex min-w-0 items-center gap-3">
@@ -293,12 +365,6 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
                         {option.description}
                       </span>
                     </div>
-                    <CheckIcon
-                      className={cn(
-                        "size-4 text-blue-400",
-                        isSelected ? "opacity-100" : "opacity-0",
-                      )}
-                    />
                   </div>
                 </SelectItem>
               );
@@ -679,13 +745,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Instance-aware projection of the wire provider list. One entry per
   // configured instance (default built-in + any custom `providerInstances.*`),
   // sorted default-first per driver kind for a stable picker order.
-  const providerInstanceEntries = useMemo<ReadonlyArray<ProviderInstanceEntry>>(
-    () =>
-      sortProviderInstanceEntries(
-        applyProviderInstanceSettings(deriveProviderInstanceEntries(providerStatuses), settings),
-      ),
-    [providerStatuses, settings],
-  );
+  const providerInstanceEntries = useMemo<ReadonlyArray<ProviderInstanceEntry>>(() => {
+    const entries = sortProviderInstanceEntries(
+      applyProviderInstanceSettings(deriveProviderInstanceEntries(providerStatuses), settings),
+    );
+    return IS_T3_AGENT_MODE
+      ? entries.filter((entry) => isT3AgentProviderInstance(entry.instanceId))
+      : entries;
+  }, [providerStatuses, settings]);
   const selectedProviderByThreadId = composerDraft.activeProvider ?? null;
   const threadProvider =
     activeThread?.session?.providerInstanceId ??
@@ -731,6 +798,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   //
   const selectedInstanceId = useMemo<ProviderInstanceId>(() => {
     const candidates: Array<string | null | undefined> = [
+      IS_T3_AGENT_MODE ? T3_AGENT_PROVIDER_INSTANCE_ID : null,
       composerDraft.activeProvider,
       activeThread?.session?.providerInstanceId,
       activeThreadModelSelection?.instanceId,
@@ -905,6 +973,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
   const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false);
   const [isComposerFocused, setIsComposerFocused] = useState(false);
+  const [composerMenuAnchor, setComposerMenuAnchor] = useState<HTMLDivElement | null>(null);
   const isMobileViewport = useMediaQuery("max-sm");
   const isComposerCollapsedMobile =
     isMobileViewport && !forceExpandedOnMobile && !isComposerFocused;
@@ -1008,7 +1077,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         }),
       );
       const query = composerTrigger.query.trim().toLowerCase();
-      const slashCommandItems = [...builtInSlashCommandItems, ...providerSlashCommandItems];
+      const slashCommandItems = mergeSlashCommandItemsWithProviderPrecedence(
+        builtInSlashCommandItems,
+        providerSlashCommandItems,
+      );
       if (!query) {
         return slashCommandItems;
       }
@@ -2162,10 +2234,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           ref={composerSurfaceRef}
           data-chat-composer-mobile-collapsed={isComposerCollapsedMobile ? "true" : "false"}
           className={cn(
-            "chat-composer-glass rounded-[20px] border transition-[background-color] duration-200 has-focus-visible:border-foreground/40",
-            isDragOverComposer
-              ? "border-primary/70 bg-accent/45"
-              : "border-black/12 dark:border-white/12",
+            "rounded-[20px] transition-[background-color] duration-200",
+            isDragOverComposer ? "bg-accent/45 ring-1 ring-primary/70" : null,
             projectSelectionRequired ? "opacity-75" : null,
             composerProviderState.composerSurfaceClassName,
           )}
@@ -2341,6 +2411,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           ) : null}
 
           <div
+            ref={setComposerMenuAnchor}
             className={cn(
               "relative px-3 pb-2 sm:px-4",
               hasComposerHeader ? "pt-2.5 sm:pt-3" : "pt-3.5 sm:pt-4",
@@ -2348,7 +2419,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             )}
           >
             {composerMenuOpen && !isComposerApprovalState && (
-              <div className="absolute inset-x-0 bottom-full z-20 mb-2">
+              <ComposerCommandMenuLayer anchor={composerMenuAnchor}>
                 <ComposerCommandMenu
                   items={composerMenuItems}
                   resolvedTheme={resolvedTheme}
@@ -2363,7 +2434,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   onHighlightedItemChange={onComposerMenuItemHighlighted}
                   onSelect={onSelectComposerItem}
                 />
-              </div>
+              </ComposerCommandMenuLayer>
             )}
 
             {!isComposerCollapsedMobile &&
@@ -2524,10 +2595,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                 environmentUnavailable.connection,
                               )}`
                             : noProviderAvailable
-                              ? "Enable a provider in Settings to send a message"
-                              : phase === "disconnected"
-                                ? "Ask for follow-up changes or attach images"
-                                : "Ask anything, @tag files/folders, $use skills, or / for commands"
+                              ? "Hermes is unavailable. Check the connection in Settings."
+                              : IS_T3_AGENT_MODE
+                                ? "Message Hermes, attach images, or type / for commands"
+                                : phase === "disconnected"
+                                  ? "Ask for follow-up changes or attach images"
+                                  : "Ask anything, @tag files/folders, $use skills, or / for commands"
                 }
                 disabled={isConnecting || isComposerApprovalState || projectSelectionRequired}
               />
@@ -2594,6 +2667,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     <CircleAlertIcon className="size-4" />
                     No provider available
                   </Button>
+                ) : IS_T3_AGENT_MODE ? (
+                  <span
+                    className="shrink-0 px-2 text-sm text-muted-foreground"
+                    title="Current Hermes model"
+                  >
+                    {selectedModelForPickerWithCustomFallback}
+                  </span>
                 ) : (
                   <ProviderModelPicker
                     compact={isComposerFooterCompact}
@@ -2620,7 +2700,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   />
                 )}
 
-                {isComposerFooterCompact ? (
+                {IS_T3_AGENT_MODE ? null : isComposerFooterCompact ? (
                   <CompactComposerControlsMenu
                     activePlan={showPlanSidebarToggle}
                     interactionMode={interactionMode}

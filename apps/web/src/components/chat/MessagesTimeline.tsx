@@ -150,6 +150,7 @@ interface TimelineRowActivityState {
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
+const TIMELINE_LIST_FADE_HEADER = <div className="h-10 sm:h-12" />;
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
 
@@ -185,6 +186,7 @@ interface MessagesTimelineProps {
   onIsAtEndChange: (isAtEnd: boolean) => void;
   onManualNavigation: () => void;
   hideEmptyPlaceholder?: boolean;
+  topFadeEnabled?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -219,6 +221,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onIsAtEndChange,
   onManualNavigation,
   hideEmptyPlaceholder = false,
+  topFadeEnabled = false,
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const [expandedWorkGroupIds, setExpandedWorkGroupIds] = useState<ReadonlySet<string>>(new Set());
@@ -510,8 +513,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               size: false,
             }}
             onScroll={handleScroll}
-            className="scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5"
-            ListHeaderComponent={TIMELINE_LIST_HEADER}
+            className={cn(
+              "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5",
+              topFadeEnabled && "chat-timeline-scroll-fade",
+            )}
+            ListHeaderComponent={topFadeEnabled ? TIMELINE_LIST_FADE_HEADER : TIMELINE_LIST_HEADER}
             ListFooterComponent={TIMELINE_LIST_FOOTER}
           />
           <TimelineMinimap
@@ -797,7 +803,7 @@ function TimelineMinimap({
                 transform: `translateY(${activeTooltipTranslate})`,
               }}
             >
-              <span className="block rounded-xl border border-border/70 bg-popover/95 p-3 text-left text-popover-foreground shadow-xl shadow-black/25 backdrop-blur">
+              <span className="dropdown-glass block rounded-xl p-3 text-left text-popover-foreground shadow-xl shadow-black/25">
                 <span className="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm font-medium leading-5">
                   {activeItem.userText ?? "User message"}
                 </span>
@@ -886,40 +892,12 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
 
   return (
     <div className="group flex flex-col items-end gap-1">
-      <div className="relative max-w-[80%] rounded-2xl border border-border bg-secondary p-3">
-        {regularImages.length > 0 && (
-          <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-            {regularImages.map((image: NonNullable<TimelineMessage["attachments"]>[number]) => (
-              <div
-                key={image.id}
-                className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
-              >
-                {image.previewUrl ? (
-                  <button
-                    type="button"
-                    className="h-full w-full cursor-zoom-in"
-                    aria-label={`Preview ${image.name}`}
-                    onClick={() => {
-                      const preview = buildExpandedImagePreview(regularImages, image.id);
-                      if (!preview) return;
-                      ctx.onImageExpand(preview);
-                    }}
-                  >
-                    <img
-                      src={image.previewUrl}
-                      alt={image.name}
-                      className="block h-auto max-h-[220px] w-full object-cover"
-                    />
-                  </button>
-                ) : (
-                  <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
-                    {image.name}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+      <div className="relative max-w-[80%] rounded-2xl bg-secondary p-3">
+        <MessageImageAttachmentGrid
+          images={regularImages}
+          className="mb-2"
+          onImageExpand={ctx.onImageExpand}
+        />
         {previewAnnotations.map((annotation, index) => (
           <UserMessagePreviewAnnotationCard
             key={annotation.id}
@@ -1013,11 +991,19 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
 
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
-  const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const assistantImages = row.message.attachments ?? [];
+  const messageText =
+    row.message.text ||
+    (row.message.streaming || assistantImages.length > 0 ? "" : "(empty response)");
 
   return (
     <>
       <div className="relative min-w-0 px-1 py-0.5">
+        <MessageImageAttachmentGrid
+          images={assistantImages}
+          {...(messageText ? { className: "mb-2" } : {})}
+          onImageExpand={ctx.onImageExpand}
+        />
         <ChatMarkdown
           text={messageText}
           cwd={ctx.markdownCwd}
@@ -1050,6 +1036,50 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
         ) : null}
       </div>
     </>
+  );
+}
+
+function MessageImageAttachmentGrid(props: {
+  images: NonNullable<TimelineMessage["attachments"]>;
+  className?: string;
+  onImageExpand: (preview: ExpandedImagePreview) => void;
+}) {
+  if (props.images.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className={cn("grid max-w-[420px] grid-cols-2 gap-2", props.className)}>
+      {props.images.map((image) => (
+        <div
+          key={image.id}
+          className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+        >
+          {image.previewUrl ? (
+            <button
+              type="button"
+              className="h-full w-full cursor-zoom-in"
+              aria-label={`Preview ${image.name}`}
+              onClick={() => {
+                const preview = buildExpandedImagePreview(props.images, image.id);
+                if (!preview) return;
+                props.onImageExpand(preview);
+              }}
+            >
+              <img
+                src={image.previewUrl}
+                alt={image.name}
+                className="block h-auto max-h-[220px] w-full object-cover"
+              />
+            </button>
+          ) : (
+            <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
+              {image.name}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -1279,8 +1309,8 @@ function AssistantChangedFilesSectionInner({
   const summaryStat = summarizeTurnDiffStats(checkpointFiles);
 
   return (
-    <div className="mt-4 rounded-2xl border border-input bg-background p-2 pt-4 shadow-xs/5 not-dark:bg-clip-padding dark:bg-input/32">
-      <div className="sticky top-2 z-10 mb-3 flex items-center justify-between gap-2 bg-background px-2 before:absolute before:inset-x-0 before:-top-4 before:h-4 before:bg-background before:content-[''] dark:bg-[color-mix(in_srgb,var(--foreground)_2.5%,var(--background))] dark:before:bg-[color-mix(in_srgb,var(--foreground)_2.5%,var(--background))]">
+    <div className="mt-4 rounded-2xl border border-border/70 bg-secondary p-2 pt-4 dark:border-transparent dark:bg-input/32">
+      <div className="sticky top-2 z-10 mb-3 flex items-center justify-between gap-2 bg-secondary px-2 before:absolute before:inset-x-0 before:-top-4 before:h-4 before:bg-secondary before:content-[''] dark:bg-[color-mix(in_srgb,var(--foreground)_2.5%,var(--background))] dark:before:bg-[color-mix(in_srgb,var(--foreground)_2.5%,var(--background))]">
         <p className="flex items-center gap-1 whitespace-nowrap font-medium text-foreground text-xs leading-4">
           <span>
             {checkpointFiles.length} changed file{checkpointFiles.length === 1 ? "" : "s"}

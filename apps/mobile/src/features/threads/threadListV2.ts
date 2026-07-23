@@ -12,6 +12,12 @@ import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
  */
 export type ThreadListV2Status = "approval" | "input" | "working" | "failed" | "ready";
 
+// Settled-tail paging: recent history is the common lookup; the deep tail
+// stays behind an explicit Show more. Shared by the compact Home list and
+// the iPad sidebar so both page identically.
+export const THREAD_LIST_V2_SETTLED_INITIAL_COUNT = 10;
+export const THREAD_LIST_V2_SETTLED_PAGE_COUNT = 25;
+
 export function resolveThreadListV2Status(
   thread: Pick<EnvironmentThreadShell, "hasPendingApprovals" | "hasPendingUserInput" | "session">,
 ): ThreadListV2Status {
@@ -89,10 +95,10 @@ export interface ThreadListV2Layout {
 export function buildThreadListV2Items(input: {
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
   readonly environmentId: EnvironmentId | null;
-  readonly projectRef?: {
+  readonly projectRefs?: ReadonlyArray<{
     readonly environmentId: EnvironmentId;
     readonly projectId: ProjectId;
-  } | null;
+  }> | null;
   readonly searchQuery: string;
   /** Per-row PR state reported up by visible rows ("env:threadId" keys). */
   readonly changeRequestStateByKey?: ReadonlyMap<string, "open" | "closed" | "merged">;
@@ -109,6 +115,9 @@ export function buildThreadListV2Items(input: {
   const now = input.now ?? new Date().toISOString();
   const autoSettleAfterDays = input.autoSettleAfterDays ?? 3;
   const query = input.searchQuery.trim().toLocaleLowerCase();
+  const projectKeys = input.projectRefs
+    ? new Set(input.projectRefs.map((ref) => `${ref.environmentId}:${ref.projectId}`))
+    : null;
 
   const active: EnvironmentThreadShell[] = [];
   const settled: EnvironmentThreadShell[] = [];
@@ -116,11 +125,7 @@ export function buildThreadListV2Items(input: {
     // Callers pass live (unarchived) shells; settled threads are among them
     // and partition into the tail via effectiveSettled.
     if (input.environmentId !== null && thread.environmentId !== input.environmentId) continue;
-    if (
-      input.projectRef != null &&
-      (thread.environmentId !== input.projectRef.environmentId ||
-        thread.projectId !== input.projectRef.projectId)
-    ) {
+    if (projectKeys !== null && !projectKeys.has(`${thread.environmentId}:${thread.projectId}`)) {
       continue;
     }
     if (query.length > 0 && !thread.title.toLocaleLowerCase().includes(query)) continue;
