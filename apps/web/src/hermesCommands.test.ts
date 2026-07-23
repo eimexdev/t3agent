@@ -18,15 +18,51 @@ describe("parseT3AgentLifecycleCommand", () => {
 });
 
 describe("resolveCommandGhostHint", () => {
-  const commands = [{ name: "resume", input: { hint: "session" } }, { name: "restart" }];
+  const commands = [
+    { name: "resume", input: { hint: "session" } },
+    { name: "cron", input: { hint: "<pause|resume|list> [name]" } },
+    {
+      name: "model",
+      input: { hint: "[model] [--provider name] [--global|--session]" },
+    },
+    { name: "voice", input: { hint: "[on|off|status]" } },
+    { name: "restart" },
+  ];
 
   it("renders a non-submitted argument hint after a selected command", () => {
     expect(resolveCommandGhostHint("/resume", commands)).toBe(" session");
     expect(resolveCommandGhostHint("/resume ", commands)).toBe("session");
   });
 
-  it("hides the hint once arguments or multiline text are present", () => {
+  it("consumes a matching typed prefix without inserting it into the prompt", () => {
+    expect(resolveCommandGhostHint("/resume ses", commands)).toBe("sion");
+    expect(resolveCommandGhostHint("/resume session", commands)).toBeNull();
+  });
+
+  it("advances through literal alternatives and subsequent placeholders", () => {
+    expect(resolveCommandGhostHint("/cron res", commands)).toBe("ume [name]");
+    expect(resolveCommandGhostHint("/cron resume", commands)).toBe(" [name]");
+    expect(resolveCommandGhostHint("/cron resume ", commands)).toBe("[name]");
+  });
+
+  it("advances through grouped multi-argument hints", () => {
+    expect(resolveCommandGhostHint("/model claude", commands)).toBe(
+      " [--provider name] [--global|--session]",
+    );
+    expect(resolveCommandGhostHint("/model claude ", commands)).toBe(
+      "[--provider name] [--global|--session]",
+    );
+    expect(resolveCommandGhostHint("/model claude --p", commands)).toBe(
+      "rovider name [--global|--session]",
+    );
+    expect(resolveCommandGhostHint("/model claude --provider ", commands)).toBe(
+      "name [--global|--session]",
+    );
+  });
+
+  it("hides exhausted, ambiguous, and multiline hints", () => {
     expect(resolveCommandGhostHint("/resume discord", commands)).toBeNull();
+    expect(resolveCommandGhostHint("/voice o", commands)).toBeNull();
     expect(resolveCommandGhostHint("/resume\nmore", commands)).toBeNull();
     expect(resolveCommandGhostHint("/restart", commands)).toBeNull();
   });

@@ -201,7 +201,7 @@ import {
   selectProjectGroupingSettings,
 } from "../logicalProject";
 import type { SidebarThreadSummary } from "../types";
-import { IS_T3_AGENT_MODE, isT3AgentThread } from "../productMode";
+import { IS_T3_AGENT_MODE, selectProductModeThreads } from "../productMode";
 import {
   buildPhysicalToLogicalProjectKeyMap,
   buildSidebarProjectSnapshots,
@@ -1170,7 +1170,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const openPrLink = useOpenPrLink();
   const allSidebarThreads = useThreadShellsForProjectRefs(project.memberProjectRefs);
   const sidebarThreads = useMemo(
-    () => (IS_T3_AGENT_MODE ? allSidebarThreads.filter(isT3AgentThread) : allSidebarThreads),
+    () => selectProductModeThreads(allSidebarThreads),
     [allSidebarThreads],
   );
   const sidebarThreadByKey = useMemo(
@@ -3046,7 +3046,7 @@ export default function Sidebar() {
   const projects = useProjects();
   const allSidebarThreads = useThreadShells();
   const sidebarThreads = useMemo(
-    () => (IS_T3_AGENT_MODE ? allSidebarThreads.filter(isT3AgentThread) : allSidebarThreads),
+    () => selectProductModeThreads(allSidebarThreads),
     [allSidebarThreads],
   );
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);

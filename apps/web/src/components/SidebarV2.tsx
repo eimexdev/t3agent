@@ -108,7 +108,7 @@ import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import { prStatusIndicator, resolveThreadPr } from "./ThreadStatusIndicators";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { HermesIcon } from "./Icons";
-import { IS_T3_AGENT_MODE, isT3AgentThread } from "../productMode";
+import { IS_T3_AGENT_MODE, selectProductModeThreads } from "../productMode";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelLabel } from "./chat/providerIconUtils";
 import { deriveProviderInstanceEntries, type ProviderInstanceEntry } from "../providerInstances";
@@ -821,10 +821,7 @@ export default function SidebarV2() {
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const allThreads = useThreadShells();
-  const threads = useMemo(
-    () => (IS_T3_AGENT_MODE ? allThreads.filter(isT3AgentThread) : allThreads),
-    [allThreads],
-  );
+  const threads = useMemo(() => selectProductModeThreads(allThreads), [allThreads]);
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);

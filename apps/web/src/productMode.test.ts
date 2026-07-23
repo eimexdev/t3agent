@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { ProviderInstanceId } from "@t3tools/contracts";
-import { isT3AgentProviderInstance, isT3AgentThread, resolveProductMode } from "./productMode";
+import {
+  isT3AgentProviderInstance,
+  isT3AgentThread,
+  resolveProductMode,
+  selectProductModeThreads,
+} from "./productMode";
 
 describe("resolveProductMode", () => {
   it.each(["1", "true", "t3agent", " T3Agent "])("enables T3 Agent for %j", (value) => {
@@ -41,5 +46,47 @@ describe("T3 Agent provider policy", () => {
         session: null,
       }),
     ).toBe(false);
+  });
+
+  it("selects only Hermes-backed threads in T3 Agent mode", () => {
+    const threads = [
+      {
+        id: "hermes-model",
+        modelSelection: { instanceId: hermes },
+        session: null,
+      },
+      {
+        id: "hermes-session",
+        modelSelection: { instanceId: codex },
+        session: { providerInstanceId: hermes },
+      },
+      {
+        id: "codex",
+        modelSelection: { instanceId: codex },
+        session: { providerInstanceId: codex },
+      },
+    ];
+
+    expect(selectProductModeThreads(threads, "t3agent").map((thread) => thread.id)).toEqual([
+      "hermes-model",
+      "hermes-session",
+    ]);
+  });
+
+  it("preserves the complete thread collection in T3 Code mode", () => {
+    const threads = [
+      {
+        id: "hermes",
+        modelSelection: { instanceId: hermes },
+        session: null,
+      },
+      {
+        id: "codex",
+        modelSelection: { instanceId: codex },
+        session: null,
+      },
+    ];
+
+    expect(selectProductModeThreads(threads, "t3code")).toBe(threads);
   });
 });

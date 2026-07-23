@@ -52,7 +52,7 @@ import { readLocalApi } from "../localApi";
 import { desktopLocalBackendId } from "../connection/desktopLocal";
 import { filesystemEnvironment } from "../state/filesystem";
 import { projectEnvironment } from "../state/projects";
-import { IS_T3_AGENT_MODE, isT3AgentThread } from "../productMode";
+import { IS_T3_AGENT_MODE, selectProductModeThreads } from "../productMode";
 import { useEnvironmentQuery } from "../state/query";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -502,10 +502,7 @@ function OpenCommandPaletteDialog(props: {
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const allThreads = useThreadShells();
-  const threads = useMemo(
-    () => (IS_T3_AGENT_MODE ? allThreads.filter(isT3AgentThread) : allThreads),
-    [allThreads],
-  );
+  const threads = useMemo(() => selectProductModeThreads(allThreads), [allThreads]);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const providers = useAtomValue(primaryServerProvidersAtom);
   const [viewStack, setViewStack] = useState<CommandPaletteView[]>([]);
