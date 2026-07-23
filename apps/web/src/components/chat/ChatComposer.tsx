@@ -81,7 +81,10 @@ import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
-import { searchSlashCommandItems } from "./composerSlashCommandSearch";
+import {
+  mergeSlashCommandItemsWithProviderPrecedence,
+  searchSlashCommandItems,
+} from "./composerSlashCommandSearch";
 import {
   getComposerPromptInjectionState,
   getComposerProviderState,
@@ -1008,7 +1011,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         }),
       );
       const query = composerTrigger.query.trim().toLowerCase();
-      const slashCommandItems = [...builtInSlashCommandItems, ...providerSlashCommandItems];
+      const slashCommandItems = mergeSlashCommandItemsWithProviderPrecedence(
+        builtInSlashCommandItems,
+        providerSlashCommandItems,
+      );
       if (!query) {
         return slashCommandItems;
       }

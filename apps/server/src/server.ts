@@ -33,6 +33,7 @@ import * as GitHubCli from "./sourceControl/GitHubCli.ts";
 import * as GitLabCli from "./sourceControl/GitLabCli.ts";
 import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./provider/Layers/ProviderInstanceRegistryHydration.ts";
+import { hermesBridgeHttpRouteLayer } from "./provider/hermes/http.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as McpHttpServer from "./mcp/McpHttpServer.ts";
 import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
@@ -359,6 +360,7 @@ export const makeRoutesLayer = Layer.mergeAll(
     assetRouteLayer,
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,
+    hermesBridgeHttpRouteLayer,
   ),
   McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer)),
 ).pipe(Layer.provide(PreviewAutomationBroker.layer), Layer.provide(browserApiCorsLayer));

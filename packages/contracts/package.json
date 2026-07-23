@@ -18,6 +18,10 @@
     "./relay": {
       "types": "./src/relay.ts",
       "import": "./src/relay.ts"
+    },
+    "./hermesBridge": {
+      "types": "./src/hermesBridge.ts",
+      "import": "./src/hermesBridge.ts"
     }
   },
   "scripts": {

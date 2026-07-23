@@ -4,12 +4,28 @@ import {
   scoreQueryMatch,
 } from "@t3tools/shared/searchRanking";
 
+import { providerAdvertisesSlashCommand } from "../../composer-logic";
 import type { ComposerCommandItem } from "./ComposerCommandMenu";
 
-function scoreSlashCommandItem(
-  item: Extract<ComposerCommandItem, { type: "slash-command" | "provider-slash-command" }>,
-  query: string,
-): number | null {
+type SlashCommandItem = Extract<
+  ComposerCommandItem,
+  { type: "slash-command" | "provider-slash-command" }
+>;
+
+export function mergeSlashCommandItemsWithProviderPrecedence(
+  builtInItems: ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>,
+  providerItems: ReadonlyArray<Extract<ComposerCommandItem, { type: "provider-slash-command" }>>,
+): SlashCommandItem[] {
+  const advertisedProviderCommands = providerItems.map(({ command }) => command);
+  return [
+    ...builtInItems.filter(
+      (item) => !providerAdvertisesSlashCommand(advertisedProviderCommands, item.command),
+    ),
+    ...providerItems,
+  ];
+}
+
+function scoreSlashCommandItem(item: SlashCommandItem, query: string): number | null {
   const primaryValue =
     item.type === "slash-command" ? item.command.toLowerCase() : item.command.name.toLowerCase();
   const description = item.description.toLowerCase();
@@ -43,18 +59,16 @@ function scoreSlashCommandItem(
 }
 
 export function searchSlashCommandItems(
-  items: ReadonlyArray<
-    Extract<ComposerCommandItem, { type: "slash-command" | "provider-slash-command" }>
-  >,
+  items: ReadonlyArray<SlashCommandItem>,
   query: string,
-): Array<Extract<ComposerCommandItem, { type: "slash-command" | "provider-slash-command" }>> {
+): SlashCommandItem[] {
   const normalizedQuery = normalizeSearchQuery(query, { trimLeadingPattern: /^\/+/ });
   if (!normalizedQuery) {
     return [...items];
   }
 
   const ranked: Array<{
-    item: Extract<ComposerCommandItem, { type: "slash-command" | "provider-slash-command" }>;
+    item: SlashCommandItem;
     score: number;
     tieBreaker: string;
   }> = [];

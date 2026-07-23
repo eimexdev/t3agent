@@ -84,6 +84,7 @@ import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
 import { PersistenceSqlError } from "./persistence/Errors.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "./provider/providerMaintenance.ts";
+import * as HermesBridgeRegistry from "./provider/hermes/HermesBridgeRegistry.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
@@ -7348,6 +7349,123 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
 
       assertFailure(result, terminalError);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+});
+
+it.layer(NodeServices.layer)("Hermes callback route", (it) => {
+  it.effect("authenticates callbacks and echoes correlation identifiers", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest();
+      const instanceId = ProviderInstanceId.make("hermes-test");
+      const payload = {
+        protocolVersion: 1,
+        requestId: "callback-request-1",
+        deliveryId: "callback-delivery-1",
+        type: "message.send",
+        chatId: "t3agent",
+        threadId: "thread-1",
+        messageId: "message-1",
+        content: "done",
+        final: true,
+      };
+
+      yield* Effect.acquireUseRelease(
+        HermesBridgeRegistry.register(instanceId, {
+          token: "callback-secret",
+          receive: (value) => Effect.succeed(value),
+        }),
+        () =>
+          Effect.gen(function* () {
+            const unauthorized = yield* fetchEffect(`/api/hermes/${instanceId}/events`, {
+              method: "POST",
+              headers: {
+                authorization: "Bearer wrong-secret",
+                "content-type": "application/json",
+              },
+              body: jsonRequestBody(payload),
+            });
+            assert.equal(unauthorized.status, 401);
+
+            const response = yield* fetchEffect(`/api/hermes/${instanceId}/events`, {
+              method: "POST",
+              headers: {
+                authorization: "Bearer callback-secret",
+                "content-type": "application/json",
+              },
+              body: jsonRequestBody(payload),
+            });
+            assert.equal(response.status, 200);
+            assert.deepEqual(yield* responseJsonEffect(response), {
+              protocolVersion: 1,
+              requestId: "callback-request-1",
+              deliveryId: "callback-delivery-1",
+              status: "accepted",
+            });
+          }),
+        () => HermesBridgeRegistry.unregister(instanceId),
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("creates a deterministic T3 thread for proactive Hermes delivery", () =>
+    Effect.gen(function* () {
+      const commands: Array<OrchestrationCommand> = [];
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                commands.push(command);
+                return { sequence: commands.length };
+              }),
+          },
+        },
+      });
+      const instanceId = ProviderInstanceId.make("hermes-test");
+      const payload = {
+        protocolVersion: 1,
+        requestId: "thread-request-1",
+        deliveryId: "cron-delivery-1",
+        type: "thread.create",
+        parentChatId: "t3agent",
+        name: "Morning brief",
+      };
+
+      yield* Effect.acquireUseRelease(
+        HermesBridgeRegistry.register(instanceId, {
+          token: "callback-secret",
+          receive: (value) => Effect.succeed(value),
+        }),
+        () =>
+          Effect.gen(function* () {
+            const response = yield* fetchEffect(`/api/hermes/${instanceId}/events`, {
+              method: "POST",
+              headers: {
+                authorization: "Bearer callback-secret",
+                "content-type": "application/json",
+              },
+              body: jsonRequestBody(payload),
+            });
+            assert.equal(response.status, 200);
+            assert.deepEqual(yield* responseJsonEffect(response), {
+              protocolVersion: 1,
+              requestId: "thread-request-1",
+              deliveryId: "cron-delivery-1",
+              chatId: "t3agent",
+              threadId: "hermes-cron-delivery-1",
+            });
+            assert.deepEqual(
+              commands.map((command) => command.type),
+              ["project.create", "thread.create"],
+            );
+            assert.equal(
+              commands[1]?.type === "thread.create" ? commands[1].title : null,
+              "Morning brief",
+            );
+          }),
+        () => HermesBridgeRegistry.unregister(instanceId),
+      );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 });

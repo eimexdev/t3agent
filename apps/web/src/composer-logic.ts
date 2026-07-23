@@ -264,14 +264,28 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
 
 export function parseStandaloneComposerSlashCommand(
   text: string,
+  providerSlashCommands: ReadonlyArray<{ readonly name: string }> = [],
 ): Exclude<ComposerSlashCommand, "model"> | null {
   const match = /^\/(plan|default)\s*$/i.exec(text.trim());
   if (!match) {
     return null;
   }
   const command = match[1]?.toLowerCase();
+  if (!command || providerAdvertisesSlashCommand(providerSlashCommands, command)) {
+    return null;
+  }
   if (command === "plan") return "plan";
   return "default";
+}
+
+export function providerAdvertisesSlashCommand(
+  providerSlashCommands: ReadonlyArray<{ readonly name: string }>,
+  commandName: string,
+): boolean {
+  const normalizedCommandName = commandName.replace(/^\/+/, "").trim().toLowerCase();
+  return providerSlashCommands.some(
+    (command) => command.name.trim().toLowerCase() === normalizedCommandName,
+  );
 }
 
 export function replaceTextRange(

@@ -2,7 +2,10 @@ import { describe, expect, it } from "vite-plus/test";
 import { ProviderDriverKind } from "@t3tools/contracts";
 
 import type { ComposerCommandItem } from "./ComposerCommandMenu";
-import { searchSlashCommandItems } from "./composerSlashCommandSearch";
+import {
+  mergeSlashCommandItemsWithProviderPrecedence,
+  searchSlashCommandItems,
+} from "./composerSlashCommandSearch";
 
 describe("searchSlashCommandItems", () => {
   const claudeDriver = ProviderDriverKind.make("claudeAgent");
@@ -67,5 +70,82 @@ describe("searchSlashCommandItems", () => {
     expect(searchSlashCommandItems(items, "gfc").map((item) => item.id)).toEqual([
       "provider-slash-command:claudeAgent:gh-fix-ci",
     ]);
+  });
+
+  it("gives advertised provider commands precedence over colliding built-ins", () => {
+    const builtInItems = [
+      {
+        id: "slash:model",
+        type: "slash-command",
+        command: "model",
+        label: "/model",
+        description: "Switch response model for this thread",
+      },
+      {
+        id: "slash:plan",
+        type: "slash-command",
+        command: "plan",
+        label: "/plan",
+        description: "Switch this thread into plan mode",
+      },
+      {
+        id: "slash:default",
+        type: "slash-command",
+        command: "default",
+        label: "/default",
+        description: "Switch this thread back to normal build mode",
+      },
+    ] satisfies Array<Extract<ComposerCommandItem, { type: "slash-command" }>>;
+    const providerItems = [
+      {
+        id: "provider-slash-command:hermes:model",
+        type: "provider-slash-command",
+        provider: ProviderDriverKind.make("hermes"),
+        command: { name: "MODEL", description: "Change the Hermes model" },
+        label: "/MODEL",
+        description: "Change the Hermes model",
+      },
+      {
+        id: "provider-slash-command:hermes:plan",
+        type: "provider-slash-command",
+        provider: ProviderDriverKind.make("hermes"),
+        command: { name: "plan", description: "Run the Hermes plan command" },
+        label: "/plan",
+        description: "Run the Hermes plan command",
+      },
+      {
+        id: "provider-slash-command:hermes:default",
+        type: "provider-slash-command",
+        provider: ProviderDriverKind.make("hermes"),
+        command: { name: "default", description: "Run the Hermes default command" },
+        label: "/default",
+        description: "Run the Hermes default command",
+      },
+      {
+        id: "provider-slash-command:hermes:restart",
+        type: "provider-slash-command",
+        provider: ProviderDriverKind.make("hermes"),
+        command: { name: "restart", description: "Restart the Hermes session" },
+        label: "/restart",
+        description: "Restart the Hermes session",
+      },
+    ] satisfies Array<Extract<ComposerCommandItem, { type: "provider-slash-command" }>>;
+
+    expect(
+      mergeSlashCommandItemsWithProviderPrecedence(builtInItems, providerItems).map(
+        (item) => item.id,
+      ),
+    ).toEqual([
+      "provider-slash-command:hermes:model",
+      "provider-slash-command:hermes:plan",
+      "provider-slash-command:hermes:default",
+      "provider-slash-command:hermes:restart",
+    ]);
+    expect(
+      searchSlashCommandItems(
+        mergeSlashCommandItemsWithProviderPrecedence(builtInItems, providerItems),
+        "model",
+      ).map((item) => item.id),
+    ).toEqual(["provider-slash-command:hermes:model"]);
   });
 });

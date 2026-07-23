@@ -445,9 +445,11 @@ export function projectEvent(
                     ...entry,
                     text: message.streaming
                       ? `${entry.text}${message.text}`
-                      : message.text.length > 0
+                      : payload.replaceText
                         ? message.text
-                        : entry.text,
+                        : message.text.length > 0
+                          ? message.text
+                          : entry.text,
                     streaming: message.streaming,
                     updatedAt: message.updatedAt,
                     turnId: message.turnId,

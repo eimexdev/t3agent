@@ -4084,7 +4084,12 @@ function ChatViewContent(props: ChatViewProps) {
       composerElementContexts.length === 0 &&
       composerPreviewAnnotations.length === 0 &&
       composerReviewComments.length === 0
-        ? parseStandaloneComposerSlashCommand(trimmed)
+        ? parseStandaloneComposerSlashCommand(
+            trimmed,
+            providerStatuses.find(
+              (provider) => provider.instanceId === ctxSelectedModelSelection.instanceId,
+            )?.slashCommands ?? [],
+          )
         : null;
     if (standaloneSlashCommand) {
       handleInteractionModeChange(standaloneSlashCommand);

@@ -887,39 +887,11 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   return (
     <div className="group flex flex-col items-end gap-1">
       <div className="relative max-w-[80%] rounded-2xl border border-border bg-secondary p-3">
-        {regularImages.length > 0 && (
-          <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-            {regularImages.map((image: NonNullable<TimelineMessage["attachments"]>[number]) => (
-              <div
-                key={image.id}
-                className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
-              >
-                {image.previewUrl ? (
-                  <button
-                    type="button"
-                    className="h-full w-full cursor-zoom-in"
-                    aria-label={`Preview ${image.name}`}
-                    onClick={() => {
-                      const preview = buildExpandedImagePreview(regularImages, image.id);
-                      if (!preview) return;
-                      ctx.onImageExpand(preview);
-                    }}
-                  >
-                    <img
-                      src={image.previewUrl}
-                      alt={image.name}
-                      className="block h-auto max-h-[220px] w-full object-cover"
-                    />
-                  </button>
-                ) : (
-                  <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
-                    {image.name}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        <MessageImageAttachmentGrid
+          images={regularImages}
+          className="mb-2"
+          onImageExpand={ctx.onImageExpand}
+        />
         {previewAnnotations.map((annotation, index) => (
           <UserMessagePreviewAnnotationCard
             key={annotation.id}
@@ -1013,11 +985,19 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
 
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
-  const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const assistantImages = row.message.attachments ?? [];
+  const messageText =
+    row.message.text ||
+    (row.message.streaming || assistantImages.length > 0 ? "" : "(empty response)");
 
   return (
     <>
       <div className="relative min-w-0 px-1 py-0.5">
+        <MessageImageAttachmentGrid
+          images={assistantImages}
+          {...(messageText ? { className: "mb-2" } : {})}
+          onImageExpand={ctx.onImageExpand}
+        />
         <ChatMarkdown
           text={messageText}
           cwd={ctx.markdownCwd}
@@ -1050,6 +1030,50 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
         ) : null}
       </div>
     </>
+  );
+}
+
+function MessageImageAttachmentGrid(props: {
+  images: NonNullable<TimelineMessage["attachments"]>;
+  className?: string;
+  onImageExpand: (preview: ExpandedImagePreview) => void;
+}) {
+  if (props.images.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className={cn("grid max-w-[420px] grid-cols-2 gap-2", props.className)}>
+      {props.images.map((image) => (
+        <div
+          key={image.id}
+          className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+        >
+          {image.previewUrl ? (
+            <button
+              type="button"
+              className="h-full w-full cursor-zoom-in"
+              aria-label={`Preview ${image.name}`}
+              onClick={() => {
+                const preview = buildExpandedImagePreview(props.images, image.id);
+                if (!preview) return;
+                props.onImageExpand(preview);
+              }}
+            >
+              <img
+                src={image.previewUrl}
+                alt={image.name}
+                className="block h-auto max-h-[220px] w-full object-cover"
+              />
+            </button>
+          ) : (
+            <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
+              {image.name}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 

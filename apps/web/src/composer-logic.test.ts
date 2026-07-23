@@ -371,4 +371,15 @@ describe("parseStandaloneComposerSlashCommand", () => {
   it("ignores slash commands with extra message text", () => {
     expect(parseStandaloneComposerSlashCommand("/plan explain this")).toBeNull();
   });
+
+  it("does not intercept built-in names advertised by the selected provider", () => {
+    const providerSlashCommands = [{ name: "plan" }, { name: "DEFAULT" }];
+
+    expect(parseStandaloneComposerSlashCommand("/plan", providerSlashCommands)).toBeNull();
+    expect(parseStandaloneComposerSlashCommand("/default", providerSlashCommands)).toBeNull();
+  });
+
+  it("continues handling non-colliding built-ins locally", () => {
+    expect(parseStandaloneComposerSlashCommand("/plan", [{ name: "restart" }])).toBe("plan");
+  });
 });

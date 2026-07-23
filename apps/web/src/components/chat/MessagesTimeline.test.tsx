@@ -219,6 +219,55 @@ function buildUserTimelineEntry(text: string) {
 }
 
 describe("MessagesTimeline", () => {
+  it("renders assistant image attachments through the shared expandable image grid", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-assistant-with-images",
+            kind: "message",
+            createdAt: MESSAGE_CREATED_AT,
+            message: {
+              id: MessageId.make("message-assistant-with-images"),
+              role: "assistant",
+              text: "",
+              attachments: [
+                {
+                  type: "image",
+                  id: "assistant-image-previewable",
+                  name: "generated-chart.png",
+                  mimeType: "image/png",
+                  sizeBytes: 12,
+                  previewUrl: "data:image/png;base64,aGVybWVz",
+                },
+                {
+                  type: "image",
+                  id: "assistant-image-loading",
+                  name: "loading-preview.png",
+                  mimeType: "image/png",
+                  sizeBytes: 8,
+                },
+              ],
+              turnId: TurnId.make("turn-with-assistant-images"),
+              createdAt: MESSAGE_CREATED_AT,
+              updatedAt: MESSAGE_CREATED_AT,
+              streaming: false,
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Preview generated-chart.png"');
+    expect(markup).toContain('src="data:image/png;base64,aGVybWVz"');
+    expect(markup).toContain('alt="generated-chart.png"');
+    expect(markup).toContain("loading-preview.png");
+    expect(markup).not.toContain('aria-label="Preview loading-preview.png"');
+    expect(markup).not.toContain("(empty response)");
+  });
+
   it("keeps assistant changed-files headers sticky below the thread header", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const assistantMessageId = MessageId.make("message-assistant-with-files");

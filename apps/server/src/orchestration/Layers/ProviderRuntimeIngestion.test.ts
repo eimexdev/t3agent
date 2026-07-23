@@ -978,6 +978,138 @@ describe("ProviderRuntimeIngestion", () => {
     expect(message?.streaming).toBe(false);
   });
 
+  it("uses assistant completion detail as the authoritative final text", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-assistant-rewrite-delta"),
+      provider: ProviderDriverKind.make("hermes"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-rewrite"),
+      itemId: asItemId("item-rewrite"),
+      payload: {
+        streamKind: "assistant_text",
+        delta: "answer▌",
+      },
+    });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-assistant-rewrite-completed"),
+      provider: ProviderDriverKind.make("hermes"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-rewrite"),
+      itemId: asItemId("item-rewrite"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+        detail: "answer",
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-rewrite" && !message.streaming,
+      ),
+    );
+    const message = thread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-rewrite",
+    );
+    expect(message?.text).toBe("answer");
+  });
+
+  it("allows authoritative completion text to clear a stale streamed preview", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "content.delta",
+      eventId: asEventId("evt-assistant-clear-delta"),
+      provider: ProviderDriverKind.make("hermes"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      itemId: asItemId("item-clear"),
+      payload: { streamKind: "assistant_text", delta: "stale preview" },
+    });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-assistant-clear-completed"),
+      provider: ProviderDriverKind.make("hermes"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      itemId: asItemId("item-clear"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+        data: { finalText: "" },
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-clear" && !message.streaming,
+      ),
+    );
+    const message = thread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-clear",
+    );
+    expect(message?.text).toBe("");
+  });
+
+  it("projects structured assistant image attachments without requiring text", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-assistant-image-completed"),
+      provider: ProviderDriverKind.make("hermes"),
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      itemId: asItemId("item-image"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+        data: {
+          attachments: [
+            {
+              type: "image",
+              id: "thread-1-image-attachment",
+              name: "result.png",
+              mimeType: "image/png",
+              sizeBytes: 128,
+            },
+          ],
+        },
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some(
+        (message: ProviderRuntimeTestMessage) =>
+          message.id === "assistant:item-image" && !message.streaming,
+      ),
+    );
+    const message = thread.messages.find(
+      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-image",
+    );
+    expect(message?.text).toBe("");
+    expect(message?.attachments).toEqual([
+      {
+        type: "image",
+        id: "thread-1-image-attachment",
+        name: "result.png",
+        mimeType: "image/png",
+        sizeBytes: 128,
+      },
+    ]);
+  });
+
   it("preserves completed tool metadata on projected tool activities", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
