@@ -3,7 +3,13 @@
 ## Task Completion Requirements
 
 - Keep local verification focused on the files and packages changed. Run the smallest relevant test set; do not run the full workspace test suite as a routine completion step.
-  - Use `vp test run <test-files>` for focused built-in Vite+ tests. Use `vp run test` only when the affected package specifically requires its `test` script.
+  - Run focused built-in Vite+ tests from the affected package with the repository-local Vite+ binary, for example:
+    `cd apps/web && ../../node_modules/.bin/vp test run src/example.test.ts`.
+  - Do not run a bare globally installed `vp test`. Even when its version matches the workspace,
+    the global CLI and local `vite-plus/test` import load separate Vitest runtimes and fail before
+    test collection with `Cannot read properties of undefined (reading 'config')`.
+  - Use a package's `test` script only when that package specifically requires it, and invoke it
+    through tooling that resolves the repository-local `vp`.
   - Backend changes must include and run focused tests for the changed behavior.
   - Run targeted formatting, lint, and type checks for the affected scope when available.
 - Do not run repo-wide `vp check`, `vp run typecheck`, `vp run test`, or equivalent full-suite commands locally unless the user explicitly requests them. CI is responsible for the full verification suite.
