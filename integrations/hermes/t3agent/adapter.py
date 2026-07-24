@@ -72,6 +72,23 @@ _HOME_THREAD_ENV = "T3_AGENT_HOME_CHAT_THREAD_ID"
 _OUTBOX_PATH_ENV = "T3_AGENT_OUTBOX_PATH"
 _INGRESS_LEDGER_PATH_ENV = "T3_AGENT_INGRESS_LEDGER_PATH"
 
+_DISCORD_TRIGGERING_MESSAGE_PREFIX = re.compile(
+    r"^\[Triggering message id:[^\r\n]*\]\s*",
+    re.IGNORECASE,
+)
+_DISCORD_TEXT_DOCUMENT_PREFIX = re.compile(
+    r"^\[The user sent a text document: '([^'\r\n]+)'\. "
+    r"Its content has been included below\. The file is also saved at: "
+    r"[^\]\r\n]+\]\s*",
+    re.IGNORECASE,
+)
+_DISCORD_SENDER_PREFIX = re.compile(r"^\[([^\]\r\n:]{1,80})\]\s+")
+_DISCORD_NON_SENDER_LABEL = re.compile(r"^(?:async\b|the user\b)", re.IGNORECASE)
+_HERMES_ASYNC_DELEGATION_RESULT_PREFIX = re.compile(
+    r"^\[ASYNC DELEGATION BATCH COMPLETE\b",
+    re.IGNORECASE,
+)
+
 
 def _env_or_extra(config: PlatformConfig, env_name: str, key: str, default: Any = "") -> Any:
     value = os.getenv(env_name)
@@ -223,6 +240,31 @@ def _gateway_session_resources(gateway_runner: Any) -> Tuple[Any, Any, Any]:
     async_store = getattr(gateway_runner, "async_session_store", None)
     db = getattr(session_db, "_db", session_db)
     return session_db, async_store, db
+
+
+def _is_synthetic_history_user(content: Any) -> bool:
+    return isinstance(content, str) and bool(
+        _HERMES_ASYNC_DELEGATION_RESULT_PREFIX.match(content)
+    )
+
+
+def _normalize_history_user_content(source: str, content: str) -> str:
+    if source.strip().casefold() != "discord":
+        return content
+
+    body = _DISCORD_TRIGGERING_MESSAGE_PREFIX.sub("", content, count=1)
+    document_match = _DISCORD_TEXT_DOCUMENT_PREFIX.match(body)
+    attachment_label = ""
+    if document_match is not None:
+        attachment_label = f"**Attached:** {document_match.group(1)}\n\n"
+        body = body[document_match.end() :]
+
+    sender_match = _DISCORD_SENDER_PREFIX.match(body)
+    if sender_match is not None and not _DISCORD_NON_SENDER_LABEL.match(
+        sender_match.group(1)
+    ):
+        body = body[sender_match.end() :]
+    return f"{attachment_label}{body}"
 
 
 def _stored_model_config(session: Dict[str, Any]) -> Dict[str, Any]:
@@ -1256,7 +1298,9 @@ class T3AgentAdapter(BasePlatformAdapter):
             user_turns = 0
             for message in messages:
                 role = str(message.get("role") or "")
-                if role == "user":
+                if role == "user" and not _is_synthetic_history_user(
+                    message.get("content")
+                ):
                     user_turns += 1
                     if raw_turn_count is not None and user_turns > raw_turn_count:
                         break
@@ -1342,6 +1386,7 @@ class T3AgentAdapter(BasePlatformAdapter):
                     set_reasoning(target_session_key, reasoning_config)
 
             history: List[Dict[str, Any]] = []
+            source = str(source_session.get("source") or "unknown")
             for message in copied_messages:
                 role = str(message.get("role") or "")
                 content = message.get("content")
@@ -1349,11 +1394,15 @@ class T3AgentAdapter(BasePlatformAdapter):
                     content, str
                 ):
                     continue
+                if role == "assistant" and not content.strip():
+                    continue
+                if role == "user" and _is_synthetic_history_user(content):
+                    continue
                 history.append(
                     {
                         "role": role,
                         "content": (
-                            re.sub(r"^\[[^\]\n]{1,80}\]\s+", "", content)
+                            _normalize_history_user_content(source, content)
                             if role == "user"
                             else content
                         ),
@@ -1366,7 +1415,7 @@ class T3AgentAdapter(BasePlatformAdapter):
                 "sourceSessionId": source_session_id,
                 "childSessionId": child_session_id,
                 "targetThreadId": target_thread_id,
-                "source": str(source_session.get("source") or "unknown"),
+                "source": source,
                 "title": child_title,
                 "messages": history,
                 **(

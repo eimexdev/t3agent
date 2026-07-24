@@ -1,15 +1,8 @@
-import { HermesLineageMetadata, type HermesLineageMetadata as Metadata } from "@t3tools/contracts";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
-
-export const HERMES_LINEAGE_PREFIX = "t3agent-lineage:";
-
-const decodeLineage = Schema.decodeUnknownOption(Schema.fromJsonString(HermesLineageMetadata));
-
-export function parseHermesLineageMessage(text: string): Metadata | null {
-  if (!text.startsWith(HERMES_LINEAGE_PREFIX)) return null;
-  return Option.getOrNull(decodeLineage(text.slice(HERMES_LINEAGE_PREFIX.length)));
-}
+import type { HermesLineageMetadata as Metadata } from "@t3tools/contracts";
+export {
+  HERMES_LINEAGE_PREFIX,
+  parseHermesLineageMessage,
+} from "@t3tools/client-runtime/state/hermes-imported-history";
 
 export function formatHermesSourceLabel(source: string): string {
   const normalized = source.trim().toLocaleLowerCase();
