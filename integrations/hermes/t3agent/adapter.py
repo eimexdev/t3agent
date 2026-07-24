@@ -23,7 +23,7 @@ import os
 from pathlib import Path
 import re
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote, unquote_to_bytes, urlparse
 
@@ -380,6 +380,15 @@ def _build_imported_history(
     active_tool_calls: Dict[str, Dict[str, Any]] = {}
     current_turn_id: Optional[str] = None
     sequence = 0
+    last_created_at: Optional[datetime] = None
+
+    def next_created_at(value: Any) -> str:
+        nonlocal last_created_at
+        candidate = datetime.fromisoformat(_iso_timestamp(value).replace("Z", "+00:00"))
+        if last_created_at is not None and candidate <= last_created_at:
+            candidate = last_created_at + timedelta(milliseconds=1)
+        last_created_at = candidate
+        return candidate.isoformat().replace("+00:00", "Z")
 
     def append_tool_activity(
         *,
@@ -457,7 +466,7 @@ def _build_imported_history(
     for index, message in enumerate(copied_messages):
         role = str(message.get("role") or "")
         content = message.get("content")
-        created_at = _iso_timestamp(message.get("timestamp"))
+        created_at = next_created_at(message.get("timestamp"))
 
         if role == "user":
             if not isinstance(content, str) or _is_synthetic_history_user(content):
@@ -612,8 +621,8 @@ def _build_imported_history(
         )
 
     final_created_at = (
-        _iso_timestamp(copied_messages[-1].get("timestamp"))
-        if copied_messages
+        last_created_at.isoformat().replace("+00:00", "Z")
+        if last_created_at is not None
         else _iso_timestamp(None)
     )
     flush_unfinished(final_created_at)
