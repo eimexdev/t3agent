@@ -274,6 +274,15 @@ describe("HermesConversationLifecycle", () => {
       }
       assert.strictEqual(forkSession.mock.calls.length, 1);
       assert.strictEqual(forkSession.mock.calls[0]?.[0].targetThreadId, LIVE_IMPORTED_THREAD_ID);
+
+      yield* lifecycle.forkConversation({
+        source: { type: "session", sessionId: SOURCE_SESSION_ID },
+      });
+      assert.strictEqual(forkSession.mock.calls.length, 2);
+      assert.notStrictEqual(
+        forkSession.mock.calls[0]?.[0].requestId,
+        forkSession.mock.calls[1]?.[0].requestId,
+      );
     });
   });
 
