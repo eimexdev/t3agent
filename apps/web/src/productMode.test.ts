@@ -5,6 +5,7 @@ import {
   isT3AgentProviderInstance,
   isT3AgentThread,
   resolveProductMode,
+  resolveSidebarV2Enabled,
   selectProductModeThreads,
 } from "./productMode";
 
@@ -19,6 +20,18 @@ describe("resolveProductMode", () => {
       expect(resolveProductMode(value)).toBe("t3code");
     },
   );
+});
+
+describe("resolveSidebarV2Enabled", () => {
+  it("always enables sidebar v2 in T3 Agent mode", () => {
+    expect(resolveSidebarV2Enabled(false, "t3agent")).toBe(true);
+    expect(resolveSidebarV2Enabled(true, "t3agent")).toBe(true);
+  });
+
+  it("preserves the client preference in T3 Code mode", () => {
+    expect(resolveSidebarV2Enabled(false, "t3code")).toBe(false);
+    expect(resolveSidebarV2Enabled(true, "t3code")).toBe(true);
+  });
 });
 
 describe("T3 Agent provider policy", () => {

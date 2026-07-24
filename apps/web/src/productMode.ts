@@ -13,6 +13,13 @@ export const PRODUCT_MODE = resolveProductMode(import.meta.env.VITE_T3_AGENT_MOD
 export const IS_T3_AGENT_MODE = PRODUCT_MODE === "t3agent";
 export const T3_AGENT_PROVIDER_INSTANCE_ID = ProviderInstanceId.make("hermes");
 
+export function resolveSidebarV2Enabled(
+  clientPreference: boolean,
+  productMode: ProductMode = PRODUCT_MODE,
+): boolean {
+  return productMode === "t3agent" || clientPreference;
+}
+
 type ProviderBackedThread = {
   readonly modelSelection: { readonly instanceId: ProviderInstanceId };
   readonly session: { readonly providerInstanceId?: ProviderInstanceId | undefined } | null;
