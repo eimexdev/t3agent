@@ -37,6 +37,19 @@ def fake_platform(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     return platform
 
 
+@pytest.fixture(autouse=True)
+def isolate_t3agent_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "T3_AGENT_INGRESS_TOKEN",
+        "T3_AGENT_BRIDGE_TOKEN",
+        "T3_AGENT_BRIDGE_URL",
+        "T3_AGENT_INSTANCE_ID",
+        "T3_AGENT_OUTBOX_PATH",
+        "T3_AGENT_INGRESS_LEDGER_PATH",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
 async def make_ingress_client(
     adapter: adapter_module.T3AgentAdapter,
 ) -> TestClient:
@@ -46,6 +59,7 @@ async def make_ingress_client(
     app.router.add_get("/v1/sessions", adapter._list_sessions)
     app.router.add_post("/v1/sessions/fork", adapter._fork_session)
     app.router.add_post("/v1/sessions/delete", adapter._delete_session)
+    app.router.add_post("/v1/sessions/title", adapter._update_session_title)
     app.router.add_post("/v1/messages", adapter._submit_message)
     app.router.add_post("/v1/interrupt", adapter._interrupt_turn)
     app.router.add_post("/v1/approvals", adapter._respond_approval)
@@ -500,6 +514,185 @@ async def test_session_delete_only_removes_matching_t3_child(
         assert deleted == ["t3-child"]
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_session_title_update_uses_hermes_validation_and_returns_canonical_title(
+    fake_platform: SimpleNamespace,
+) -> None:
+    adapter = adapter_module.T3AgentAdapter(make_config())
+
+    class FakeDB:
+        title = "Original"
+
+        def get_session(self, session_id: str) -> Dict[str, Any]:
+            assert session_id == "session-1"
+            return {
+                "id": session_id,
+                "source": "t3agent",
+                "thread_id": "thread-1",
+            }
+
+        def get_session_title(self, session_id: str) -> str:
+            assert session_id == "session-1"
+            return self.title
+
+    db = FakeDB()
+
+    class FakeAsyncDB:
+        _db = db
+
+        async def set_session_title(self, session_id: str, title: str) -> bool:
+            assert session_id == "session-1"
+            db.title = " ".join(title.split())
+            return True
+
+    adapter.gateway_runner = SimpleNamespace(_session_db=FakeAsyncDB())
+    client = await make_ingress_client(adapter)
+    frame = {
+        "protocolVersion": 1,
+        "requestId": "rename-session",
+        "type": "session.title.update",
+        "sessionId": "session-1",
+        "targetThreadId": "thread-1",
+        "title": "  Canonical   Hermes title  ",
+    }
+    try:
+        first = await client.post(
+            "/v1/sessions/title",
+            headers=auth_headers(),
+            json=frame,
+        )
+        duplicate = await client.post(
+            "/v1/sessions/title",
+            headers=auth_headers(),
+            json=frame,
+        )
+
+        assert first.status == duplicate.status == 200
+        assert await first.json() == {
+            "protocolVersion": 1,
+            "requestId": "rename-session",
+            "status": "accepted",
+            "title": "Canonical Hermes title",
+        }
+        assert (await duplicate.json())["status"] == "duplicate"
+        assert db.title == "Canonical Hermes title"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_session_title_update_surfaces_hermes_rejection(
+    fake_platform: SimpleNamespace,
+) -> None:
+    adapter = adapter_module.T3AgentAdapter(make_config())
+
+    class FakeDB:
+        def get_session(self, _: str) -> Dict[str, Any]:
+            return {
+                "id": "session-1",
+                "source": "t3agent",
+                "thread_id": "thread-1",
+            }
+
+    class FakeAsyncDB:
+        _db = FakeDB()
+
+        async def set_session_title(self, _: str, title: str) -> bool:
+            raise ValueError(f"Title '{title}' is already in use")
+
+    adapter.gateway_runner = SimpleNamespace(_session_db=FakeAsyncDB())
+    client = await make_ingress_client(adapter)
+    try:
+        response = await client.post(
+            "/v1/sessions/title",
+            headers=auth_headers(),
+            json={
+                "protocolVersion": 1,
+                "requestId": "rename-duplicate",
+                "type": "session.title.update",
+                "sessionId": "session-1",
+                "targetThreadId": "thread-1",
+                "title": "Duplicate",
+            },
+        )
+
+        assert response.status == 200
+        body = await response.json()
+        assert body["status"] == "rejected"
+        assert "already in use" in body["message"]
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_processing_completion_publishes_the_hermes_session_title(
+    fake_platform: SimpleNamespace,
+) -> None:
+    received: List[Dict[str, Any]] = []
+
+    async def receive(request: web.Request) -> web.Response:
+        frame = await request.json()
+        received.append(frame)
+        return web.json_response(
+            {
+                "protocolVersion": 1,
+                "requestId": frame["requestId"],
+                "deliveryId": frame["deliveryId"],
+                "status": "accepted",
+            }
+        )
+
+    app = web.Application()
+    app.router.add_post("/api/hermes/hermes-test/events", receive)
+    server = TestServer(app)
+    await server.start_server()
+    adapter = adapter_module.T3AgentAdapter(
+        make_config(bridge_url=str(server.make_url("/")))
+    )
+    adapter.bridge_url = adapter.bridge_url.rstrip("/")
+    adapter._client = ClientSession()
+
+    class FakeDB:
+        def get_session_title(self, session_id: str) -> str:
+            assert session_id == "session-1"
+            return "Hermes automatic title"
+
+    class FakeStore:
+        async def get_or_create_session(self, _: Any) -> Any:
+            return SimpleNamespace(session_id="session-1")
+
+    adapter.gateway_runner = SimpleNamespace(
+        _session_db=SimpleNamespace(_db=FakeDB()),
+        async_session_store=FakeStore(),
+    )
+    event = SimpleNamespace(
+        source=SimpleNamespace(chat_id="t3agent", thread_id="thread-1"),
+        message_id="hermes-user:title-turn",
+    )
+    try:
+        await adapter.on_processing_complete(
+            event,
+            SimpleNamespace(value="success"),
+        )
+        await wait_until(
+            lambda: any(
+                frame["type"] == "session.title.updated" for frame in received
+            )
+        )
+
+        title_event = next(
+            frame
+            for frame in received
+            if frame["type"] == "session.title.updated"
+        )
+        assert title_event["threadId"] == "thread-1"
+        assert title_event["sessionId"] == "session-1"
+        assert title_event["title"] == "Hermes automatic title"
+    finally:
+        await adapter.disconnect()
+        await server.close()
 
 
 @pytest.mark.asyncio
