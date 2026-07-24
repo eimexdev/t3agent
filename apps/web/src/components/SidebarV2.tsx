@@ -107,7 +107,6 @@ import {
 import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import { prStatusIndicator, resolveThreadPr } from "./ThreadStatusIndicators";
 import { ProjectFavicon } from "./ProjectFavicon";
-import { HermesIcon } from "./Icons";
 import { IS_T3_AGENT_MODE, selectProductModeThreads } from "../productMode";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelLabel } from "./chat/providerIconUtils";
@@ -632,7 +631,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
               )}
             >
               {IS_T3_AGENT_MODE ? (
-                <HermesIcon className="size-4" />
+                <MessageSquareIcon className="size-4" />
               ) : (
                 <ProjectFavicon
                   environmentId={thread.environmentId}
@@ -708,7 +707,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
           <div className="relative z-10 h-[4.875rem] px-2.5 py-2">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
               {IS_T3_AGENT_MODE ? (
-                <HermesIcon className="size-4 shrink-0" />
+                <MessageSquareIcon className="size-4 shrink-0" />
               ) : (
                 <ProjectFavicon
                   environmentId={thread.environmentId}
