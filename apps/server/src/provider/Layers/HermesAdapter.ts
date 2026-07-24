@@ -230,6 +230,70 @@ function textDelta(previous: string, next: string): string {
   return "";
 }
 
+function hermesToolTitle(name: string): string {
+  const titles: Readonly<Record<string, string>> = {
+    terminal: "Terminal",
+    execute_code: "Ran code",
+    process: "Process",
+    web_search: "Web search",
+    web_extract: "Read web page",
+    browser_navigate: "Navigated browser",
+    browser_snapshot: "Inspected browser",
+    browser_click: "Clicked browser",
+    browser_type: "Typed in browser",
+    computer_use: "Used computer",
+    read_file: "Read file",
+    search_files: "Searched files",
+    write_file: "Wrote file",
+    patch: "Edited files",
+    skill_view: "Read skill",
+    delegate_task: "Delegated task",
+  };
+  return titles[name] ?? name.replaceAll("_", " ").replace(/^\w/, (value) => value.toUpperCase());
+}
+
+function hermesToolItemType(
+  name: string,
+):
+  | "command_execution"
+  | "file_change"
+  | "mcp_tool_call"
+  | "collab_agent_tool_call"
+  | "web_search"
+  | "image_view" {
+  if (name === "terminal" || name === "execute_code" || name === "process") {
+    return "command_execution";
+  }
+  if (name === "write_file" || name === "patch") return "file_change";
+  if (name === "web_search" || name === "web_extract") return "web_search";
+  if (name === "computer_use" || name === "image_view") return "image_view";
+  if (name === "delegate_task") return "collab_agent_tool_call";
+  return "mcp_tool_call";
+}
+
+function toolResultData(result: unknown): unknown {
+  return typeof result === "string" ? { output: result } : result;
+}
+
+function toolResultDetail(result: unknown): string | undefined {
+  const text =
+    typeof result === "string"
+      ? result
+      : (() => {
+          try {
+            return JSON.stringify(result);
+          } catch {
+            return "";
+          }
+        })();
+  const firstLine = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstLine) return undefined;
+  return firstLine.length <= 240 ? firstLine : `${firstLine.slice(0, 239).trimEnd()}…`;
+}
+
 function firstAnswer(answers: ProviderUserInputAnswers): unknown {
   return Object.values(answers)[0] ?? "";
 }
@@ -454,6 +518,47 @@ export const makeHermesAdapter = Effect.fn("makeHermesAdapter")(function* (
     });
   });
 
+  const handleToolCallback = Effect.fn("HermesAdapter.handleToolCallback")(function* (
+    callback: Extract<HermesBridgeHermesToT3Request, { type: "tool.started" | "tool.completed" }>,
+    threadId: ThreadId,
+  ) {
+    const base = yield* eventBase(
+      callback,
+      threadId,
+      callback.type === "tool.started" ? "tool-started" : "tool-completed",
+    );
+    const itemType = hermesToolItemType(callback.name);
+    const title = hermesToolTitle(callback.name);
+    const item = {
+      toolCallId: callback.toolCallId,
+      name: callback.name,
+      input: callback.input,
+      ...(callback.type === "tool.completed" ? { result: toolResultData(callback.result) } : {}),
+    };
+    const detail =
+      callback.type === "tool.completed" ? toolResultDetail(callback.result) : undefined;
+    yield* publish({
+      ...base,
+      type: callback.type === "tool.started" ? "item.started" : "item.completed",
+      itemId: RuntimeItemId.make(`hermes-tool:${callback.toolCallId}`),
+      payload: {
+        itemType,
+        status:
+          callback.type === "tool.started"
+            ? "inProgress"
+            : callback.isError
+              ? "failed"
+              : "completed",
+        title,
+        ...(detail ? { detail } : {}),
+        data: {
+          toolCallId: callback.toolCallId,
+          item,
+        },
+      },
+    });
+  });
+
   const rememberApproval = Effect.fn("HermesAdapter.rememberApproval")(function* (
     callback: HermesBridgeApprovalRequest,
     threadId: ThreadId,
@@ -553,6 +658,10 @@ export const makeHermesAdapter = Effect.fn("makeHermesAdapter")(function* (
               case "message.send":
               case "message.edit":
                 yield* handleMessageCallback(callback, threadId, context);
+                break;
+              case "tool.started":
+              case "tool.completed":
+                yield* handleToolCallback(callback, threadId);
                 break;
               case "message.delete":
                 return yield* requestError(

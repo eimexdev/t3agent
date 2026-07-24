@@ -983,6 +983,7 @@ class T3AgentAdapter(BasePlatformAdapter):
 
     supports_async_delivery = True
     supports_code_blocks = True
+    supports_structured_tool_events = True
 
     def __init__(self, config: PlatformConfig):
         super().__init__(config, Platform("t3agent"))
@@ -2193,6 +2194,55 @@ class T3AgentAdapter(BasePlatformAdapter):
             raw_response=body if ok else None,
             retryable=not ok,
         )
+
+    def _tool_event_fields(
+        self,
+        chat_id: str,
+        tool_call_id: str,
+        name: str,
+        args: Any,
+        metadata: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        fields: Dict[str, Any] = {
+            "chatId": str(chat_id),
+            "toolCallId": str(tool_call_id),
+            "name": str(name),
+            "input": args if isinstance(args, dict) else {"value": args},
+        }
+        thread_id = _metadata_value(metadata, "threadId", "thread_id")
+        if thread_id:
+            fields["threadId"] = thread_id
+        source_message_id = self._source_message_id(chat_id, metadata)
+        if source_message_id:
+            fields["sourceMessageId"] = source_message_id
+        return fields
+
+    async def send_tool_started(
+        self,
+        chat_id: str,
+        tool_call_id: str,
+        name: str,
+        args: Any,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        fields = self._tool_event_fields(chat_id, tool_call_id, name, args, metadata)
+        await self._post_event("tool.started", fields)
+
+    async def send_tool_completed(
+        self,
+        chat_id: str,
+        tool_call_id: str,
+        name: str,
+        args: Any,
+        result: Any,
+        metadata: Optional[Dict[str, Any]] = None,
+        *,
+        is_error: bool = False,
+    ) -> None:
+        fields = self._tool_event_fields(chat_id, tool_call_id, name, args, metadata)
+        fields["result"] = result
+        fields["isError"] = bool(is_error)
+        await self._post_event("tool.completed", fields)
 
     async def send_image_file(
         self,

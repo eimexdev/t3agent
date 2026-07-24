@@ -232,6 +232,28 @@ export const HermesBridgeEditMessageRequest = openStruct({
 });
 export type HermesBridgeEditMessageRequest = typeof HermesBridgeEditMessageRequest.Type;
 
+const ToolCallbackFields = {
+  ...CallbackFields,
+  ...DestinationFields,
+  toolCallId: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  input: Schema.Unknown,
+} as const;
+
+export const HermesBridgeToolStartedRequest = openStruct({
+  ...ToolCallbackFields,
+  type: Schema.Literal("tool.started"),
+});
+export type HermesBridgeToolStartedRequest = typeof HermesBridgeToolStartedRequest.Type;
+
+export const HermesBridgeToolCompletedRequest = openStruct({
+  ...ToolCallbackFields,
+  type: Schema.Literal("tool.completed"),
+  result: Schema.Unknown,
+  isError: Schema.Boolean,
+});
+export type HermesBridgeToolCompletedRequest = typeof HermesBridgeToolCompletedRequest.Type;
+
 export const HermesBridgeDeleteMessageRequest = openStruct({
   ...CallbackFields,
   ...DestinationFields,
@@ -307,6 +329,8 @@ export type HermesBridgeThreadCreateRequest = typeof HermesBridgeThreadCreateReq
 export const HermesBridgeHermesToT3Request = Schema.Union([
   HermesBridgeSendMessageRequest,
   HermesBridgeEditMessageRequest,
+  HermesBridgeToolStartedRequest,
+  HermesBridgeToolCompletedRequest,
   HermesBridgeDeleteMessageRequest,
   HermesBridgeTypingRequest,
   HermesBridgeTurnCompleteRequest,

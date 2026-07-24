@@ -288,6 +288,38 @@ describe("Hermes bridge Hermes to T3 callbacks", () => {
     expect(edit.futurePresentation).toBe("markdown-v2");
   });
 
+  it("decodes structured tool lifecycle callbacks", () => {
+    const started = decodeHermesToT3({
+      ...callbackFields,
+      type: "tool.started",
+      chatId: "t3agent",
+      threadId: "thread-1",
+      sourceMessageId: "hermes-user:turn-1",
+      toolCallId: "call-1",
+      name: "skill_view",
+      input: { name: "query" },
+    });
+    const completed = decodeHermesToT3({
+      ...callbackFields,
+      requestId: "request-2",
+      deliveryId: "delivery-2",
+      type: "tool.completed",
+      chatId: "t3agent",
+      threadId: "thread-1",
+      sourceMessageId: "hermes-user:turn-1",
+      toolCallId: "call-1",
+      name: "skill_view",
+      input: { name: "query" },
+      result: "Skill loaded",
+      isError: false,
+    });
+
+    expect(started.type).toBe("tool.started");
+    expect(started.input).toEqual({ name: "query" });
+    expect(completed.type).toBe("tool.completed");
+    expect(completed.result).toBe("Skill loaded");
+  });
+
   it("accepts delete, typing, interactions, confirmation, and thread creation", () => {
     const callbacks = [
       { ...callbackFields, type: "message.delete", messageId: "message-1" },
