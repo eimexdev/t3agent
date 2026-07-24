@@ -1522,6 +1522,35 @@ describe("deriveWorkLogEntries", () => {
 });
 
 describe("deriveTimelineEntries", () => {
+  it("omits empty settled assistant placeholders without hiding their work entries", () => {
+    const entries = deriveTimelineEntries(
+      [
+        {
+          id: MessageId.make("empty-assistant"),
+          role: "assistant",
+          text: "",
+          createdAt: "2026-02-23T00:00:01.000Z",
+          turnId: TurnId.make("turn-1"),
+          updatedAt: "2026-02-23T00:00:01.000Z",
+          streaming: false,
+        },
+      ],
+      [],
+      [
+        {
+          id: "work-1",
+          createdAt: "2026-02-23T00:00:02.000Z",
+          turnId: TurnId.make("turn-1"),
+          label: "Read file",
+          tone: "tool",
+        },
+      ],
+    );
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ kind: "work", id: "work-1" });
+  });
+
   it("includes proposed plans alongside messages and work entries in chronological order", () => {
     const entries = deriveTimelineEntries(
       [
