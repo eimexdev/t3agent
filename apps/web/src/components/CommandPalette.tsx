@@ -60,11 +60,7 @@ import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { useProjects, useThreadShells } from "../state/entities";
-import {
-  resolveThreadActionProjectRef,
-  startNewThreadInProjectFromContext,
-  startNewThreadFromContext,
-} from "../lib/chatThreadActions";
+import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
   appendBrowsePathSegment,
   canNavigateUp,
@@ -862,13 +858,7 @@ function OpenCommandPaletteDialog(props: {
                   projectRef.environmentId === contextualProjectRef.environmentId &&
                   projectRef.projectId === contextualProjectRef.projectId,
               );
-            await startNewThreadInProjectFromContext(
-              {
-                activeDraftThread,
-                activeThread: activeThread ?? undefined,
-                defaultProjectRef,
-                handleNewThread,
-              },
+            await handleNewThread(
               contextualRefBelongsToGroup
                 ? contextualProjectRef
                 : scopeProjectRef(project.environmentId, project.id),
@@ -876,15 +866,7 @@ function OpenCommandPaletteDialog(props: {
           },
         }),
       ),
-    [
-      activeDraftThread,
-      activeThread,
-      contextualProjectRef,
-      defaultProjectRef,
-      handleNewThread,
-      pickerProjects,
-      projectGroupByTargetKey,
-    ],
+    [contextualProjectRef, handleNewThread, pickerProjects, projectGroupByTargetKey],
   );
 
   const allThreadItems = useMemo(
