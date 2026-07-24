@@ -56,6 +56,7 @@ import {
 import { useShortcutModifierState } from "../shortcutModifierState";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { isModelPickerOpen } from "../modelPickerVisibility";
+import { describeThreadRenameFailure } from "../lib/threadRenameFailure";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { isMacPlatform } from "~/lib/utils";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
@@ -1343,13 +1344,12 @@ export default function SidebarV2() {
         }
         if (trimmed === originalTitle) return;
         const result = await renameThreadTitle(threadRef, trimmed);
-        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
+        const failureMessage = describeThreadRenameFailure(result);
+        if (failureMessage) {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Failed to rename thread",
-              description: error instanceof Error ? error.message : "An error occurred.",
+              ...failureMessage,
             }),
           );
         }
