@@ -215,12 +215,13 @@ export function makeHermesConversationLifecycle(
         existingThreadId !== undefined
       ) {
         const childSessionId = HermesBridgeSessionId.make(`t3-${existingThreadId}`);
+        const refreshRequestId = HermesBridgeRequestId.make(
+          `conversation-refresh:${source.sessionId}:${existingThreadId}:${yield* dependencies.randomUuid}`,
+        );
         const fork = yield* client
           .forkSession({
             protocolVersion: HERMES_BRIDGE_PROTOCOL_VERSION,
-            requestId: HermesBridgeRequestId.make(
-              `conversation-refresh:${source.sessionId}:${existingThreadId}`,
-            ),
+            requestId: refreshRequestId,
             type: "session.fork",
             sourceSessionId: source.sessionId,
             childSessionId,
