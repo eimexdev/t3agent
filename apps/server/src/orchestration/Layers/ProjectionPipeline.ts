@@ -879,7 +879,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             text: nextText,
             ...(nextAttachments !== undefined ? { attachments: [...nextAttachments] } : {}),
             isStreaming: event.payload.streaming,
-            createdAt: previousMessage?.createdAt ?? event.payload.createdAt,
+            createdAt:
+              event.payload.imported || previousMessage === undefined
+                ? event.payload.createdAt
+                : previousMessage.createdAt,
             updatedAt: event.payload.updatedAt,
           });
           return;

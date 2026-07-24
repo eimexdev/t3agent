@@ -443,6 +443,7 @@ export function projectEvent(
               entry.id === message.id
                 ? {
                     ...entry,
+                    role: message.role,
                     text: message.streaming
                       ? `${entry.text}${message.text}`
                       : payload.replaceText
@@ -451,6 +452,7 @@ export function projectEvent(
                           ? message.text
                           : entry.text,
                     streaming: message.streaming,
+                    createdAt: payload.imported ? message.createdAt : entry.createdAt,
                     updatedAt: message.updatedAt,
                     turnId: message.turnId,
                     ...(message.attachments !== undefined
