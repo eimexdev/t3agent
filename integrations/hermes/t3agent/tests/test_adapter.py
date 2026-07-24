@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from types import SimpleNamespace
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterator, List
 
 from aiohttp import ClientSession, web
 from aiohttp.test_utils import TestClient, TestServer
@@ -13,6 +14,25 @@ import pytest
 
 from integrations.hermes import t3agent as plugin_package
 from integrations.hermes.t3agent import adapter as adapter_module
+
+
+@pytest.fixture(autouse=True)
+def isolate_t3agent_environment() -> Iterator[None]:
+    """Keep lazy Hermes imports from leaking live bridge config between tests."""
+    original = {
+        name: value
+        for name, value in os.environ.items()
+        if name.startswith("T3_AGENT_")
+    }
+    for name in original:
+        os.environ.pop(name, None)
+    try:
+        yield
+    finally:
+        for name in tuple(os.environ):
+            if name.startswith("T3_AGENT_"):
+                os.environ.pop(name, None)
+        os.environ.update(original)
 
 
 def make_config(**extra: Any) -> SimpleNamespace:
@@ -362,10 +382,58 @@ async def test_session_fork_creates_child_copy_and_binds_target_thread(
         def get_messages(self, session_id: str) -> List[Dict[str, Any]]:
             assert session_id == "discord-source"
             return [
-                {"role": "user", "content": "[Ada] first", "timestamp": 10},
-                {"role": "assistant", "content": "first answer", "timestamp": 11},
-                {"role": "user", "content": "[Ada] second", "timestamp": 12},
-                {"role": "assistant", "content": "second answer", "timestamp": 13},
+                {
+                    "id": 1,
+                    "role": "user",
+                    "content": (
+                        "[Triggering message id: `123` — use as `message_id` for "
+                        "reply/react/pin via the discord tools.]\n\n"
+                        "[The user sent a text document: 'notes.txt'. Its content "
+                        "has been included below. The file is also saved at: "
+                        "/tmp/notes.txt]\n\n[Ada] first"
+                    ),
+                    "timestamp": 10,
+                },
+                {
+                    "id": 2,
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "I should inspect the relevant files.",
+                    "tool_calls": [
+                        {
+                            "id": "call-search",
+                            "function": {
+                                "name": "search_files",
+                                "arguments": '{"query":"notes"}',
+                            },
+                        }
+                    ],
+                    "timestamp": 11,
+                },
+                {
+                    "id": 3,
+                    "role": "tool",
+                    "content": "notes.txt",
+                    "tool_call_id": "call-search",
+                    "tool_name": "search_files",
+                    "timestamp": 11.5,
+                },
+                {
+                    "id": 4,
+                    "role": "assistant",
+                    "content": "first answer",
+                    "timestamp": 11,
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "[ASYNC DELEGATION BATCH COMPLETE — deleg_123]\n"
+                        "Internal tool result"
+                    ),
+                    "timestamp": 13,
+                },
+                {"role": "user", "content": "[Ada] second", "timestamp": 14},
+                {"role": "assistant", "content": "second answer", "timestamp": 15},
             ]
 
         def get_next_title_in_lineage(self, title: str) -> str:
@@ -438,8 +506,56 @@ async def test_session_fork_creates_child_copy_and_binds_target_thread(
         assert payload["targetThreadId"] == target_thread_id
         assert payload["title"] == "Planning #2"
         assert [message["content"] for message in payload["messages"]] == [
-            "first",
+            "**Attached:** notes.txt\n\nfirst",
+            "",
+            "",
             "first answer",
+            "",
+        ]
+        turn_id = payload["messages"][3]["turnId"]
+        assert turn_id.startswith("hermes_turn_")
+        assert payload["messages"][1]["turnId"] == turn_id
+        assert payload["messages"][2]["turnId"] == turn_id
+        assert payload["messages"][4]["turnId"] == turn_id
+        assert payload["messages"][3]["createdAt"] == "1970-01-01T00:00:11.501000Z"
+        assert payload["activities"] == [
+            {
+                "id": payload["activities"][0]["id"],
+                "tone": "info",
+                "kind": "task.progress",
+                "summary": "Reasoning update",
+                "payload": {
+                    "taskId": "hermes-reasoning:discord-source:1",
+                    "detail": "I should inspect the relevant files.",
+                },
+                "turnId": turn_id,
+                "sequence": 0,
+                "createdAt": "1970-01-01T00:00:11Z",
+            },
+            {
+                "id": payload["activities"][1]["id"],
+                "tone": "tool",
+                "kind": "tool.completed",
+                "summary": "Searched files",
+                "payload": {
+                    "itemType": "mcp_tool_call",
+                    "status": "completed",
+                    "title": "Searched files",
+                    "data": {
+                        "toolCallId": "call-search",
+                        "item": {
+                            "toolCallId": "call-search",
+                            "name": "search_files",
+                            "input": {"query": "notes"},
+                            "result": {"output": "notes.txt"},
+                        },
+                    },
+                    "detail": "notes.txt",
+                },
+                "turnId": turn_id,
+                "sequence": 1,
+                "createdAt": "1970-01-01T00:00:11.500000Z",
+            },
         ]
         assert created[0]["source"] == "t3agent"
         assert created[0]["parent_session_id"] == "discord-source"
@@ -449,7 +565,9 @@ async def test_session_fork_creates_child_copy_and_binds_target_thread(
         assert created[0]["model_config"]["_t3agent_imported_from"] == (
             "discord-source"
         )
-        assert replacements[0][1][-1]["content"] == "first answer"
+        assert replacements[0][1][-1]["content"].startswith(
+            "[ASYNC DELEGATION BATCH COMPLETE"
+        )
         assert titles[0][1] == "Planning #2"
         assert route_sources[0].thread_id == target_thread_id
         assert switches[0][1] == payload["childSessionId"]
@@ -1091,6 +1209,64 @@ async def test_stream_metadata_marks_preview_then_routes_final_edit(
         assert received[2]["threadId"] == "thread-1"
     finally:
         await adapter.disconnect()
+        await server.close()
+
+
+@pytest.mark.asyncio
+async def test_structured_tool_lifecycle_posts_full_tool_frames(
+    fake_platform: SimpleNamespace,
+) -> None:
+    received: List[Dict[str, Any]] = []
+
+    async def receive(request: web.Request) -> web.Response:
+        frame = await request.json()
+        received.append(frame)
+        return web.json_response(
+            {
+                "protocolVersion": 1,
+                "requestId": frame["requestId"],
+                "deliveryId": frame["deliveryId"],
+                "status": "accepted",
+            }
+        )
+
+    app = web.Application()
+    app.router.add_post("/api/hermes/hermes-test/events", receive)
+    server = TestServer(app)
+    await server.start_server()
+    adapter = adapter_module.T3AgentAdapter(make_config(bridge_url=str(server.make_url("/"))))
+    adapter.bridge_url = adapter.bridge_url.rstrip("/")
+    adapter._client = ClientSession()
+    adapter._processing_sources[("chat-1", "thread-1")] = "hermes-user:turn-1"
+    try:
+        await adapter.send_tool_started(
+            "chat-1",
+            "call-1",
+            "skill_view",
+            {"name": "query"},
+            metadata={"thread_id": "thread-1"},
+        )
+        await adapter.send_tool_completed(
+            "chat-1",
+            "call-1",
+            "skill_view",
+            {"name": "query"},
+            "Skill loaded",
+            metadata={"thread_id": "thread-1"},
+        )
+
+        assert [frame["type"] for frame in received] == [
+            "tool.started",
+            "tool.completed",
+        ]
+        assert received[0]["sourceMessageId"] == "hermes-user:turn-1"
+        assert received[0]["toolCallId"] == "call-1"
+        assert received[0]["input"] == {"name": "query"}
+        assert received[1]["result"] == "Skill loaded"
+        assert received[1]["isError"] is False
+    finally:
+        await adapter._client.close()
+        adapter._client = None
         await server.close()
 
 

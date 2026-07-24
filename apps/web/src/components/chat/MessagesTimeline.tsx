@@ -520,7 +520,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             }
             maintainVisibleContentPosition={{
               data: true,
-              size: false,
+              size: true,
             }}
             onScroll={handleScroll}
             className={cn(

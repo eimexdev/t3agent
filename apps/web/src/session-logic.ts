@@ -1340,12 +1340,20 @@ export function deriveTimelineEntries(
   proposedPlans: ReadonlyArray<ProposedPlan>,
   workEntries: ReadonlyArray<WorkLogEntry>,
 ): TimelineEntry[] {
-  const messageRows: TimelineEntry[] = messages.map((message) => ({
-    id: message.id,
-    kind: "message",
-    createdAt: message.createdAt,
-    message,
-  }));
+  const messageRows: TimelineEntry[] = messages
+    .filter(
+      (message) =>
+        message.role !== "assistant" ||
+        message.streaming ||
+        message.text.trim().length > 0 ||
+        (message.attachments?.length ?? 0) > 0,
+    )
+    .map((message) => ({
+      id: message.id,
+      kind: "message",
+      createdAt: message.createdAt,
+      message,
+    }));
   const proposedPlanRows: TimelineEntry[] = proposedPlans.map((proposedPlan) => ({
     id: proposedPlan.id,
     kind: "proposed-plan",

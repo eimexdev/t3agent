@@ -23,7 +23,7 @@ import os
 from pathlib import Path
 import re
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote, unquote_to_bytes, urlparse
 
@@ -73,6 +73,23 @@ _HOME_CHAT_ENV = "T3_AGENT_HOME_CHAT"
 _HOME_THREAD_ENV = "T3_AGENT_HOME_CHAT_THREAD_ID"
 _OUTBOX_PATH_ENV = "T3_AGENT_OUTBOX_PATH"
 _INGRESS_LEDGER_PATH_ENV = "T3_AGENT_INGRESS_LEDGER_PATH"
+
+_DISCORD_TRIGGERING_MESSAGE_PREFIX = re.compile(
+    r"^\[Triggering message id:[^\r\n]*\]\s*",
+    re.IGNORECASE,
+)
+_DISCORD_TEXT_DOCUMENT_PREFIX = re.compile(
+    r"^\[The user sent a text document: '([^'\r\n]+)'\. "
+    r"Its content has been included below\. The file is also saved at: "
+    r"[^\]\r\n]+\]\s*",
+    re.IGNORECASE,
+)
+_DISCORD_SENDER_PREFIX = re.compile(r"^\[([^\]\r\n:]{1,80})\]\s+")
+_DISCORD_NON_SENDER_LABEL = re.compile(r"^(?:async\b|the user\b)", re.IGNORECASE)
+_HERMES_ASYNC_DELEGATION_RESULT_PREFIX = re.compile(
+    r"^\[ASYNC DELEGATION BATCH COMPLETE\b",
+    re.IGNORECASE,
+)
 
 
 def _env_or_extra(config: PlatformConfig, env_name: str, key: str, default: Any = "") -> Any:
@@ -225,6 +242,393 @@ def _gateway_session_resources(gateway_runner: Any) -> Tuple[Any, Any, Any]:
     async_store = getattr(gateway_runner, "async_session_store", None)
     db = getattr(session_db, "_db", session_db)
     return session_db, async_store, db
+
+
+def _is_synthetic_history_user(content: Any) -> bool:
+    return isinstance(content, str) and bool(
+        _HERMES_ASYNC_DELEGATION_RESULT_PREFIX.match(content)
+    )
+
+
+def _normalize_history_user_content(source: str, content: str) -> str:
+    if source.strip().casefold() != "discord":
+        return content
+
+    body = _DISCORD_TRIGGERING_MESSAGE_PREFIX.sub("", content, count=1)
+    document_match = _DISCORD_TEXT_DOCUMENT_PREFIX.match(body)
+    attachment_label = ""
+    if document_match is not None:
+        attachment_label = f"**Attached:** {document_match.group(1)}\n\n"
+        body = body[document_match.end() :]
+
+    sender_match = _DISCORD_SENDER_PREFIX.match(body)
+    if sender_match is not None and not _DISCORD_NON_SENDER_LABEL.match(
+        sender_match.group(1)
+    ):
+        body = body[sender_match.end() :]
+    return f"{attachment_label}{body}"
+
+
+def _history_reasoning_text(message: Dict[str, Any]) -> str:
+    for key in ("reasoning_content", "reasoning"):
+        value = message.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _history_tool_call_name_args(
+    tool_call: Dict[str, Any],
+) -> Tuple[str, Dict[str, Any]]:
+    function = (
+        tool_call.get("function")
+        if isinstance(tool_call.get("function"), dict)
+        else {}
+    )
+    name = str(
+        function.get("name") or tool_call.get("name") or "unknown_tool"
+    ).strip()
+    raw_args = (
+        function.get("arguments")
+        or tool_call.get("arguments")
+        or tool_call.get("args")
+        or {}
+    )
+    if isinstance(raw_args, str):
+        try:
+            raw_args = json.loads(raw_args)
+        except (TypeError, ValueError):
+            raw_args = {"raw": raw_args}
+    if not isinstance(raw_args, dict):
+        raw_args = {"value": raw_args}
+    return name or "unknown_tool", raw_args
+
+
+def _history_tool_call_id(tool_call: Dict[str, Any]) -> str:
+    return str(
+        tool_call.get("id")
+        or tool_call.get("call_id")
+        or tool_call.get("tool_call_id")
+        or ""
+    ).strip()
+
+
+def _history_tool_title(name: str) -> str:
+    titles = {
+        "terminal": "Terminal",
+        "execute_code": "Ran code",
+        "process": "Process",
+        "web_search": "Web search",
+        "web_extract": "Read web page",
+        "browser_navigate": "Navigated browser",
+        "browser_snapshot": "Inspected browser",
+        "browser_click": "Clicked browser",
+        "browser_type": "Typed in browser",
+        "computer_use": "Used computer",
+        "read_file": "Read file",
+        "search_files": "Searched files",
+        "write_file": "Wrote file",
+        "patch": "Edited files",
+        "skill_view": "Read skill",
+        "delegate_task": "Delegated task",
+    }
+    return titles.get(name, name.replace("_", " ").strip().capitalize() or "Tool")
+
+
+def _history_tool_item_type(name: str) -> str:
+    if name in {"terminal", "execute_code", "process"}:
+        return "command_execution"
+    if name in {"write_file", "patch"}:
+        return "file_change"
+    if name in {"web_search", "web_extract"}:
+        return "web_search"
+    if name in {"computer_use", "image_view"}:
+        return "image_view"
+    if name in {"delegate_task"}:
+        return "collab_agent_tool_call"
+    return "mcp_tool_call"
+
+
+def _truncate_history_tool_text(value: Any, limit: int = 12_000) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[:limit].rstrip()}\n\n[Tool output truncated during import]"
+
+
+def _history_tool_detail(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    first_line = next(
+        (line.strip() for line in value.splitlines() if line.strip()),
+        "",
+    )
+    if not first_line:
+        return None
+    return first_line if len(first_line) <= 240 else f"{first_line[:239].rstrip()}…"
+
+
+def _build_imported_history(
+    source_session_id: str,
+    source: str,
+    copied_messages: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    history: List[Dict[str, Any]] = []
+    activities: List[Dict[str, Any]] = []
+    active_tool_calls: Dict[str, Dict[str, Any]] = {}
+    current_turn_id: Optional[str] = None
+    sequence = 0
+    last_created_at: Optional[datetime] = None
+
+    def next_created_at(value: Any) -> str:
+        nonlocal last_created_at
+        candidate = datetime.fromisoformat(_iso_timestamp(value).replace("Z", "+00:00"))
+        if last_created_at is not None and candidate <= last_created_at:
+            candidate = last_created_at + timedelta(milliseconds=1)
+        last_created_at = candidate
+        return candidate.isoformat().replace("+00:00", "Z")
+
+    def append_tool_activity(
+        *,
+        call_id: str,
+        name: str,
+        args: Dict[str, Any],
+        turn_id: Optional[str],
+        created_at: str,
+        result: Any = None,
+        status: str = "completed",
+    ) -> None:
+        nonlocal sequence
+        title = _history_tool_title(name)
+        item_type = _history_tool_item_type(name)
+        result_text = _truncate_history_tool_text(result)
+        item: Dict[str, Any] = {
+            "toolCallId": call_id,
+            "name": name,
+            "input": args,
+        }
+        command = args.get("command") or args.get("cmd")
+        if item_type == "command_execution" and command is not None:
+            item["command"] = command
+        if result_text is not None:
+            item["result"] = {"output": result_text}
+        payload: Dict[str, Any] = {
+            "itemType": item_type,
+            "status": status,
+            "title": title,
+            "data": {
+                "toolCallId": call_id,
+                "item": item,
+            },
+        }
+        detail = _history_tool_detail(result_text)
+        if detail is not None:
+            payload["detail"] = detail
+        activities.append(
+            {
+                "id": _canonical_id(
+                    "hermes_activity",
+                    {
+                        "sessionId": source_session_id,
+                        "toolCallId": call_id,
+                        "kind": "tool.completed",
+                    },
+                ),
+                "tone": "tool",
+                "kind": "tool.completed",
+                "summary": title,
+                "payload": payload,
+                "turnId": turn_id,
+                "sequence": sequence,
+                "createdAt": created_at,
+            }
+        )
+        sequence += 1
+
+    def flush_unfinished(created_at: str) -> None:
+        for call_id, call in list(active_tool_calls.items()):
+            append_tool_activity(
+                call_id=call_id,
+                name=call["name"],
+                args=call["args"],
+                turn_id=call["turnId"],
+                created_at=created_at,
+                status="stopped",
+            )
+            active_tool_calls.pop(call_id, None)
+
+    # Preserve one history slot per source row. The lifecycle derives stable
+    # message IDs from these positions, so compacting hidden tool/synthetic
+    # rows would overwrite the wrong legacy rows when an existing import is
+    # refreshed.
+    for index, message in enumerate(copied_messages):
+        role = str(message.get("role") or "")
+        content = message.get("content")
+        created_at = next_created_at(message.get("timestamp"))
+
+        if role == "user":
+            if not isinstance(content, str) or _is_synthetic_history_user(content):
+                history.append(
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "createdAt": created_at,
+                        **(
+                            {"turnId": current_turn_id}
+                            if current_turn_id is not None
+                            else {}
+                        ),
+                    }
+                )
+                continue
+            flush_unfinished(created_at)
+            current_turn_id = _canonical_id(
+                "hermes_turn",
+                {
+                    "sessionId": source_session_id,
+                    "messageId": message.get("id") or index,
+                    "timestamp": message.get("timestamp"),
+                },
+            )
+            history.append(
+                {
+                    "role": role,
+                    "content": _normalize_history_user_content(source, content),
+                    "createdAt": created_at,
+                }
+            )
+            continue
+
+        if role == "system":
+            history.append(
+                {
+                    "role": role,
+                    "content": content if isinstance(content, str) else "",
+                    "createdAt": created_at,
+                }
+            )
+            continue
+
+        if role == "assistant":
+            reasoning = _history_reasoning_text(message)
+            if reasoning:
+                activities.append(
+                    {
+                        "id": _canonical_id(
+                            "hermes_activity",
+                            {
+                                "sessionId": source_session_id,
+                                "messageId": message.get("id") or index,
+                                "kind": "reasoning",
+                            },
+                        ),
+                        "tone": "info",
+                        "kind": "task.progress",
+                        "summary": "Reasoning update",
+                        "payload": {
+                            "taskId": f"hermes-reasoning:{source_session_id}:{index}",
+                            "detail": _truncate_history_tool_text(reasoning, 8_000),
+                        },
+                        "turnId": current_turn_id,
+                        "sequence": sequence,
+                        "createdAt": created_at,
+                    }
+                )
+                sequence += 1
+
+            tool_calls = message.get("tool_calls")
+            if isinstance(tool_calls, list):
+                for call_index, tool_call in enumerate(tool_calls):
+                    if not isinstance(tool_call, dict):
+                        continue
+                    call_id = _history_tool_call_id(tool_call) or _canonical_id(
+                        "hermes_tool",
+                        {
+                            "sessionId": source_session_id,
+                            "messageId": message.get("id") or index,
+                            "callIndex": call_index,
+                        },
+                    )
+                    name, args = _history_tool_call_name_args(tool_call)
+                    active_tool_calls[call_id] = {
+                        "name": name,
+                        "args": args,
+                        "turnId": current_turn_id,
+                        "createdAt": created_at,
+                    }
+
+            item = {
+                "role": role,
+                "content": content if isinstance(content, str) else "",
+                "createdAt": created_at,
+            }
+            if current_turn_id is not None:
+                item["turnId"] = current_turn_id
+            history.append(item)
+            continue
+
+        if role == "tool":
+            call_id = str(message.get("tool_call_id") or "").strip()
+            call = active_tool_calls.pop(call_id, None) if call_id else None
+            name = str(message.get("tool_name") or "").strip()
+            if call is not None:
+                name = call["name"]
+                args = call["args"]
+                turn_id = call["turnId"]
+            else:
+                args = {}
+                turn_id = current_turn_id
+            if not call_id:
+                call_id = _canonical_id(
+                    "hermes_tool",
+                    {
+                        "sessionId": source_session_id,
+                        "messageId": message.get("id") or index,
+                        "toolName": name,
+                    },
+                )
+            append_tool_activity(
+                call_id=call_id,
+                name=name or "unknown_tool",
+                args=args,
+                turn_id=turn_id,
+                created_at=created_at,
+                result=content,
+            )
+            history.append(
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "createdAt": created_at,
+                    **({"turnId": turn_id} if turn_id is not None else {}),
+                }
+            )
+            continue
+
+        history.append(
+            {
+                "role": "assistant",
+                "content": "",
+                "createdAt": created_at,
+                **(
+                    {"turnId": current_turn_id}
+                    if current_turn_id is not None
+                    else {}
+                ),
+            }
+        )
+
+    final_created_at = (
+        last_created_at.isoformat().replace("+00:00", "Z")
+        if last_created_at is not None
+        else _iso_timestamp(None)
+    )
+    flush_unfinished(final_created_at)
+    return history, activities
 
 
 def _stored_model_config(session: Dict[str, Any]) -> Dict[str, Any]:
@@ -581,6 +985,7 @@ class T3AgentAdapter(BasePlatformAdapter):
 
     supports_async_delivery = True
     supports_code_blocks = True
+    supports_structured_tool_events = True
 
     def __init__(self, config: PlatformConfig):
         super().__init__(config, Platform("t3agent"))
@@ -1267,7 +1672,9 @@ class T3AgentAdapter(BasePlatformAdapter):
             user_turns = 0
             for message in messages:
                 role = str(message.get("role") or "")
-                if role == "user":
+                if role == "user" and not _is_synthetic_history_user(
+                    message.get("content")
+                ):
                     user_turns += 1
                     if raw_turn_count is not None and user_turns > raw_turn_count:
                         break
@@ -1352,34 +1759,22 @@ class T3AgentAdapter(BasePlatformAdapter):
                 if callable(set_reasoning):
                     set_reasoning(target_session_key, reasoning_config)
 
-            history: List[Dict[str, Any]] = []
-            for message in copied_messages:
-                role = str(message.get("role") or "")
-                content = message.get("content")
-                if role not in {"user", "assistant", "system"} or not isinstance(
-                    content, str
-                ):
-                    continue
-                history.append(
-                    {
-                        "role": role,
-                        "content": (
-                            re.sub(r"^\[[^\]\n]{1,80}\]\s+", "", content)
-                            if role == "user"
-                            else content
-                        ),
-                        "createdAt": _iso_timestamp(message.get("timestamp")),
-                    }
-                )
+            source = str(source_session.get("source") or "unknown")
+            history, activities = _build_imported_history(
+                source_session_id,
+                source,
+                copied_messages,
+            )
             return 201, {
                 "protocolVersion": PROTOCOL_VERSION,
                 "requestId": request_id,
                 "sourceSessionId": source_session_id,
                 "childSessionId": child_session_id,
                 "targetThreadId": target_thread_id,
-                "source": str(source_session.get("source") or "unknown"),
+                "source": source,
                 "title": child_title,
                 "messages": history,
+                "activities": activities,
                 **(
                     {"modelSelection": model_selection}
                     if model_selection is not None
@@ -1881,6 +2276,55 @@ class T3AgentAdapter(BasePlatformAdapter):
             raw_response=body if ok else None,
             retryable=not ok,
         )
+
+    def _tool_event_fields(
+        self,
+        chat_id: str,
+        tool_call_id: str,
+        name: str,
+        args: Any,
+        metadata: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        fields: Dict[str, Any] = {
+            "chatId": str(chat_id),
+            "toolCallId": str(tool_call_id),
+            "name": str(name),
+            "input": args if isinstance(args, dict) else {"value": args},
+        }
+        thread_id = _metadata_value(metadata, "threadId", "thread_id")
+        if thread_id:
+            fields["threadId"] = thread_id
+        source_message_id = self._source_message_id(chat_id, metadata)
+        if source_message_id:
+            fields["sourceMessageId"] = source_message_id
+        return fields
+
+    async def send_tool_started(
+        self,
+        chat_id: str,
+        tool_call_id: str,
+        name: str,
+        args: Any,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        fields = self._tool_event_fields(chat_id, tool_call_id, name, args, metadata)
+        await self._post_event("tool.started", fields)
+
+    async def send_tool_completed(
+        self,
+        chat_id: str,
+        tool_call_id: str,
+        name: str,
+        args: Any,
+        result: Any,
+        metadata: Optional[Dict[str, Any]] = None,
+        *,
+        is_error: bool = False,
+    ) -> None:
+        fields = self._tool_event_fields(chat_id, tool_call_id, name, args, metadata)
+        fields["result"] = result
+        fields["isError"] = bool(is_error)
+        await self._post_event("tool.completed", fields)
 
     async def send_image_file(
         self,

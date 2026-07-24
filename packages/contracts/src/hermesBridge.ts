@@ -6,7 +6,9 @@ import {
   NonNegativeInt,
   ThreadId,
   TrimmedNonEmptyString,
+  TurnId,
 } from "./baseSchemas.ts";
+import { OrchestrationThreadActivity } from "./orchestration.ts";
 
 export const HERMES_BRIDGE_MAX_IMAGES = 8;
 export const HERMES_BRIDGE_MAX_IMAGE_DATA_URL_CHARS = 14_000_000;
@@ -230,6 +232,28 @@ export const HermesBridgeEditMessageRequest = openStruct({
 });
 export type HermesBridgeEditMessageRequest = typeof HermesBridgeEditMessageRequest.Type;
 
+const ToolCallbackFields = {
+  ...CallbackFields,
+  ...DestinationFields,
+  toolCallId: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+  input: Schema.Unknown,
+} as const;
+
+export const HermesBridgeToolStartedRequest = openStruct({
+  ...ToolCallbackFields,
+  type: Schema.Literal("tool.started"),
+});
+export type HermesBridgeToolStartedRequest = typeof HermesBridgeToolStartedRequest.Type;
+
+export const HermesBridgeToolCompletedRequest = openStruct({
+  ...ToolCallbackFields,
+  type: Schema.Literal("tool.completed"),
+  result: Schema.Unknown,
+  isError: Schema.Boolean,
+});
+export type HermesBridgeToolCompletedRequest = typeof HermesBridgeToolCompletedRequest.Type;
+
 export const HermesBridgeDeleteMessageRequest = openStruct({
   ...CallbackFields,
   ...DestinationFields,
@@ -315,6 +339,8 @@ export type HermesBridgeThreadCreateRequest = typeof HermesBridgeThreadCreateReq
 export const HermesBridgeHermesToT3Request = Schema.Union([
   HermesBridgeSendMessageRequest,
   HermesBridgeEditMessageRequest,
+  HermesBridgeToolStartedRequest,
+  HermesBridgeToolCompletedRequest,
   HermesBridgeDeleteMessageRequest,
   HermesBridgeTypingRequest,
   HermesBridgeTurnCompleteRequest,
@@ -470,6 +496,7 @@ export const HermesBridgeHistoryMessage = openStruct({
   role: Schema.Literals(["user", "assistant", "system"]),
   content: Schema.String,
   createdAt: IsoDateTime,
+  turnId: Schema.optionalKey(TurnId),
 });
 export type HermesBridgeHistoryMessage = typeof HermesBridgeHistoryMessage.Type;
 
@@ -481,6 +508,7 @@ export const HermesBridgeSessionForkResponse = openStruct({
   source: TrimmedNonEmptyString,
   title: TrimmedNonEmptyString,
   messages: Schema.Array(HermesBridgeHistoryMessage),
+  activities: Schema.optionalKey(Schema.Array(OrchestrationThreadActivity)),
   modelSelection: Schema.optionalKey(HermesBridgeModelSelection),
 });
 export type HermesBridgeSessionForkResponse = typeof HermesBridgeSessionForkResponse.Type;
