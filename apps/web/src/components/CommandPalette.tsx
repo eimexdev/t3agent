@@ -25,6 +25,7 @@ import {
   CornerLeftUpIcon,
   FolderIcon,
   FolderPlusIcon,
+  GitForkIcon,
   LinkIcon,
   MessageSquareIcon,
   SettingsIcon,
@@ -137,6 +138,8 @@ import {
   buildSidebarProjectPickerEntries,
   buildSidebarProjectSnapshots,
 } from "../sidebarProjectGrouping";
+import { HermesSessionBrowser } from "./hermes/HermesSessionBrowser";
+import type { HermesConversationBrowserMode } from "./hermes/HermesSessionBrowser.logic";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 
@@ -403,6 +406,12 @@ export function CommandPalette({ children }: { children: ReactNode }) {
       ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen
       : false,
   );
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const [hermesConversationBrowserMode, setHermesConversationBrowserMode] =
+    useState<HermesConversationBrowserMode | null>(null);
+  const openHermesConversationBrowser = useCallback((mode: HermesConversationBrowserMode) => {
+    setHermesConversationBrowserMode(mode);
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -447,8 +456,19 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           openIntent={state.openIntent}
           setOpen={setOpen}
           clearOpenIntent={clearOpenIntent}
+          openHermesConversationBrowser={openHermesConversationBrowser}
         />
       </CommandDialog>
+      {IS_T3_AGENT_MODE && primaryEnvironmentId ? (
+        <HermesSessionBrowser
+          environmentId={primaryEnvironmentId}
+          mode={hermesConversationBrowserMode ?? "open"}
+          open={hermesConversationBrowserMode !== null}
+          onOpenChange={(open) => {
+            if (!open) setHermesConversationBrowserMode(null);
+          }}
+        />
+      ) : null}
     </ComposerHandleContext>
   );
 }
@@ -458,6 +478,7 @@ function CommandPaletteDialog(props: {
   readonly openIntent: CommandPaletteOpenIntent | null;
   readonly setOpen: (open: boolean) => void;
   readonly clearOpenIntent: () => void;
+  readonly openHermesConversationBrowser: (mode: HermesConversationBrowserMode) => void;
 }) {
   if (!props.open) {
     return null;
@@ -468,6 +489,7 @@ function CommandPaletteDialog(props: {
       openIntent={props.openIntent}
       setOpen={props.setOpen}
       clearOpenIntent={props.clearOpenIntent}
+      openHermesConversationBrowser={props.openHermesConversationBrowser}
     />
   );
 }
@@ -476,9 +498,10 @@ function OpenCommandPaletteDialog(props: {
   readonly openIntent: CommandPaletteOpenIntent | null;
   readonly setOpen: (open: boolean) => void;
   readonly clearOpenIntent: () => void;
+  readonly openHermesConversationBrowser: (mode: HermesConversationBrowserMode) => void;
 }) {
   const navigate = useNavigate();
-  const { clearOpenIntent, openIntent, setOpen } = props;
+  const { clearOpenIntent, openHermesConversationBrowser, openIntent, setOpen } = props;
   const composerHandleRef = useComposerHandleContext();
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
@@ -1187,6 +1210,49 @@ function OpenCommandPaletteDialog(props: {
         });
       },
     });
+    if (primaryEnvironmentId) {
+      actionItems.push(
+        {
+          kind: "action",
+          value: "action:open-hermes-conversation",
+          searchTerms: [
+            "open hermes conversation",
+            "browse conversations",
+            "sessions",
+            "resume",
+            "/sessions",
+            "/resume",
+            "import",
+            "discord",
+            "telegram",
+          ],
+          title: "Open Hermes conversation…",
+          description: "Open a T3 Agent conversation or import one from another Hermes gateway",
+          icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
+          run: async () => {
+            openHermesConversationBrowser("open");
+          },
+        },
+        {
+          kind: "action",
+          value: "action:fork-hermes-conversation",
+          searchTerms: [
+            "fork hermes conversation",
+            "fork conversation",
+            "branch",
+            "copy",
+            "/fork",
+            "/branch",
+          ],
+          title: "Fork conversation…",
+          description: "Select any Hermes conversation and create a new child copy",
+          icon: <GitForkIcon className={ITEM_ICON_CLASS} />,
+          run: async () => {
+            openHermesConversationBrowser("fork");
+          },
+        },
+      );
+    }
   } else if (projects.length > 0) {
     const activeProjectTitle =
       projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??

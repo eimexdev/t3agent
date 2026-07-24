@@ -20,9 +20,14 @@ import {
 import { Input } from "~/components/ui/input";
 import { formatHermesSourceLabel } from "~/hermesLineage";
 import { cn } from "~/lib/utils";
+import {
+  type HermesConversationBrowserMode,
+  resolveHermesConversationSelection,
+} from "./HermesSessionBrowser.logic";
 
 interface HermesSessionBrowserProps {
   readonly environmentId: EnvironmentId;
+  readonly mode?: HermesConversationBrowserMode;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
 }
@@ -44,6 +49,7 @@ function sessionTimestamp(session: HermesBridgeSessionSummary): string {
 
 export function HermesSessionBrowser({
   environmentId,
+  mode = "open",
   open,
   onOpenChange,
 }: HermesSessionBrowserProps) {
@@ -115,7 +121,7 @@ export function HermesSessionBrowser({
     [environmentId, navigate, onOpenChange],
   );
 
-  const importSession = useCallback(
+  const forkSession = useCallback(
     async (session: HermesBridgeSessionSummary, forceNew: boolean) => {
       setBusySessionId(session.sessionId);
       setError(null);
@@ -129,21 +135,46 @@ export function HermesSessionBrowser({
       setBusySessionId(null);
       if (result._tag === "Failure") {
         const cause = squashAtomCommandFailure(result);
-        setError(cause instanceof Error ? cause.message : "Unable to import the conversation.");
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : mode === "fork"
+              ? "Unable to fork the conversation."
+              : "Unable to import the conversation.",
+        );
         return;
       }
       openThread(result.value.threadId);
     },
-    [environmentId, forkConversation, openThread],
+    [environmentId, forkConversation, mode, openThread],
+  );
+
+  const selectSession = useCallback(
+    (session: HermesBridgeSessionSummary) => {
+      const selection = resolveHermesConversationSelection({ mode, session });
+      switch (selection.type) {
+        case "open-thread":
+          openThread(selection.threadId);
+          return;
+        case "fork-session":
+          void forkSession(session, selection.forceNew);
+          return;
+      }
+    },
+    [forkSession, mode, openThread],
   );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogPopup className="h-[min(42rem,calc(100dvh-2rem))] w-[min(42rem,calc(100vw-2rem))] max-w-none">
         <DialogHeader>
-          <DialogTitle>Hermes conversations</DialogTitle>
+          <DialogTitle>
+            {mode === "fork" ? "Fork conversation" : "Open Hermes conversation"}
+          </DialogTitle>
           <DialogDescription>
-            Open a T3 Agent conversation or import a child copy from another Hermes gateway.
+            {mode === "fork"
+              ? "Select any Hermes conversation to create a new child copy."
+              : "Open a T3 Agent conversation or import a child copy from another Hermes gateway."}
           </DialogDescription>
           <div className="relative pt-2">
             <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -181,10 +212,7 @@ export function HermesSessionBrowser({
                 </div>
                 <div className="space-y-1">
                   {group.sessions.map((session) => {
-                    const existingThreadId =
-                      session.source === "t3agent"
-                        ? session.threadId
-                        : session.importedThreadIds?.[0];
+                    const selection = resolveHermesConversationSelection({ mode, session });
                     const busy = busySessionId === session.sessionId;
                     return (
                       <div
@@ -198,13 +226,7 @@ export function HermesSessionBrowser({
                           type="button"
                           className="min-w-0 flex-1 text-left outline-none"
                           disabled={busy}
-                          onClick={() => {
-                            if (existingThreadId) {
-                              openThread(existingThreadId);
-                              return;
-                            }
-                            void importSession(session, false);
-                          }}
+                          onClick={() => selectSession(session)}
                         >
                           <div className="truncate font-medium text-sm">
                             {sessionTitle(session)}
@@ -225,14 +247,17 @@ export function HermesSessionBrowser({
                           </div>
                         </button>
                         {busy ? <LoaderCircleIcon className="size-4 animate-spin" /> : null}
-                        {session.source !== "t3agent" && existingThreadId && !busy ? (
+                        {mode === "open" &&
+                        session.source !== "t3agent" &&
+                        selection.type === "open-thread" &&
+                        !busy ? (
                           <Button
                             type="button"
                             size="xs"
                             variant="ghost"
                             className="shrink-0 text-muted-foreground"
                             title="Import another child copy"
-                            onClick={() => void importSession(session, true)}
+                            onClick={() => void forkSession(session, true)}
                           >
                             <ImportIcon className="size-3.5" />
                             Import another copy
