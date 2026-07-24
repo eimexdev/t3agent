@@ -798,6 +798,7 @@ const ThreadMessageImportCommand = Schema.Struct({
   messageId: MessageId,
   role: OrchestrationMessageRole,
   text: Schema.String,
+  turnId: Schema.optional(TurnId),
   createdAt: IsoDateTime,
 });
 

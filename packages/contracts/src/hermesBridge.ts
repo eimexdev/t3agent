@@ -6,7 +6,9 @@ import {
   NonNegativeInt,
   ThreadId,
   TrimmedNonEmptyString,
+  TurnId,
 } from "./baseSchemas.ts";
+import { OrchestrationThreadActivity } from "./orchestration.ts";
 
 export const HERMES_BRIDGE_MAX_IMAGES = 8;
 export const HERMES_BRIDGE_MAX_IMAGE_DATA_URL_CHARS = 14_000_000;
@@ -440,6 +442,7 @@ export const HermesBridgeHistoryMessage = openStruct({
   role: Schema.Literals(["user", "assistant", "system"]),
   content: Schema.String,
   createdAt: IsoDateTime,
+  turnId: Schema.optionalKey(TurnId),
 });
 export type HermesBridgeHistoryMessage = typeof HermesBridgeHistoryMessage.Type;
 
@@ -451,6 +454,7 @@ export const HermesBridgeSessionForkResponse = openStruct({
   source: TrimmedNonEmptyString,
   title: TrimmedNonEmptyString,
   messages: Schema.Array(HermesBridgeHistoryMessage),
+  activities: Schema.optionalKey(Schema.Array(OrchestrationThreadActivity)),
   modelSelection: Schema.optionalKey(HermesBridgeModelSelection),
 });
 export type HermesBridgeSessionForkResponse = typeof HermesBridgeSessionForkResponse.Type;

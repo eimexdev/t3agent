@@ -369,6 +369,7 @@ async def test_session_fork_creates_child_copy_and_binds_target_thread(
             assert session_id == "discord-source"
             return [
                 {
+                    "id": 1,
                     "role": "user",
                     "content": (
                         "[Triggering message id: `123` — use as `message_id` for "
@@ -380,12 +381,35 @@ async def test_session_fork_creates_child_copy_and_binds_target_thread(
                     "timestamp": 10,
                 },
                 {
+                    "id": 2,
                     "role": "assistant",
                     "content": "",
-                    "tool_calls": [{"name": "search"}],
+                    "reasoning_content": "I should inspect the relevant files.",
+                    "tool_calls": [
+                        {
+                            "id": "call-search",
+                            "function": {
+                                "name": "search_files",
+                                "arguments": '{"query":"notes"}',
+                            },
+                        }
+                    ],
                     "timestamp": 11,
                 },
-                {"role": "assistant", "content": "first answer", "timestamp": 12},
+                {
+                    "id": 3,
+                    "role": "tool",
+                    "content": "notes.txt",
+                    "tool_call_id": "call-search",
+                    "tool_name": "search_files",
+                    "timestamp": 11.5,
+                },
+                {
+                    "id": 4,
+                    "role": "assistant",
+                    "content": "first answer",
+                    "timestamp": 12,
+                },
                 {
                     "role": "user",
                     "content": (
@@ -470,6 +494,47 @@ async def test_session_fork_creates_child_copy_and_binds_target_thread(
         assert [message["content"] for message in payload["messages"]] == [
             "**Attached:** notes.txt\n\nfirst",
             "first answer",
+        ]
+        turn_id = payload["messages"][1]["turnId"]
+        assert turn_id.startswith("hermes_turn_")
+        assert payload["activities"] == [
+            {
+                "id": payload["activities"][0]["id"],
+                "tone": "info",
+                "kind": "task.progress",
+                "summary": "Reasoning update",
+                "payload": {
+                    "taskId": "hermes-reasoning:discord-source:1",
+                    "detail": "I should inspect the relevant files.",
+                },
+                "turnId": turn_id,
+                "sequence": 0,
+                "createdAt": "1970-01-01T00:00:11Z",
+            },
+            {
+                "id": payload["activities"][1]["id"],
+                "tone": "tool",
+                "kind": "tool.completed",
+                "summary": "Searched files",
+                "payload": {
+                    "itemType": "mcp_tool_call",
+                    "status": "completed",
+                    "title": "Searched files",
+                    "data": {
+                        "toolCallId": "call-search",
+                        "item": {
+                            "toolCallId": "call-search",
+                            "name": "search_files",
+                            "input": {"query": "notes"},
+                            "result": {"output": "notes.txt"},
+                        },
+                    },
+                    "detail": "notes.txt",
+                },
+                "turnId": turn_id,
+                "sequence": 1,
+                "createdAt": "1970-01-01T00:00:11.500000Z",
+            },
         ]
         assert created[0]["source"] == "t3agent"
         assert created[0]["parent_session_id"] == "discord-source"

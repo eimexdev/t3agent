@@ -132,6 +132,28 @@ describe("HermesBridgeClient", () => {
             content: "Continue this",
             createdAt: "2026-07-23T10:00:00.000Z",
           },
+          {
+            role: "assistant",
+            content: "Done",
+            createdAt: "2026-07-23T10:00:02.000Z",
+            turnId: "hermes-turn-1",
+          },
+        ],
+        activities: [
+          {
+            id: "hermes-activity-1",
+            tone: "tool",
+            kind: "tool.completed",
+            summary: "Searched files",
+            payload: {
+              itemType: "mcp_tool_call",
+              status: "completed",
+              data: { toolCallId: "call-1" },
+            },
+            turnId: "hermes-turn-1",
+            sequence: 0,
+            createdAt: "2026-07-23T10:00:01.000Z",
+          },
         ],
       }),
     );
@@ -148,6 +170,8 @@ describe("HermesBridgeClient", () => {
       });
 
       assert.strictEqual(result.childSessionId, "t3-child");
+      assert.strictEqual(result.messages[1]?.turnId, "hermes-turn-1");
+      assert.strictEqual(result.activities?.[0]?.kind, "tool.completed");
       const call = execute.mock.calls[0];
       assert.ok(call);
       const [request] = call;
@@ -223,6 +247,7 @@ describe("HermesBridgeClient", () => {
         protocolVersion: 1,
         requestId: "request-interrupt",
         type: "turn.interrupt",
+        chatId: "t3agent",
         threadId: "thread-1",
       }),
     ],
