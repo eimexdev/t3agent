@@ -132,7 +132,7 @@ async def test_typing_lifecycle_preserves_thread_routing(
                 "threadId": "thread-1",
                 "sourceMessageId": "hermes-user:message-1",
             },
-            metadata,
+            None,
         ),
         (
             "typing.set",
@@ -142,9 +142,53 @@ async def test_typing_lifecycle_preserves_thread_routing(
                 "threadId": "thread-1",
                 "sourceMessageId": "hermes-user:message-1",
             },
-            metadata,
+            None,
         ),
     ]
+
+
+@pytest.mark.asyncio
+async def test_typing_start_and_stop_use_distinct_idempotency_keys(
+    fake_platform: SimpleNamespace,
+) -> None:
+    received: List[Dict[str, Any]] = []
+
+    async def receive(request: web.Request) -> web.Response:
+        frame = await request.json()
+        received.append(frame)
+        return web.json_response(
+            {
+                "protocolVersion": 1,
+                "requestId": frame["requestId"],
+                "deliveryId": frame["deliveryId"],
+                "status": "accepted",
+            }
+        )
+
+    app = web.Application()
+    app.router.add_post("/api/hermes/hermes-test/events", receive)
+    server = TestServer(app)
+    await server.start_server()
+    adapter = adapter_module.T3AgentAdapter(make_config(bridge_url=str(server.make_url("/"))))
+    adapter.bridge_url = adapter.bridge_url.rstrip("/")
+    adapter._client = ClientSession()
+    metadata = {
+        "threadId": "thread-1",
+        "sourceMessageId": "hermes-user:message-1",
+        "requestId": "shared-request",
+        "deliveryId": "shared-delivery",
+    }
+    try:
+        await adapter.send_typing("chat-1", metadata)
+        await adapter.stop_typing("chat-1", metadata)
+
+        assert [frame["active"] for frame in received] == [True, False]
+        assert received[0]["requestId"] != received[1]["requestId"]
+        assert received[0]["deliveryId"] != received[1]["deliveryId"]
+    finally:
+        await adapter._client.close()
+        adapter._client = None
+        await server.close()
 
 
 async def wait_until(predicate: Any, *, timeout: float = 2.0) -> None:
