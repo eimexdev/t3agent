@@ -17,10 +17,15 @@ export class HermesBridgeRegistryError extends Schema.TaggedErrorClass<HermesBri
 export interface HermesBridgeReceiver {
   readonly token: string;
   readonly receive: (payload: unknown) => Effect.Effect<unknown, ProviderAdapterError>;
-  readonly client?: Pick<HermesBridgeClient, "listSessions" | "forkSession">;
+  readonly client?: Pick<HermesBridgeClient, "listSessions" | "forkSession" | "deleteSession">;
 }
 
-const receivers = new Map<ProviderInstanceId, HermesBridgeReceiver>();
+export interface HermesBridgeRegistration {
+  readonly instanceId: ProviderInstanceId;
+  readonly receiver: HermesBridgeReceiver;
+}
+
+const registrations = new Map<ProviderInstanceId, HermesBridgeRegistration>();
 
 function constantTimeEqual(left: string, right: string): boolean {
   const maximumLength = Math.max(left.length, right.length);
@@ -31,70 +36,74 @@ function constantTimeEqual(left: string, right: string): boolean {
   return difference === 0;
 }
 
-export const register = (instanceId: ProviderInstanceId, receiver: HermesBridgeReceiver) =>
-  Effect.sync(() => {
-    receivers.set(instanceId, receiver);
-  });
-
-export const unregister = (instanceId: ProviderInstanceId) =>
-  Effect.sync(() => {
-    receivers.delete(instanceId);
-  });
-
-export const getClient = (
+export const register = Effect.fn("HermesBridgeRegistry.register")(function* (
   instanceId: ProviderInstanceId,
-): Effect.Effect<
-  Pick<HermesBridgeClient, "listSessions" | "forkSession">,
-  HermesBridgeRegistryError
-> =>
-  Effect.suspend(() => {
-    const receiver = receivers.get(instanceId);
-    return receiver?.client
-      ? Effect.succeed(receiver.client)
-      : Effect.fail(
-          new HermesBridgeRegistryError({
-            operation: "lookup",
-            instanceId,
-            detail: receiver
-              ? "Hermes provider lifecycle client is unavailable."
-              : "Hermes provider instance is not registered.",
-          }),
-        );
+  receiver: HermesBridgeReceiver,
+): Effect.fn.Return<HermesBridgeRegistration> {
+  const registration = { instanceId, receiver } satisfies HermesBridgeRegistration;
+  yield* Effect.sync(() => {
+    registrations.set(instanceId, registration);
   });
+  return registration;
+});
 
-export const receive = (
+export const unregister = Effect.fn("HermesBridgeRegistry.unregister")(function* (
+  registration: HermesBridgeRegistration,
+): Effect.fn.Return<void> {
+  yield* Effect.sync(() => {
+    if (registrations.get(registration.instanceId) === registration) {
+      registrations.delete(registration.instanceId);
+    }
+  });
+});
+
+export const getClient = Effect.fn("HermesBridgeRegistry.getClient")(function* (
+  instanceId: ProviderInstanceId,
+): Effect.fn.Return<
+  Pick<HermesBridgeClient, "listSessions" | "forkSession" | "deleteSession">,
+  HermesBridgeRegistryError
+> {
+  const receiver = registrations.get(instanceId)?.receiver;
+  if (receiver?.client) {
+    return receiver.client;
+  }
+  return yield* new HermesBridgeRegistryError({
+    operation: "lookup",
+    instanceId,
+    detail: receiver
+      ? "Hermes provider lifecycle client is unavailable."
+      : "Hermes provider instance is not registered.",
+  });
+});
+
+export const receive = Effect.fn("HermesBridgeRegistry.receive")(function* (
   instanceId: ProviderInstanceId,
   token: string,
   payload: unknown,
-): Effect.Effect<unknown, HermesBridgeRegistryError> =>
-  Effect.suspend(() => {
-    const receiver = receivers.get(instanceId);
-    if (!receiver) {
-      return Effect.fail(
+): Effect.fn.Return<unknown, HermesBridgeRegistryError> {
+  const receiver = registrations.get(instanceId)?.receiver;
+  if (!receiver) {
+    return yield* new HermesBridgeRegistryError({
+      operation: "lookup",
+      instanceId,
+      detail: "Hermes provider instance is not registered.",
+    });
+  }
+  if (!receiver.token || !constantTimeEqual(receiver.token, token)) {
+    return yield* new HermesBridgeRegistryError({
+      operation: "authenticate",
+      instanceId,
+      detail: "Invalid bridge credential.",
+    });
+  }
+  return yield* receiver.receive(payload).pipe(
+    Effect.mapError(
+      (cause) =>
         new HermesBridgeRegistryError({
-          operation: "lookup",
+          operation: "receive",
           instanceId,
-          detail: "Hermes provider instance is not registered.",
+          detail: cause.message,
         }),
-      );
-    }
-    if (!receiver.token || !constantTimeEqual(receiver.token, token)) {
-      return Effect.fail(
-        new HermesBridgeRegistryError({
-          operation: "authenticate",
-          instanceId,
-          detail: "Invalid bridge credential.",
-        }),
-      );
-    }
-    return receiver.receive(payload).pipe(
-      Effect.mapError(
-        (cause) =>
-          new HermesBridgeRegistryError({
-            operation: "receive",
-            instanceId,
-            detail: cause.message,
-          }),
-      ),
-    );
-  });
+    ),
+  );
+});

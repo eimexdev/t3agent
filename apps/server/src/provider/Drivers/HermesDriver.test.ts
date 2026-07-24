@@ -60,7 +60,7 @@ it("surfaces the active Hermes identity and canonical commands plus aliases", ()
       slug: "openrouter::anthropic/claude-sonnet-4",
       name: "anthropic/claude-sonnet-4",
       subProvider: "openrouter",
-      isCustom: true,
+      isCustom: false,
       isDefault: true,
       capabilities: {
         optionDescriptors: [
@@ -69,11 +69,12 @@ it("surfaces the active Hermes identity and canonical commands plus aliases", ()
             label: "Reasoning",
             type: "select",
             options: [
+              { id: "reset", label: "Default (High)", isDefault: true },
               { id: "none", label: "None" },
-              { id: "medium", label: "Medium", isDefault: true },
+              { id: "medium", label: "Medium" },
               { id: "high", label: "High" },
             ],
-            currentValue: "high",
+            currentValue: "reset",
           },
         ],
       },
@@ -82,7 +83,7 @@ it("surfaces the active Hermes identity and canonical commands plus aliases", ()
       slug: "openai-codex::gpt-5.6-sol",
       name: "gpt-5.6-sol",
       subProvider: "openai-codex",
-      isCustom: true,
+      isCustom: false,
       isDefault: false,
       capabilities: {
         optionDescriptors: [
@@ -91,10 +92,11 @@ it("surfaces the active Hermes identity and canonical commands plus aliases", ()
             label: "Reasoning",
             type: "select",
             options: [
-              { id: "low", label: "Low", isDefault: true },
+              { id: "reset", label: "Default (High)", isDefault: true },
+              { id: "low", label: "Low" },
               { id: "high", label: "High" },
             ],
-            currentValue: "low",
+            currentValue: "reset",
           },
         ],
       },
@@ -102,7 +104,21 @@ it("surfaces the active Hermes identity and canonical commands plus aliases", ()
   ]);
   assert.deepEqual(
     snapshot.slashCommands.map(({ name }) => name),
-    ["new", "sessions", "resume", "fork", "reset"],
+    ["new", "reset", "sessions", "resume", "fork", "branch"],
   );
   assert.equal(snapshot.slashCommands[0]?.input, undefined);
+});
+
+it("does not invent a model inventory while the Hermes bridge is unavailable", () => {
+  const snapshot = makeHermesProviderSnapshot({
+    instanceId: ProviderInstanceId.make("hermes"),
+    displayName: undefined,
+    accentColor: undefined,
+    enabled: true,
+    error: "Hermes bridge is unavailable.",
+    checkedAt: "2026-07-22T00:00:00.000Z",
+  });
+
+  assert.equal(snapshot.status, "error");
+  assert.deepEqual(snapshot.models, []);
 });

@@ -8,6 +8,7 @@ const originalWindow = globalThis.window;
 
 afterEach(() => {
   vi.resetModules();
+  vi.unstubAllEnvs();
 
   if (originalWindow === undefined) {
     Reflect.deleteProperty(globalThis, "window");
@@ -18,6 +19,27 @@ afterEach(() => {
 });
 
 describe("branding", () => {
+  it("uses T3 Agent branding when the Hermes-native product mode is enabled", async () => {
+    vi.stubEnv("VITE_T3_AGENT_MODE", "true");
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        desktopBridge: {
+          getAppBranding: () => ({
+            baseName: "T3 Code",
+            stageLabel: "Nightly",
+            displayName: "T3 Code (Nightly)",
+          }),
+        },
+      },
+    });
+
+    const branding = await import("./branding");
+
+    expect(branding.APP_BASE_NAME).toBe("T3 Agent");
+    expect(branding.APP_DISPLAY_NAME).toBe("T3 Agent (Nightly)");
+  });
+
   it("uses injected desktop branding when available", async () => {
     Object.defineProperty(globalThis, "window", {
       configurable: true,

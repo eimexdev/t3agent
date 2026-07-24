@@ -657,6 +657,51 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
         ]);
       });
 
+      it("retains the authoritative Hermes inventory when the bridge becomes unavailable", () => {
+        const previousProvider = {
+          instanceId: ProviderInstanceId.make("hermes"),
+          driver: ProviderDriverKind.make("hermes"),
+          status: "ready",
+          enabled: true,
+          installed: true,
+          auth: { status: "authenticated" },
+          checkedAt: "2026-07-23T00:00:00.000Z",
+          version: null,
+          models: [
+            {
+              slug: "openai-codex::gpt-5.6-sol",
+              name: "gpt-5.6-sol",
+              subProvider: "openai-codex",
+              isCustom: false,
+              isDefault: true,
+              capabilities: null,
+            },
+          ],
+          slashCommands: [],
+          skills: [],
+        } as const satisfies ServerProvider;
+        const failedProvider = {
+          ...previousProvider,
+          status: "error",
+          auth: { status: "unknown" },
+          checkedAt: "2026-07-23T00:01:00.000Z",
+          models: [
+            {
+              slug: "active",
+              name: "Active Hermes model",
+              isCustom: true,
+              isDefault: true,
+              capabilities: null,
+            },
+          ],
+          message: "Hermes bridge is unavailable.",
+        } satisfies ServerProvider;
+
+        assert.deepStrictEqual(mergeProviderSnapshot(previousProvider, failedProvider).models, [
+          ...previousProvider.models,
+        ]);
+      });
+
       it("retains stale OpenCode models when a refresh fails", () => {
         const previousProvider = {
           instanceId: ProviderInstanceId.make("opencode"),

@@ -85,6 +85,23 @@
       }
     </style>
     <title>T3 Code (Alpha)</title>
+    <script>
+      (() => {
+        const configuredMode = "%VITE_T3_AGENT_MODE%".trim().toLowerCase();
+        const isT3Agent =
+          configuredMode === "1" || configuredMode === "true" || configuredMode === "t3agent";
+        if (!isT3Agent) return;
+
+        document.documentElement.dataset.productMode = "t3agent";
+        document.title = "T3 Agent (Alpha)";
+        window.addEventListener("DOMContentLoaded", () => {
+          const splashCard = document.getElementById("boot-shell-card");
+          const splashLogo = document.getElementById("boot-shell-logo");
+          splashCard?.setAttribute("aria-label", "T3 Agent splash screen");
+          splashLogo?.setAttribute("alt", "T3 Agent");
+        });
+      })();
+    </script>
   </head>
   <body>
     <div id="root">

@@ -2,6 +2,7 @@ import {
   HERMES_BRIDGE_PROTOCOL_VERSION,
   HermesBridgeAcknowledgement,
   HermesBridgeCapabilitiesResponse,
+  HermesBridgeSessionDeleteRequest,
   HermesBridgeSessionForkRequest,
   HermesBridgeSessionForkResponse,
   HermesBridgeSessionListResponse,
@@ -29,6 +30,9 @@ export interface HermesBridgeClient {
   readonly forkSession: (
     request: HermesBridgeSessionForkRequest,
   ) => Effect.Effect<HermesBridgeSessionForkResponse, ProviderAdapterRequestError>;
+  readonly deleteSession: (
+    request: HermesBridgeSessionDeleteRequest,
+  ) => Effect.Effect<HermesBridgeAcknowledgement, ProviderAdapterRequestError>;
 }
 
 function requestPath(request: HermesBridgeT3ToHermesRequest): string {
@@ -99,15 +103,29 @@ export function makeHermesBridgeClient(input: {
     Effect.mapError(mapRequestError("sessions.list")),
   );
 
-  const forkSession: HermesBridgeClient["forkSession"] = (request) =>
-    HttpClientRequest.post(`${baseUrl}/v1/sessions/fork`).pipe(
-      authorize,
-      HttpClientRequest.setHeader("idempotency-key", request.requestId),
-      HttpClientRequest.bodyJsonUnsafe(request),
-      execute.execute,
-      Effect.flatMap(HttpClientResponse.schemaBodyJson(HermesBridgeSessionForkResponse)),
-      Effect.mapError(mapRequestError("session.fork")),
-    );
+  const forkSession = Effect.fn("HermesBridgeClient.forkSession")(
+    (request: HermesBridgeSessionForkRequest) =>
+      HttpClientRequest.post(`${baseUrl}/v1/sessions/fork`).pipe(
+        authorize,
+        HttpClientRequest.setHeader("idempotency-key", request.requestId),
+        HttpClientRequest.bodyJsonUnsafe(request),
+        execute.execute,
+        Effect.flatMap(HttpClientResponse.schemaBodyJson(HermesBridgeSessionForkResponse)),
+        Effect.mapError(mapRequestError("session.fork")),
+      ),
+  );
+
+  const deleteSession = Effect.fn("HermesBridgeClient.deleteSession")(
+    (request: HermesBridgeSessionDeleteRequest) =>
+      HttpClientRequest.post(`${baseUrl}/v1/sessions/delete`).pipe(
+        authorize,
+        HttpClientRequest.setHeader("idempotency-key", request.requestId),
+        HttpClientRequest.bodyJsonUnsafe(request),
+        execute.execute,
+        Effect.flatMap(HttpClientResponse.schemaBodyJson(HermesBridgeAcknowledgement)),
+        Effect.mapError(mapRequestError("session.delete")),
+      ),
+  );
 
   const send: HermesBridgeClient["send"] = (request) =>
     HttpClientRequest.post(`${baseUrl}${requestPath(request)}`).pipe(
@@ -119,5 +137,5 @@ export function makeHermesBridgeClient(input: {
       Effect.mapError(mapRequestError(request.type)),
     );
 
-  return { getCapabilities, listSessions, forkSession, send };
+  return { getCapabilities, listSessions, forkSession, deleteSession, send };
 }

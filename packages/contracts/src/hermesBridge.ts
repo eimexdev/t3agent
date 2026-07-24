@@ -44,6 +44,9 @@ export type HermesBridgeThreadId = typeof HermesBridgeThreadId.Type;
 export const HermesBridgeSessionKey = makeBridgeId("HermesBridgeSessionKey");
 export type HermesBridgeSessionKey = typeof HermesBridgeSessionKey.Type;
 
+export const HermesBridgeSessionId = makeBridgeId("HermesBridgeSessionId");
+export type HermesBridgeSessionId = typeof HermesBridgeSessionId.Type;
+
 export const HermesBridgeProviderRequestId = makeBridgeId("HermesBridgeProviderRequestId");
 export type HermesBridgeProviderRequestId = typeof HermesBridgeProviderRequestId.Type;
 
@@ -112,6 +115,13 @@ export type HermesBridgeChoice = typeof HermesBridgeChoice.Type;
 
 // T3 Agent -> Hermes
 
+export const HermesBridgeModelSelection = openStruct({
+  provider: TrimmedNonEmptyString,
+  model: TrimmedNonEmptyString,
+  reasoningEffort: Schema.optionalKey(TrimmedNonEmptyString),
+});
+export type HermesBridgeModelSelection = typeof HermesBridgeModelSelection.Type;
+
 export const HermesBridgeInboundMessageRequest = openStruct({
   ...RequestFields,
   type: Schema.Literal("message.submit"),
@@ -120,22 +130,29 @@ export const HermesBridgeInboundMessageRequest = openStruct({
   threadId: Schema.optionalKey(HermesBridgeThreadId),
   user: HermesBridgeUser,
   content: Schema.String,
-  model: Schema.optionalKey(TrimmedNonEmptyString),
-  modelProvider: Schema.optionalKey(TrimmedNonEmptyString),
-  reasoningEffort: Schema.optionalKey(TrimmedNonEmptyString),
+  modelSelection: Schema.optionalKey(HermesBridgeModelSelection),
   images: Schema.optionalKey(
     Schema.Array(HermesBridgeImageAttachment).check(Schema.isMaxLength(HERMES_BRIDGE_MAX_IMAGES)),
   ),
 });
 export type HermesBridgeInboundMessageRequest = typeof HermesBridgeInboundMessageRequest.Type;
 
-export const HermesBridgeInterruptRequest = openStruct({
-  ...RequestFields,
-  type: Schema.Literal("turn.interrupt"),
-  sessionKey: Schema.optionalKey(HermesBridgeSessionKey),
-  chatId: Schema.optionalKey(HermesBridgeChatId),
-  threadId: Schema.optionalKey(HermesBridgeThreadId),
-});
+export const HermesBridgeInterruptRequest = Schema.Union([
+  openStruct({
+    ...RequestFields,
+    type: Schema.Literal("turn.interrupt"),
+    sessionKey: HermesBridgeSessionKey,
+    chatId: Schema.optionalKey(HermesBridgeChatId),
+    threadId: Schema.optionalKey(HermesBridgeThreadId),
+  }),
+  openStruct({
+    ...RequestFields,
+    type: Schema.Literal("turn.interrupt"),
+    sessionKey: Schema.optionalKey(HermesBridgeSessionKey),
+    chatId: HermesBridgeChatId,
+    threadId: Schema.optionalKey(HermesBridgeThreadId),
+  }),
+]);
 export type HermesBridgeInterruptRequest = typeof HermesBridgeInterruptRequest.Type;
 
 export const HermesBridgeApprovalResponseRequest = openStruct({
@@ -185,7 +202,7 @@ export type HermesBridgeT3ToHermesRequest = typeof HermesBridgeT3ToHermesRequest
 // Hermes -> T3 Agent callbacks
 
 const DestinationFields = {
-  chatId: Schema.optionalKey(HermesBridgeChatId),
+  chatId: HermesBridgeChatId,
   threadId: Schema.optionalKey(HermesBridgeThreadId),
   sourceMessageId: Schema.optionalKey(MessageId),
 } as const;
@@ -382,12 +399,12 @@ export const HermesBridgeThreadCreateResponse = openStruct({
 export type HermesBridgeThreadCreateResponse = typeof HermesBridgeThreadCreateResponse.Type;
 
 export const HermesBridgeSessionSummary = openStruct({
-  sessionId: TrimmedNonEmptyString,
+  sessionId: HermesBridgeSessionId,
   source: TrimmedNonEmptyString,
   title: Schema.optionalKey(TrimmedNonEmptyString),
   model: Schema.optionalKey(TrimmedNonEmptyString),
   threadId: Schema.optionalKey(ThreadId),
-  parentSessionId: Schema.optionalKey(TrimmedNonEmptyString),
+  parentSessionId: Schema.optionalKey(HermesBridgeSessionId),
   startedAt: IsoDateTime,
   endedAt: Schema.optionalKey(IsoDateTime),
   messageCount: NonNegativeInt,
@@ -404,11 +421,20 @@ export type HermesBridgeSessionListResponse = typeof HermesBridgeSessionListResp
 export const HermesBridgeSessionForkRequest = openStruct({
   ...RequestFields,
   type: Schema.Literal("session.fork"),
-  sourceSessionId: TrimmedNonEmptyString,
+  sourceSessionId: HermesBridgeSessionId,
+  childSessionId: HermesBridgeSessionId,
   targetThreadId: ThreadId,
   userTurnCount: Schema.optionalKey(NonNegativeInt),
 });
 export type HermesBridgeSessionForkRequest = typeof HermesBridgeSessionForkRequest.Type;
+
+export const HermesBridgeSessionDeleteRequest = openStruct({
+  ...RequestFields,
+  type: Schema.Literal("session.delete"),
+  sessionId: HermesBridgeSessionId,
+  targetThreadId: ThreadId,
+});
+export type HermesBridgeSessionDeleteRequest = typeof HermesBridgeSessionDeleteRequest.Type;
 
 export const HermesBridgeHistoryMessage = openStruct({
   role: Schema.Literals(["user", "assistant", "system"]),
@@ -419,18 +445,27 @@ export type HermesBridgeHistoryMessage = typeof HermesBridgeHistoryMessage.Type;
 
 export const HermesBridgeSessionForkResponse = openStruct({
   ...RequestFields,
-  sourceSessionId: TrimmedNonEmptyString,
-  childSessionId: TrimmedNonEmptyString,
+  sourceSessionId: HermesBridgeSessionId,
+  childSessionId: HermesBridgeSessionId,
   targetThreadId: ThreadId,
   source: TrimmedNonEmptyString,
   title: TrimmedNonEmptyString,
   messages: Schema.Array(HermesBridgeHistoryMessage),
+  modelSelection: Schema.optionalKey(HermesBridgeModelSelection),
 });
 export type HermesBridgeSessionForkResponse = typeof HermesBridgeSessionForkResponse.Type;
 
 export const HermesConversationForkInput = Schema.Struct({
-  sourceThreadId: Schema.optional(ThreadId),
-  sourceSessionId: Schema.optional(TrimmedNonEmptyString),
+  source: Schema.Union([
+    Schema.Struct({
+      type: Schema.Literal("thread"),
+      threadId: ThreadId,
+    }),
+    Schema.Struct({
+      type: Schema.Literal("session"),
+      sessionId: HermesBridgeSessionId,
+    }),
+  ]),
   userTurnCount: Schema.optional(NonNegativeInt),
   forceNew: Schema.optional(Schema.Boolean),
 });
@@ -446,7 +481,7 @@ export const HermesLineageMetadata = Schema.Struct({
   kind: Schema.Literals(["fork", "import"]),
   label: TrimmedNonEmptyString,
   sourceProvider: TrimmedNonEmptyString,
-  sourceSessionId: TrimmedNonEmptyString,
+  sourceSessionId: HermesBridgeSessionId,
   sourceThreadId: Schema.optional(ThreadId),
 });
 export type HermesLineageMetadata = typeof HermesLineageMetadata.Type;
@@ -454,6 +489,10 @@ export type HermesLineageMetadata = typeof HermesLineageMetadata.Type;
 export class HermesLifecycleError extends Schema.TaggedErrorClass<HermesLifecycleError>()(
   "HermesLifecycleError",
   {
+    operation: Schema.Literals(["sessions.list", "conversation.fork"]),
     message: TrimmedNonEmptyString,
+    detail: Schema.optional(TrimmedNonEmptyString),
+    sourceSessionId: Schema.optional(HermesBridgeSessionId),
+    sourceThreadId: Schema.optional(ThreadId),
   },
 ) {}

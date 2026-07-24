@@ -40,9 +40,11 @@ function reasoningLabel(value: string): string {
 
 const T3_AGENT_LIFECYCLE_COMMANDS: ReadonlyArray<ServerProviderSlashCommand> = [
   { name: "new", description: "Start a new T3 Agent conversation" },
+  { name: "reset", description: "Start a new T3 Agent conversation" },
   { name: "sessions", description: "Browse Hermes conversations" },
   { name: "resume", description: "Open or import a Hermes conversation" },
   { name: "fork", description: "Fork this conversation at its latest response" },
+  { name: "branch", description: "Fork this conversation at its latest response" },
 ];
 
 function hermesSlashCommands(
@@ -79,53 +81,61 @@ export function makeHermesProviderSnapshot(input: {
   const activeProvider = input.capabilities?.provider?.trim();
   const inventory = input.capabilities?.models ?? [];
   const models =
-    inventory.length > 0
-      ? inventory.map((model) => {
-          const reasoningEfforts = model.reasoningEfforts ?? [];
-          return {
-            slug: encodeHermesModelSlug(model.provider, model.slug),
-            name: model.name ?? model.slug,
-            subProvider: model.provider,
-            isCustom: true,
-            isDefault:
-              model.isDefault === true ||
-              (model.provider === activeProvider && model.slug === activeModel),
-            capabilities:
-              reasoningEfforts.length > 0
-                ? {
-                    optionDescriptors: [
-                      {
-                        id: "reasoningEffort",
-                        label: "Reasoning",
-                        type: "select" as const,
-                        options: reasoningEfforts.map((effort) => ({
-                          id: effort,
-                          label: reasoningLabel(effort),
-                          ...(effort === model.defaultReasoningEffort ? { isDefault: true } : {}),
-                        })),
-                        ...(model.provider === activeProvider &&
-                        model.slug === activeModel &&
-                        input.capabilities?.reasoningEffort
-                          ? { currentValue: input.capabilities.reasoningEffort }
-                          : model.defaultReasoningEffort
-                            ? { currentValue: model.defaultReasoningEffort }
-                            : {}),
-                      },
-                    ],
-                  }
-                : null,
-          };
-        })
-      : [
-          {
-            slug: activeProvider ? encodeHermesModelSlug(activeProvider, activeModel) : activeModel,
-            name: activeModel === "active" ? "Active Hermes model" : activeModel,
-            ...(activeProvider ? { subProvider: activeProvider } : {}),
-            isCustom: true,
-            isDefault: true,
-            capabilities: null,
-          },
-        ];
+    input.error && !input.capabilities
+      ? []
+      : inventory.length > 0
+        ? inventory.map((model) => {
+            const reasoningEfforts = model.reasoningEfforts ?? [];
+            const inheritedReasoning =
+              input.capabilities?.reasoningEffort ?? model.defaultReasoningEffort;
+            return {
+              slug: encodeHermesModelSlug(model.provider, model.slug),
+              name: model.name ?? model.slug,
+              subProvider: model.provider,
+              isCustom: false,
+              isDefault:
+                model.isDefault === true ||
+                (model.provider === activeProvider && model.slug === activeModel),
+              capabilities:
+                reasoningEfforts.length > 0
+                  ? {
+                      optionDescriptors: [
+                        {
+                          id: "reasoningEffort",
+                          label: "Reasoning",
+                          type: "select" as const,
+                          options: [
+                            {
+                              id: "reset",
+                              label: inheritedReasoning
+                                ? `Default (${reasoningLabel(inheritedReasoning)})`
+                                : "Default",
+                              isDefault: true,
+                            },
+                            ...reasoningEfforts.map((effort) => ({
+                              id: effort,
+                              label: reasoningLabel(effort),
+                            })),
+                          ],
+                          currentValue: "reset",
+                        },
+                      ],
+                    }
+                  : null,
+            };
+          })
+        : [
+            {
+              slug: activeProvider
+                ? encodeHermesModelSlug(activeProvider, activeModel)
+                : activeModel,
+              name: activeModel === "active" ? "Active Hermes model" : activeModel,
+              ...(activeProvider ? { subProvider: activeProvider } : {}),
+              isCustom: true,
+              isDefault: true,
+              capabilities: null,
+            },
+          ];
   return {
     instanceId: input.instanceId,
     driver: DRIVER_KIND,
@@ -213,12 +223,14 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
       httpClient,
     });
     const adapter = yield* makeHermesAdapter({ instanceId, client });
-    yield* HermesBridgeRegistry.register(instanceId, {
-      token: config.callbackToken,
-      receive: adapter.receiveCallback,
-      client,
-    });
-    yield* Effect.addFinalizer(() => HermesBridgeRegistry.unregister(instanceId));
+    yield* Effect.acquireRelease(
+      HermesBridgeRegistry.register(instanceId, {
+        token: config.callbackToken,
+        receive: adapter.receiveCallback,
+        client,
+      }),
+      HermesBridgeRegistry.unregister,
+    );
 
     const checkedAt = DateTime.formatIso(yield* DateTime.now);
     const initial = makeHermesProviderSnapshot({

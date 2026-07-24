@@ -22,14 +22,8 @@ import {
   type AuthEnvironmentScope,
   AuthSessionId,
   CommandId,
-  DEFAULT_PROVIDER_INTERACTION_MODE,
   type DiscoveredLocalServerList,
   EventId,
-  HERMES_BRIDGE_PROTOCOL_VERSION,
-  HermesBridgeRequestId,
-  HermesLineageMetadata,
-  HermesLifecycleError,
-  MessageId,
   type OrchestrationCommand,
   type GitActionProgressEvent,
   type GitManagerServiceError,
@@ -85,6 +79,7 @@ import {
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
+import { makeHermesConversationLifecycle } from "./provider/hermes/HermesConversationLifecycle.ts";
 import * as HermesBridgeRegistry from "./provider/hermes/HermesBridgeRegistry.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
@@ -533,11 +528,14 @@ const makeWsRpcLayer = (
       const serverEventId = randomUUID.pipe(Effect.map(EventId.make));
       const serverCommandId = (tag: string) =>
         randomUUID.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
-      const hermesLifecycleError = (cause: unknown, fallback: string) =>
-        new HermesLifecycleError({
-          message:
-            cause instanceof Error && cause.message.trim().length > 0 ? cause.message : fallback,
-        });
+      const hermesConversationLifecycle = makeHermesConversationLifecycle({
+        getClient: () => HermesBridgeRegistry.getClient(ProviderInstanceId.make("hermes")),
+        getSnapshot: projectionSnapshotQuery.getSnapshot,
+        getProviders: providerRegistry.getProviders,
+        dispatch: orchestrationEngine.dispatch,
+        randomUuid: randomUUID,
+        nowIso,
+      });
 
       const loadAuthAccessSnapshot = () =>
         Effect.all({
@@ -1574,195 +1572,13 @@ const makeWsRpcLayer = (
         [WS_METHODS.hermesSessionsList]: (_input) =>
           observeRpcEffect(
             WS_METHODS.hermesSessionsList,
-            Effect.gen(function* () {
-              const client = yield* HermesBridgeRegistry.getClient(
-                ProviderInstanceId.make("hermes"),
-              );
-              const [response, snapshot] = yield* Effect.all([
-                client.listSessions,
-                projectionSnapshotQuery.getSnapshot(),
-              ]);
-              const liveThreadIds = new Set(
-                snapshot.threads
-                  .filter((thread) => thread.deletedAt === null)
-                  .map((thread) => thread.id),
-              );
-              return {
-                ...response,
-                sessions: response.sessions.map((session) => {
-                  const { threadId, importedThreadIds, ...metadata } = session;
-                  return {
-                    ...metadata,
-                    ...(threadId && liveThreadIds.has(threadId) ? { threadId } : {}),
-                    ...(importedThreadIds
-                      ? {
-                          importedThreadIds: importedThreadIds.filter((candidate) =>
-                            liveThreadIds.has(candidate),
-                          ),
-                        }
-                      : {}),
-                  };
-                }),
-              };
-            }).pipe(
-              Effect.mapError((cause) =>
-                hermesLifecycleError(cause, "Unable to load Hermes sessions."),
-              ),
-            ),
+            hermesConversationLifecycle.listSessions,
             { "rpc.aggregate": "hermes" },
           ),
         [WS_METHODS.hermesConversationFork]: (input) =>
           observeRpcEffect(
             WS_METHODS.hermesConversationFork,
-            Effect.gen(function* () {
-              if (input.sourceThreadId === undefined && input.sourceSessionId === undefined) {
-                return yield* new HermesLifecycleError({
-                  message: "A source thread or Hermes session is required.",
-                });
-              }
-              const client = yield* HermesBridgeRegistry.getClient(
-                ProviderInstanceId.make("hermes"),
-              );
-              const [sessions, snapshot] = yield* Effect.all([
-                client.listSessions,
-                projectionSnapshotQuery.getSnapshot(),
-              ]);
-              const source =
-                input.sourceSessionId !== undefined
-                  ? sessions.sessions.find((session) => session.sessionId === input.sourceSessionId)
-                  : sessions.sessions.find((session) => session.threadId === input.sourceThreadId);
-              if (!source) {
-                return yield* new HermesLifecycleError({
-                  message: "The source Hermes session is no longer available.",
-                });
-              }
-              const existingThreadId = source.importedThreadIds?.find((threadId) =>
-                snapshot.threads.some(
-                  (thread) => thread.id === threadId && thread.deletedAt === null,
-                ),
-              );
-              if (
-                input.forceNew !== true &&
-                source.source !== "t3agent" &&
-                existingThreadId !== undefined
-              ) {
-                return {
-                  threadId: existingThreadId,
-                  existing: true,
-                };
-              }
-              const project = snapshot.projects.find((candidate) => candidate.deletedAt === null);
-              if (!project) {
-                return yield* new HermesLifecycleError({
-                  message: "T3 Agent's internal conversation workspace is unavailable.",
-                });
-              }
-              const providers = yield* providerRegistry.getProviders;
-              const hermesProvider = providers.find(
-                (provider) => provider.instanceId === ProviderInstanceId.make("hermes"),
-              );
-              const defaultModel =
-                hermesProvider?.models.find((model) => model.isDefault) ??
-                hermesProvider?.models[0];
-              if (!defaultModel) {
-                return yield* new HermesLifecycleError({
-                  message: "Hermes has not reported an available model.",
-                });
-              }
-
-              const threadId = ThreadId.make(yield* randomUUID);
-              const createdAt = yield* nowIso;
-              yield* orchestrationEngine.dispatch({
-                type: "thread.create",
-                commandId: yield* serverCommandId("hermes-conversation-fork-create"),
-                threadId,
-                projectId: project.id,
-                title: `${source.title ?? "Conversation"} copy`,
-                modelSelection: {
-                  instanceId: ProviderInstanceId.make("hermes"),
-                  model: defaultModel.slug,
-                },
-                runtimeMode: "full-access",
-                interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-                branch: null,
-                worktreePath: null,
-                createdAt,
-              });
-
-              const fork = yield* client
-                .forkSession({
-                  protocolVersion: HERMES_BRIDGE_PROTOCOL_VERSION,
-                  requestId: HermesBridgeRequestId.make(
-                    `conversation-fork:${source.sessionId}:${threadId}`,
-                  ),
-                  type: "session.fork",
-                  sourceSessionId: source.sessionId,
-                  targetThreadId: threadId,
-                  ...(input.userTurnCount !== undefined
-                    ? { userTurnCount: input.userTurnCount }
-                    : {}),
-                })
-                .pipe(
-                  Effect.onError(() =>
-                    serverCommandId("hermes-conversation-fork-cleanup").pipe(
-                      Effect.flatMap((commandId) =>
-                        orchestrationEngine.dispatch({
-                          type: "thread.delete",
-                          commandId,
-                          threadId,
-                        }),
-                      ),
-                      Effect.ignoreCause({ log: true }),
-                    ),
-                  ),
-                );
-              yield* orchestrationEngine.dispatch({
-                type: "thread.meta.update",
-                commandId: yield* serverCommandId("hermes-conversation-fork-title"),
-                threadId,
-                title: fork.title,
-              });
-              for (const [index, message] of fork.messages.entries()) {
-                yield* orchestrationEngine.dispatch({
-                  type: "thread.message.import",
-                  commandId: yield* serverCommandId(`hermes-history-${index}`),
-                  threadId,
-                  messageId: MessageId.make(`hermes-history:${fork.childSessionId}:${index}`),
-                  role: message.role,
-                  text: message.content,
-                  createdAt: message.createdAt,
-                });
-              }
-              const isT3Fork = source.source === "t3agent" && source.threadId !== undefined;
-              const lineage: HermesLineageMetadata = {
-                kind: isT3Fork ? "fork" : "import",
-                label: isT3Fork
-                  ? `Continued from ${source.title ?? "conversation"}`
-                  : `Imported from ${source.source}`,
-                sourceProvider: source.source,
-                sourceSessionId: source.sessionId,
-                ...(source.threadId ? { sourceThreadId: source.threadId } : {}),
-              };
-              const lineageJson = yield* Schema.encodeEffect(
-                Schema.fromJsonString(HermesLineageMetadata),
-              )(lineage);
-              yield* orchestrationEngine.dispatch({
-                type: "thread.message.import",
-                commandId: yield* serverCommandId("hermes-lineage"),
-                threadId,
-                messageId: MessageId.make(`hermes-lineage:${fork.childSessionId}`),
-                role: "system",
-                text: `t3agent-lineage:${lineageJson}`,
-                createdAt,
-              });
-              return { threadId, existing: false };
-            }).pipe(
-              Effect.mapError((cause) =>
-                cause._tag === "HermesLifecycleError"
-                  ? cause
-                  : hermesLifecycleError(cause, "Unable to create the Hermes conversation copy."),
-              ),
-            ),
+            hermesConversationLifecycle.forkConversation(input),
             { "rpc.aggregate": "hermes" },
           ),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) =>

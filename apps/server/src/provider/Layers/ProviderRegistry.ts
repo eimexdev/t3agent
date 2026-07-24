@@ -41,6 +41,7 @@ import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 
 import { ServerConfig } from "../../config.ts";
+import { isHermesModelSlug } from "../hermes/HermesModel.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
 import { ProviderRegistry, type ProviderRegistryShape } from "../Services/ProviderRegistry.ts";
 import {
@@ -106,9 +107,17 @@ const mergeProviderModels = (
   // bridge failure does not empty the picker.
   const hasAuthoritativeHermesInventory =
     provider.driver === ProviderDriverKind.make("hermes") &&
-    nextModels.some((model) => model.slug.includes("::"));
+    nextModels.some((model) => isHermesModelSlug(model.slug));
+  const isFailedHermesInventory =
+    provider.driver === ProviderDriverKind.make("hermes") &&
+    provider.status === "error" &&
+    !hasAuthoritativeHermesInventory;
   const shouldRetainMissingModels =
     !hasAuthoritativeHermesInventory && shouldRetainMissingProviderModels(provider);
+
+  if (isFailedHermesInventory && previousModels.length > 0) {
+    return previousModels;
+  }
 
   if (shouldRetainMissingModels && nextModels.length === 0 && previousModels.length > 0) {
     return previousModels;

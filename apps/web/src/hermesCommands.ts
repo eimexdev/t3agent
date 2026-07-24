@@ -3,8 +3,23 @@ import type { ServerProviderSlashCommand } from "@t3tools/contracts";
 export type T3AgentLifecycleCommand = "new" | "sessions" | "resume" | "fork";
 
 export function parseT3AgentLifecycleCommand(input: string): T3AgentLifecycleCommand | null {
-  const match = input.trim().match(/^\/(new|sessions|resume|fork)\s*$/i);
-  return match ? (match[1]!.toLocaleLowerCase() as T3AgentLifecycleCommand) : null;
+  const match = input.trim().match(/^\/(new|reset|sessions|resume|fork|branch)(?:\s+.*)?$/i);
+  const command = match?.[1];
+  if (!command) return null;
+  switch (command.toLocaleLowerCase()) {
+    case "new":
+    case "reset":
+      return "new";
+    case "sessions":
+      return "sessions";
+    case "resume":
+      return "resume";
+    case "fork":
+    case "branch":
+      return "fork";
+    default:
+      return null;
+  }
 }
 
 type HintUnit = {
@@ -80,7 +95,8 @@ function resolveAtomCompletion(atom: string, input: string): string | null {
     candidate.toLocaleLowerCase().startsWith(input.toLocaleLowerCase()),
   );
   if (matches.length !== 1) return null;
-  return matches[0]!.slice(input.length);
+  const match = matches[0];
+  return match ? match.slice(input.length) : null;
 }
 
 export function resolveCommandGhostHint(
@@ -89,14 +105,14 @@ export function resolveCommandGhostHint(
 ): string | null {
   const match = input.match(/^\/([^\s/]+)([ \t]*)([^\r\n]*)$/);
   if (!match) return null;
+  const [, rawCommand, commandSpacing = "", argumentText = ""] = match;
+  if (!rawCommand) return null;
   const command = commands.find(
-    (candidate) => candidate.name.toLocaleLowerCase() === match[1]!.toLocaleLowerCase(),
+    (candidate) => candidate.name.toLocaleLowerCase() === rawCommand.toLocaleLowerCase(),
   );
   const hint = command?.input?.hint.trim();
   if (!hint) return null;
 
-  const commandSpacing = match[2]!;
-  const argumentText = match[3]!;
   if (!commandSpacing && !argumentText) return ` ${hint}`;
 
   const units = parseHintUnits(hint);
@@ -113,9 +129,10 @@ export function resolveCommandGhostHint(
     return renderHintFrom(units, position.unitIndex, position.atomIndex);
   }
 
-  const currentInput = argumentAtoms.at(-1)!;
-  const currentUnit = units[position.unitIndex]!;
-  const currentAtom = currentUnit.atoms[position.atomIndex]!;
+  const currentInput = argumentAtoms.at(-1);
+  const currentUnit = units[position.unitIndex];
+  const currentAtom = currentUnit?.atoms[position.atomIndex];
+  if (currentInput === undefined || currentAtom === undefined) return null;
   const completion = resolveAtomCompletion(currentAtom, currentInput);
   const nextPosition = findAtomPosition(units, targetIndex + 1);
   const remaining = nextPosition

@@ -11,9 +11,15 @@ describe("parseT3AgentLifecycleCommand", () => {
     },
   );
 
-  it("does not intercept Hermes-native commands or arguments", () => {
+  it("keeps session-changing aliases and arguments on the native T3 lifecycle", () => {
+    expect(parseT3AgentLifecycleCommand("/reset")).toBe("new");
+    expect(parseT3AgentLifecycleCommand("/branch")).toBe("fork");
+    expect(parseT3AgentLifecycleCommand("/resume discord-session")).toBe("resume");
+    expect(parseT3AgentLifecycleCommand("/fork named-copy")).toBe("fork");
+  });
+
+  it("does not intercept unrelated Hermes-native commands", () => {
     expect(parseT3AgentLifecycleCommand("/restart")).toBeNull();
-    expect(parseT3AgentLifecycleCommand("/fork named-copy")).toBeNull();
   });
 });
 

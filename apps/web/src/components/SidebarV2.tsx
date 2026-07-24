@@ -240,13 +240,13 @@ function SidebarV2ThreadTooltip({
               <div className="min-w-0 wrap-break-word text-foreground/90">{environmentLabel}</div>
             </div>
           ) : null}
-          {thread.branch ? (
+          {!IS_T3_AGENT_MODE && thread.branch ? (
             <div className="flex min-w-0 items-center gap-2">
               <GitBranchIcon className="size-4 shrink-0 stroke-muted-foreground" />
               <div className="min-w-0 wrap-break-word text-foreground/90">{thread.branch}</div>
             </div>
           ) : null}
-          {branchMismatch ? (
+          {!IS_T3_AGENT_MODE && branchMismatch ? (
             <div className="flex min-w-0 items-start gap-2 text-warning">
               <CircleAlertIcon aria-hidden className="mt-0.5 size-4 shrink-0 stroke-current" />
               <div className="min-w-0 flex-1 wrap-break-word leading-5">
@@ -383,24 +383,28 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
 
   const gitCwd = thread.worktreePath ?? props.projectCwd;
   const gitStatus = useEnvironmentQuery(
-    (thread.branch != null || thread.worktreePath !== null) && gitCwd !== null
+    !IS_T3_AGENT_MODE && (thread.branch != null || thread.worktreePath !== null) && gitCwd !== null
       ? vcsEnvironment.status({
           environmentId: thread.environmentId,
           input: { cwd: gitCwd },
         })
       : null,
   );
-  const branchMismatch = resolveLocalCheckoutBranchMismatch({
-    effectiveEnvMode: thread.worktreePath === null ? "local" : "worktree",
-    activeWorktreePath: thread.worktreePath,
-    activeThreadBranch: thread.branch,
-    currentGitBranch: gitStatus.data?.refName ?? null,
-  });
-  const pr = resolveThreadPr({
-    threadBranch: thread.branch,
-    gitStatus: gitStatus.data,
-    hasDedicatedWorktree: thread.worktreePath !== null,
-  });
+  const branchMismatch = IS_T3_AGENT_MODE
+    ? null
+    : resolveLocalCheckoutBranchMismatch({
+        effectiveEnvMode: thread.worktreePath === null ? "local" : "worktree",
+        activeWorktreePath: thread.worktreePath,
+        activeThreadBranch: thread.branch,
+        currentGitBranch: gitStatus.data?.refName ?? null,
+      });
+  const pr = IS_T3_AGENT_MODE
+    ? null
+    : resolveThreadPr({
+        threadBranch: thread.branch,
+        gitStatus: gitStatus.data,
+        hasDedicatedWorktree: thread.worktreePath !== null,
+      });
   const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
   // Report the PR state up: the parent partitions rows with effectiveSettled,
   // and a merged/closed PR auto-settles a thread — data only rows have.
@@ -767,13 +771,13 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
             </div>
             <div className="mt-1 flex min-w-0">{title}</div>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground/75">
-              {thread.branch ? (
+              {!IS_T3_AGENT_MODE && thread.branch ? (
                 <span className="min-w-0 flex-1 truncate whitespace-nowrap">{thread.branch}</span>
               ) : (
                 <span className="flex-1" />
               )}
               {prBadge}
-              {diff ? (
+              {!IS_T3_AGENT_MODE && diff ? (
                 <span className="shrink-0 font-mono">
                   <span className="text-emerald-600 dark:text-emerald-400">+{diff.insertions}</span>{" "}
                   <span className="text-red-600 dark:text-red-400">−{diff.deletions}</span>

@@ -25,6 +25,7 @@ interface HermesAdapterTestHarnessShape {
   readonly adapter: HermesAdapter;
   readonly client: HermesBridgeClient;
   readonly sent: Array<HermesBridgeT3ToHermesRequest>;
+  readonly rejectNext: (message: string) => void;
 }
 
 class HermesAdapterTestHarness extends Context.Service<
@@ -36,6 +37,7 @@ const testLayer = Layer.effect(
   HermesAdapterTestHarness,
   Effect.gen(function* () {
     const sent: Array<HermesBridgeT3ToHermesRequest> = [];
+    let nextRejection: string | undefined;
     const client: HermesBridgeClient = {
       getCapabilities: Effect.succeed({
         protocolVersion: HERMES_BRIDGE_PROTOCOL_VERSION,
@@ -55,20 +57,32 @@ const testLayer = Layer.effect(
       send: (request) =>
         Effect.sync(() => {
           sent.push(request);
+          const rejection = nextRejection;
+          nextRejection = undefined;
           return {
             protocolVersion: HERMES_BRIDGE_PROTOCOL_VERSION,
             requestId: request.requestId,
-            status: "accepted" as const,
+            ...(rejection
+              ? { status: "rejected" as const, message: rejection }
+              : { status: "accepted" as const }),
           };
         }),
       listSessions: Effect.die("not used by adapter tests"),
       forkSession: () => Effect.die("not used by adapter tests"),
+      deleteSession: () => Effect.die("not used by adapter tests"),
     };
     const adapter = yield* makeHermesAdapter({
       instanceId: ProviderInstanceId.make("hermes-test"),
       client,
     });
-    return HermesAdapterTestHarness.of({ adapter, client, sent });
+    return HermesAdapterTestHarness.of({
+      adapter,
+      client,
+      sent,
+      rejectNext: (message) => {
+        nextRejection = message;
+      },
+    });
   }),
 ).pipe(
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-hermes-adapter-test-" })),
@@ -126,9 +140,29 @@ it.layer(testLayer)("HermesAdapter", (it) => {
       const request = sent[0];
       NodeAssert.equal(request?.type, "message.submit");
       if (request?.type !== "message.submit") return;
-      NodeAssert.equal(request.modelProvider, "openai-codex");
-      NodeAssert.equal(request.model, "gpt-5.6-sol");
-      NodeAssert.equal(request.reasoningEffort, "high");
+      NodeAssert.deepEqual(request.modelSelection, {
+        provider: "openai-codex",
+        model: "gpt-5.6-sol",
+        reasoningEffort: "high",
+      });
+    }),
+  );
+
+  it.effect("surfaces a rejected Hermes acknowledgement without starting the prompt", () =>
+    Effect.gen(function* () {
+      const { adapter, rejectNext } = yield* HermesAdapterTestHarness;
+      const threadId = ThreadId.make("hermes-rejected-thread");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("hermes"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      rejectNext("Approve the model change, then send the message again.");
+
+      const error = yield* Effect.flip(adapter.sendTurn({ threadId, input: "wait for approval" }));
+
+      NodeAssert.equal(error._tag, "ProviderAdapterValidationError");
+      NodeAssert.match(error.message, /Approve the model change/);
     }),
   );
 

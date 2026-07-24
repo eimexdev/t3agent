@@ -7407,7 +7407,7 @@ it.layer(NodeServices.layer)("Hermes callback route", (it) => {
               status: "accepted",
             });
           }),
-        () => HermesBridgeRegistry.unregister(instanceId),
+        HermesBridgeRegistry.unregister,
       );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
@@ -7468,7 +7468,7 @@ it.layer(NodeServices.layer)("Hermes callback route", (it) => {
               "Morning brief",
             );
           }),
-        () => HermesBridgeRegistry.unregister(instanceId),
+        HermesBridgeRegistry.unregister,
       );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );

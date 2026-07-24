@@ -3,6 +3,7 @@ import {
   HermesBridgeT3ToHermesRequest,
   HERMES_BRIDGE_PROTOCOL_VERSION,
   HermesBridgeRequestId,
+  HermesBridgeSessionId,
 } from "@t3tools/contracts/hermesBridge";
 import { ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -66,7 +67,9 @@ describe("HermesBridgeClient", () => {
       assert.strictEqual(result.commands[0]?.name, "restart");
       assert.strictEqual(execute.mock.calls.length, 1);
 
-      const request = execute.mock.calls[0]![0];
+      const call = execute.mock.calls[0];
+      assert.ok(call);
+      const [request] = call;
       const url = new URL(request.url);
       assert.strictEqual(request.method, "GET");
       assert.strictEqual(url.origin, "http://127.0.0.1:8789");
@@ -103,7 +106,9 @@ describe("HermesBridgeClient", () => {
 
       assert.strictEqual(result.sessions[0]?.source, "discord");
       assert.strictEqual(result.sessions[0]?.importedThreadIds?.[0], importedThreadId);
-      const request = execute.mock.calls[0]![0];
+      const call = execute.mock.calls[0];
+      assert.ok(call);
+      const [request] = call;
       assert.strictEqual(request.method, "GET");
       assert.strictEqual(new URL(request.url).pathname, "/v1/sessions");
       assert.strictEqual(new URL(request.url).searchParams.get("requestId"), "sessions-list");
@@ -116,7 +121,7 @@ describe("HermesBridgeClient", () => {
       Response.json({
         protocolVersion: 1,
         requestId: "fork-request",
-        sourceSessionId: "discord-source",
+        sourceSessionId: HermesBridgeSessionId.make("discord-source"),
         childSessionId: "t3-child",
         targetThreadId,
         source: "discord",
@@ -136,13 +141,16 @@ describe("HermesBridgeClient", () => {
         protocolVersion: 1,
         requestId: HermesBridgeRequestId.make("fork-request"),
         type: "session.fork",
-        sourceSessionId: "discord-source",
+        sourceSessionId: HermesBridgeSessionId.make("discord-source"),
+        childSessionId: HermesBridgeSessionId.make("t3-child"),
         targetThreadId,
         userTurnCount: 1,
       });
 
       assert.strictEqual(result.childSessionId, "t3-child");
-      const request = execute.mock.calls[0]![0];
+      const call = execute.mock.calls[0];
+      assert.ok(call);
+      const [request] = call;
       assert.strictEqual(request.method, "POST");
       assert.strictEqual(new URL(request.url).pathname, "/v1/sessions/fork");
       assert.strictEqual(request.headers["idempotency-key"], "fork-request");
@@ -150,9 +158,47 @@ describe("HermesBridgeClient", () => {
         protocolVersion: 1,
         requestId: "fork-request",
         type: "session.fork",
-        sourceSessionId: "discord-source",
+        sourceSessionId: HermesBridgeSessionId.make("discord-source"),
+        childSessionId: HermesBridgeSessionId.make("t3-child"),
         targetThreadId,
         userTurnCount: 1,
+      });
+    });
+  });
+
+  it.effect("deletes only the child session correlated to its T3 thread", () => {
+    const targetThreadId = ThreadId.make("00000000-0000-4000-8000-000000000002");
+    const sessionId = HermesBridgeSessionId.make("t3-child");
+    const { client, execute } = makeClient(() =>
+      Response.json({
+        protocolVersion: 1,
+        requestId: "delete-request",
+        status: "accepted",
+      }),
+    );
+
+    return Effect.gen(function* () {
+      const result = yield* client.deleteSession({
+        protocolVersion: 1,
+        requestId: HermesBridgeRequestId.make("delete-request"),
+        type: "session.delete",
+        sessionId,
+        targetThreadId,
+      });
+
+      assert.strictEqual(result.status, "accepted");
+      const call = execute.mock.calls[0];
+      assert.ok(call);
+      const [request] = call;
+      assert.strictEqual(request.method, "POST");
+      assert.strictEqual(new URL(request.url).pathname, "/v1/sessions/delete");
+      assert.strictEqual(request.headers["idempotency-key"], "delete-request");
+      assert.deepStrictEqual(jsonBody(request), {
+        protocolVersion: 1,
+        requestId: "delete-request",
+        type: "session.delete",
+        sessionId,
+        targetThreadId,
       });
     });
   });
@@ -232,7 +278,9 @@ describe("HermesBridgeClient", () => {
         const acknowledgement = yield* client.send(bridgeRequest);
 
         assert.strictEqual(acknowledgement.status, "accepted");
-        const request = execute.mock.calls[0]![0];
+        const call = execute.mock.calls[0];
+        assert.ok(call);
+        const [request] = call;
         assert.strictEqual(request.method, "POST");
         assert.strictEqual(new URL(request.url).pathname, path);
         assert.strictEqual(request.headers.authorization, "Bearer bridge-secret");
@@ -257,7 +305,9 @@ describe("HermesBridgeClient", () => {
   });
 
   it.effect("maps malformed acknowledgements to a provider request error", () => {
-    const request = requests[0]![1];
+    const firstRequest = requests[0];
+    assert.ok(firstRequest);
+    const [, request] = firstRequest;
     const { client } = makeClient(() =>
       Response.json({
         protocolVersion: 1,

@@ -789,12 +789,28 @@ export const makeHermesAdapter = Effect.fn("makeHermesAdapter")(function* (
         user: { id: "owner", name: "Owner" },
         content: input.input ?? "",
         ...(requestedModel
-          ? { model: requestedModel.model, modelProvider: requestedModel.provider }
+          ? {
+              modelSelection: {
+                model: requestedModel.model,
+                provider: requestedModel.provider,
+                ...(typeof reasoningEffort === "string" ? { reasoningEffort } : {}),
+              },
+            }
           : {}),
-        ...(typeof reasoningEffort === "string" ? { reasoningEffort } : {}),
         ...(images.length > 0 ? { images } : {}),
       })
       .pipe(
+        Effect.flatMap((acknowledgement) =>
+          acknowledgement.status === "rejected"
+            ? Effect.fail(
+                new ProviderAdapterValidationError({
+                  provider: PROVIDER,
+                  operation: "sendTurn",
+                  issue: acknowledgement.message ?? "Hermes rejected the message.",
+                }),
+              )
+            : Effect.succeed(acknowledgement),
+        ),
         Effect.tapError(() =>
           Effect.sync(() => {
             const failedIndex = context.activeTurnIds.indexOf(turnId);

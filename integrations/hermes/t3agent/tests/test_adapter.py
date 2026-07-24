@@ -45,6 +45,7 @@ async def make_ingress_client(
     app.router.add_get("/v1/capabilities", adapter._capabilities)
     app.router.add_get("/v1/sessions", adapter._list_sessions)
     app.router.add_post("/v1/sessions/fork", adapter._fork_session)
+    app.router.add_post("/v1/sessions/delete", adapter._delete_session)
     app.router.add_post("/v1/messages", adapter._submit_message)
     app.router.add_post("/v1/interrupt", adapter._interrupt_turn)
     app.router.add_post("/v1/approvals", adapter._respond_approval)
@@ -154,8 +155,20 @@ async def test_message_submit_applies_model_and_reasoning_before_dispatch(
     calls: List[Any] = []
 
     class FakeRunner:
+        def __init__(self) -> None:
+            self._session_model_overrides: Dict[str, Dict[str, str]] = {}
+
         async def _handle_model_command(self, event: Any) -> None:
             calls.append(("model", event.text))
+            session_key = adapter_module.build_session_key(
+                event.source,
+                group_sessions_per_user=True,
+                thread_sessions_per_user=False,
+            )
+            self._session_model_overrides[session_key] = {
+                "model": "test-model",
+                "provider": "test-provider",
+            }
 
         def _apply_reasoning_selection(
             self, session_key: str, platform_key: str, value: str
@@ -172,7 +185,7 @@ async def test_message_submit_applies_model_and_reasoning_before_dispatch(
     try:
         response = await client.post(
             "/v1/messages",
-            headers=auth_headers(),
+            headers={"Authorization": f"Bearer {adapter.ingress_token}"},
             json={
                 "protocolVersion": 1,
                 "requestId": "model-request",
@@ -182,19 +195,69 @@ async def test_message_submit_applies_model_and_reasoning_before_dispatch(
                 "threadId": "thread-model",
                 "user": {"id": "owner", "name": "Owner"},
                 "content": "hello",
-                "model": "gpt-5.6-sol",
-                "modelProvider": "openai-codex",
-                "reasoningEffort": "high",
+                "modelSelection": {
+                    "model": "test-model",
+                    "provider": "test-provider",
+                    "reasoningEffort": "high",
+                },
             },
         )
         assert response.status == 202
         assert calls[0] == (
             "model",
-            "/model gpt-5.6-sol --session --provider openai-codex",
+            "/model test-model --session --provider test-provider",
         )
         assert calls[1][0] == "reasoning"
         assert calls[1][-1] == "high"
         assert calls[2] == ("message", "hello")
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_message_submit_does_not_dispatch_before_model_confirmation(
+    fake_platform: SimpleNamespace,
+) -> None:
+    adapter = adapter_module.T3AgentAdapter(make_config())
+    dispatched: List[str] = []
+
+    class FakeRunner:
+        _session_model_overrides: Dict[str, Dict[str, str]] = {}
+
+        async def _handle_model_command(self, _: Any) -> str:
+            return "Expensive model confirmation required."
+
+    adapter.gateway_runner = FakeRunner()  # type: ignore[attr-defined]
+
+    async def capture(event: Any) -> None:
+        dispatched.append(event.text)
+
+    adapter.handle_message = capture  # type: ignore[method-assign]
+    client = await make_ingress_client(adapter)
+    try:
+        response = await client.post(
+            "/v1/messages",
+            headers={"Authorization": f"Bearer {adapter.ingress_token}"},
+            json={
+                "protocolVersion": 1,
+                "requestId": "model-confirmation-request",
+                "type": "message.submit",
+                "messageId": "model-confirmation-message",
+                "chatId": "t3agent",
+                "threadId": "thread-model-confirmation",
+                "user": {"id": "owner", "name": "Owner"},
+                "content": "do not send yet",
+                "modelSelection": {
+                    "model": "expensive-model",
+                    "provider": "openrouter",
+                },
+            },
+        )
+        assert response.status == 202
+        body = await response.json()
+        assert body["status"] == "rejected"
+        assert "message was not sent" in body["message"]
+        assert dispatched == []
     finally:
         await client.close()
 
@@ -259,16 +322,26 @@ async def test_session_fork_creates_child_copy_and_binds_target_thread(
     created: List[Dict[str, Any]] = []
     replacements: List[Any] = []
     titles: List[Any] = []
+    route_sources: List[Any] = []
     switches: List[Any] = []
+    model_overrides: List[Any] = []
+    reasoning_overrides: List[Any] = []
 
     class FakeDB:
-        def get_session(self, session_id: str) -> Dict[str, Any]:
+        def get_session(self, session_id: str) -> Any:
+            if session_id == "t3-child":
+                return None
             assert session_id == "discord-source"
             return {
                 "id": session_id,
                 "source": "discord",
                 "title": "Planning",
                 "model": "gpt-5.6-sol",
+                "session_key": "discord-session-key",
+                "model_config": {
+                    "gateway_runtime": {"provider": "openai-codex"},
+                    "reasoning_config": {"enabled": True, "effort": "high"},
+                },
                 "system_prompt": "Be useful",
             }
 
@@ -301,13 +374,32 @@ async def test_session_fork_creates_child_copy_and_binds_target_thread(
             titles.append((session_id, title))
 
     class FakeStore:
+        async def get_model_override(self, session_key: str) -> None:
+            assert session_key == "discord-session-key"
+            return None
+
+        async def get_or_create_session(self, source: Any) -> object:
+            route_sources.append(source)
+            return object()
+
         async def switch_session(self, key: str, session_id: str) -> object:
             switches.append((key, session_id))
             return object()
 
+        async def set_model_override(
+            self, session_key: str, override: Dict[str, str]
+        ) -> None:
+            model_overrides.append((session_key, override))
+
+    def set_reasoning_override(session_key: str, config: Dict[str, Any]) -> None:
+        reasoning_overrides.append((session_key, config))
+
     adapter.gateway_runner = SimpleNamespace(
         _session_db=FakeAsyncDB(),
         async_session_store=FakeStore(),
+        _session_model_overrides={},
+        _session_reasoning_overrides={},
+        _set_session_reasoning_override=set_reasoning_override,
     )
     client = await make_ingress_client(adapter)
     target_thread_id = "00000000-0000-4000-8000-000000000002"
@@ -320,6 +412,7 @@ async def test_session_fork_creates_child_copy_and_binds_target_thread(
                 "requestId": "fork-session",
                 "type": "session.fork",
                 "sourceSessionId": "discord-source",
+                "childSessionId": "t3-child",
                 "targetThreadId": target_thread_id,
                 "userTurnCount": 1,
             },
@@ -327,6 +420,7 @@ async def test_session_fork_creates_child_copy_and_binds_target_thread(
         assert response.status == 201
         payload = await response.json()
         assert payload["sourceSessionId"] == "discord-source"
+        assert payload["childSessionId"] == "t3-child"
         assert payload["targetThreadId"] == target_thread_id
         assert payload["title"] == "Planning #2"
         assert [message["content"] for message in payload["messages"]] == [
@@ -335,10 +429,75 @@ async def test_session_fork_creates_child_copy_and_binds_target_thread(
         ]
         assert created[0]["source"] == "t3agent"
         assert created[0]["parent_session_id"] == "discord-source"
+        assert created[0]["model_config"]["gateway_runtime"]["provider"] == (
+            "openai-codex"
+        )
+        assert created[0]["model_config"]["_t3agent_imported_from"] == (
+            "discord-source"
+        )
         assert replacements[0][1][-1]["content"] == "first answer"
         assert titles[0][1] == "Planning #2"
+        assert route_sources[0].thread_id == target_thread_id
         assert switches[0][1] == payload["childSessionId"]
         assert target_thread_id in switches[0][0]
+        assert payload["modelSelection"] == {
+            "provider": "openai-codex",
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high",
+        }
+        assert model_overrides[0][1]["model"] == "gpt-5.6-sol"
+        assert reasoning_overrides[0][1]["effort"] == "high"
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_session_delete_only_removes_matching_t3_child(
+    fake_platform: SimpleNamespace,
+) -> None:
+    adapter = adapter_module.T3AgentAdapter(make_config())
+    deleted: List[str] = []
+
+    class FakeDB:
+        def get_session(self, session_id: str) -> Dict[str, Any]:
+            assert session_id == "t3-child"
+            return {
+                "id": session_id,
+                "source": "t3agent",
+                "thread_id": "thread-child",
+                "parent_session_id": "discord-source",
+            }
+
+        def delete_session(self, session_id: str) -> bool:
+            deleted.append(session_id)
+            return True
+
+    adapter.gateway_runner = SimpleNamespace(
+        _session_db=SimpleNamespace(_db=FakeDB())
+    )
+    client = await make_ingress_client(adapter)
+    frame = {
+        "protocolVersion": 1,
+        "requestId": "delete-child",
+        "type": "session.delete",
+        "sessionId": "t3-child",
+        "targetThreadId": "thread-child",
+    }
+    try:
+        first = await client.post(
+            "/v1/sessions/delete",
+            headers={"Authorization": f"Bearer {adapter.ingress_token}"},
+            json=frame,
+        )
+        duplicate = await client.post(
+            "/v1/sessions/delete",
+            headers={"Authorization": f"Bearer {adapter.ingress_token}"},
+            json=frame,
+        )
+        assert first.status == duplicate.status == 200
+        assert (await first.json())["status"] == "accepted"
+        assert (await duplicate.json())["status"] == "duplicate"
+        assert deleted == ["t3-child"]
     finally:
         await client.close()
 

@@ -2478,7 +2478,7 @@ function ChatViewContent(props: ChatViewProps) {
       const result = await forkHermesConversationCommand({
         environmentId,
         input: {
-          sourceThreadId: activeThread.id,
+          source: { type: "thread", threadId: activeThread.id },
           ...(userTurnCount !== undefined ? { userTurnCount } : {}),
         },
       });
@@ -4337,14 +4337,20 @@ function ChatViewContent(props: ChatViewProps) {
     } = sendCtx;
     const promptForSend = promptRef.current;
     const lifecycleCommand = IS_T3_AGENT_MODE ? parseT3AgentLifecycleCommand(promptForSend) : null;
-    if (
-      lifecycleCommand &&
-      composerImages.length === 0 &&
-      composerTerminalContexts.length === 0 &&
-      composerElementContexts.length === 0 &&
-      composerPreviewAnnotations.length === 0 &&
-      composerReviewComments.length === 0
-    ) {
+    if (lifecycleCommand) {
+      const hasAttachedContext =
+        composerImages.length > 0 ||
+        composerTerminalContexts.length > 0 ||
+        composerElementContexts.length > 0 ||
+        composerPreviewAnnotations.length > 0 ||
+        composerReviewComments.length > 0;
+      if (hasAttachedContext) {
+        setThreadError(
+          activeThread.id,
+          "Remove attachments and context before running a conversation command.",
+        );
+        return;
+      }
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
@@ -5467,7 +5473,7 @@ function ChatViewContent(props: ChatViewProps) {
         newShortcutLabel={newTerminalShortcutLabel ?? undefined}
         closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
       />
-    ) : activeRightPanelSurface?.kind === "diff" ? (
+    ) : !IS_T3_AGENT_MODE && activeRightPanelSurface?.kind === "diff" ? (
       <Suspense fallback={null}>
         <DiffPanel
           key={`${activeThreadKey}:${diffPanelGitStatusResolutionKey}`}
@@ -5488,7 +5494,8 @@ function ChatViewContent(props: ChatViewProps) {
         timestampFormat={timestampFormat}
         mode="embedded"
       />
-    ) : (activeRightPanelSurface?.kind === "files" || activeRightPanelSurface?.kind === "file") &&
+    ) : !IS_T3_AGENT_MODE &&
+      (activeRightPanelSurface?.kind === "files" || activeRightPanelSurface?.kind === "file") &&
       activeProject &&
       activeWorkspaceRoot ? (
       <Suspense fallback={null}>
@@ -5873,8 +5880,8 @@ function ChatViewContent(props: ChatViewProps) {
           onAddDiff={addDiffSurface}
           onAddFiles={addFilesSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
-          diffAvailable={isServerThread && isGitRepo}
-          filesAvailable={activeProject !== null}
+          diffAvailable={!IS_T3_AGENT_MODE && isServerThread && isGitRepo}
+          filesAvailable={!IS_T3_AGENT_MODE && activeProject !== null}
         >
           {rightPanelContent}
         </RightPanelTabs>
@@ -5900,8 +5907,8 @@ function ChatViewContent(props: ChatViewProps) {
             onAddDiff={addDiffSurface}
             onAddFiles={addFilesSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
-            diffAvailable={isServerThread && isGitRepo}
-            filesAvailable={activeProject !== null}
+            diffAvailable={!IS_T3_AGENT_MODE && isServerThread && isGitRepo}
+            filesAvailable={!IS_T3_AGENT_MODE && activeProject !== null}
           >
             {rightPanelContent}
           </RightPanelTabs>

@@ -17,47 +17,59 @@ describe("HermesBridgeRegistry", () => {
     const payload = { type: "typing.set", deliveryId: "delivery-1" };
     const receiver = vi.fn((received: unknown) => Effect.succeed({ accepted: true, received }));
 
-    return Effect.gen(function* () {
-      yield* register(instanceId, { token: "correct-token", receive: receiver });
-      const result = yield* receive(instanceId, "correct-token", payload);
+    return Effect.acquireUseRelease(
+      register(instanceId, { token: "correct-token", receive: receiver }),
+      () =>
+        Effect.gen(function* () {
+          const result = yield* receive(instanceId, "correct-token", payload);
 
-      assert.deepStrictEqual(result, { accepted: true, received: payload });
-      assert.strictEqual(receiver.mock.calls.length, 1);
-      assert.strictEqual(receiver.mock.calls[0]![0], payload);
-    }).pipe(Effect.ensuring(unregister(instanceId)));
+          assert.deepStrictEqual(result, { accepted: true, received: payload });
+          assert.strictEqual(receiver.mock.calls.length, 1);
+          assert.strictEqual(receiver.mock.calls[0]![0], payload);
+        }),
+      unregister,
+    );
   });
 
   it.effect("rejects an incorrect token without invoking the receiver", () => {
     const instanceId = ProviderInstanceId.make("hermes_registry_auth");
     const receiver = vi.fn(() => Effect.succeed("should-not-run"));
 
-    return Effect.gen(function* () {
-      yield* register(instanceId, { token: "correct-token", receive: receiver });
-      const result = yield* Effect.result(receive(instanceId, "incorrect-token", {}));
-      assert.isTrue(Result.isFailure(result));
-      if (Result.isSuccess(result)) return;
-      const error = result.failure;
+    return Effect.acquireUseRelease(
+      register(instanceId, { token: "correct-token", receive: receiver }),
+      () =>
+        Effect.gen(function* () {
+          const result = yield* Effect.result(receive(instanceId, "incorrect-token", {}));
+          assert.isTrue(Result.isFailure(result));
+          if (Result.isSuccess(result)) return;
+          const error = result.failure;
 
-      assert.instanceOf(error, HermesBridgeRegistryError);
-      assert.strictEqual(error.operation, "authenticate");
-      assert.strictEqual(receiver.mock.calls.length, 0);
-    }).pipe(Effect.ensuring(unregister(instanceId)));
+          assert.instanceOf(error, HermesBridgeRegistryError);
+          assert.strictEqual(error.operation, "authenticate");
+          assert.strictEqual(receiver.mock.calls.length, 0);
+        }),
+      unregister,
+    );
   });
 
   it.effect("rejects an empty configured token", () => {
     const instanceId = ProviderInstanceId.make("hermes_registry_empty_token");
     const receiver = vi.fn(() => Effect.succeed("should-not-run"));
 
-    return Effect.gen(function* () {
-      yield* register(instanceId, { token: "", receive: receiver });
-      const result = yield* Effect.result(receive(instanceId, "", {}));
-      assert.isTrue(Result.isFailure(result));
-      if (Result.isSuccess(result)) return;
-      const error = result.failure;
+    return Effect.acquireUseRelease(
+      register(instanceId, { token: "", receive: receiver }),
+      () =>
+        Effect.gen(function* () {
+          const result = yield* Effect.result(receive(instanceId, "", {}));
+          assert.isTrue(Result.isFailure(result));
+          if (Result.isSuccess(result)) return;
+          const error = result.failure;
 
-      assert.strictEqual(error.operation, "authenticate");
-      assert.strictEqual(receiver.mock.calls.length, 0);
-    }).pipe(Effect.ensuring(unregister(instanceId)));
+          assert.strictEqual(error.operation, "authenticate");
+          assert.strictEqual(receiver.mock.calls.length, 0);
+        }),
+      unregister,
+    );
   });
 
   it.effect("reports unknown instances and unregistered instances as lookup failures", () => {
@@ -71,9 +83,14 @@ describe("HermesBridgeRegistry", () => {
       const unknownError = unknownResult.failure;
       assert.strictEqual(unknownError.operation, "lookup");
 
-      yield* register(instanceId, { token: "token", receive: receiver });
-      assert.strictEqual(yield* receive(instanceId, "token", {}), "received");
-      yield* unregister(instanceId);
+      assert.strictEqual(
+        yield* Effect.acquireUseRelease(
+          register(instanceId, { token: "token", receive: receiver }),
+          () => receive(instanceId, "token", {}),
+          unregister,
+        ),
+        "received",
+      );
 
       const unregisteredResult = yield* Effect.result(receive(instanceId, "token", {}));
       assert.isTrue(Result.isFailure(unregisteredResult));
@@ -81,7 +98,7 @@ describe("HermesBridgeRegistry", () => {
       const unregisteredError = unregisteredResult.failure;
       assert.strictEqual(unregisteredError.operation, "lookup");
       assert.strictEqual(receiver.mock.calls.length, 1);
-    }).pipe(Effect.ensuring(unregister(instanceId)));
+    });
   });
 
   it.effect("wraps receiver failures without exposing them as authentication errors", () => {
@@ -92,19 +109,47 @@ describe("HermesBridgeRegistry", () => {
       detail: "Callback was invalid.",
     });
 
-    return Effect.gen(function* () {
-      yield* register(instanceId, {
+    return Effect.acquireUseRelease(
+      register(instanceId, {
         token: "token",
         receive: () => Effect.fail(receiverError),
-      });
-      const result = yield* Effect.result(receive(instanceId, "token", {}));
-      assert.isTrue(Result.isFailure(result));
-      if (Result.isSuccess(result)) return;
-      const error = result.failure;
+      }),
+      () =>
+        Effect.gen(function* () {
+          const result = yield* Effect.result(receive(instanceId, "token", {}));
+          assert.isTrue(Result.isFailure(result));
+          if (Result.isSuccess(result)) return;
+          const error = result.failure;
 
-      assert.instanceOf(error, HermesBridgeRegistryError);
-      assert.strictEqual(error.operation, "receive");
-      assert.strictEqual(error.detail, receiverError.message);
-    }).pipe(Effect.ensuring(unregister(instanceId)));
+          assert.instanceOf(error, HermesBridgeRegistryError);
+          assert.strictEqual(error.operation, "receive");
+          assert.strictEqual(error.detail, receiverError.message);
+        }),
+      unregister,
+    );
+  });
+
+  it.effect("does not let a stale owner unregister its replacement", () => {
+    const instanceId = ProviderInstanceId.make("hermes_registry_replacement");
+    const oldReceiver = vi.fn(() => Effect.succeed("old"));
+    const newReceiver = vi.fn(() => Effect.succeed("new"));
+
+    return Effect.acquireUseRelease(
+      register(instanceId, { token: "old-token", receive: oldReceiver }),
+      (oldRegistration) =>
+        Effect.acquireUseRelease(
+          register(instanceId, { token: "new-token", receive: newReceiver }),
+          () =>
+            Effect.gen(function* () {
+              yield* unregister(oldRegistration);
+
+              assert.strictEqual(yield* receive(instanceId, "new-token", {}), "new");
+              assert.strictEqual(oldReceiver.mock.calls.length, 0);
+              assert.strictEqual(newReceiver.mock.calls.length, 1);
+            }),
+          unregister,
+        ),
+      unregister,
+    );
   });
 });

@@ -16,3 +16,7 @@ export function decodeHermesModelSlug(
     model: value.slice(separatorIndex + MODEL_SLUG_SEPARATOR.length),
   };
 }
+
+export function isHermesModelSlug(value: string): boolean {
+  return decodeHermesModelSlug(value) !== undefined;
+}

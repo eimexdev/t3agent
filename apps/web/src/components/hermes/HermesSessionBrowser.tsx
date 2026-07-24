@@ -122,7 +122,7 @@ export function HermesSessionBrowser({
       const result = await forkConversation({
         environmentId,
         input: {
-          sourceSessionId: session.sessionId,
+          source: { type: "session", sessionId: session.sessionId },
           ...(forceNew ? { forceNew: true } : {}),
         },
       });

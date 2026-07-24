@@ -12,9 +12,11 @@ import {
   HermesBridgeInboundMessageRequest,
   HermesBridgeSlashConfirmationRequest,
   HermesBridgeSlashConfirmationResponseRequest,
+  HermesBridgeSessionDeleteRequest,
   HermesBridgeT3ToHermesRequest,
   HermesBridgeThreadCreateRequest,
   HermesBridgeThreadCreateResponse,
+  HermesConversationForkInput,
 } from "./hermesBridge.ts";
 
 const decodeInboundMessage = Schema.decodeUnknownSync(HermesBridgeInboundMessageRequest);
@@ -36,6 +38,8 @@ const decodeCapabilitiesResponse = Schema.decodeUnknownSync(HermesBridgeCapabili
 const decodeAcknowledgement = Schema.decodeUnknownSync(HermesBridgeAcknowledgement);
 const decodeThreadCreateRequest = Schema.decodeUnknownSync(HermesBridgeThreadCreateRequest);
 const decodeThreadCreateResponse = Schema.decodeUnknownSync(HermesBridgeThreadCreateResponse);
+const decodeConversationForkInput = Schema.decodeUnknownSync(HermesConversationForkInput);
+const decodeSessionDeleteRequest = Schema.decodeUnknownSync(HermesBridgeSessionDeleteRequest);
 
 const requestFields = {
   protocolVersion: 1,
@@ -93,9 +97,11 @@ describe("Hermes bridge T3 to Hermes requests", () => {
         futureUserField: "preserved",
       },
       content: "Inspect this image",
-      model: "gpt-5.6-sol",
-      modelProvider: "openai-codex",
-      reasoningEffort: "high",
+      modelSelection: {
+        model: "gpt-5.6-sol",
+        provider: "openai-codex",
+        reasoningEffort: "high",
+      },
       images: [
         {
           type: "image",
@@ -118,9 +124,11 @@ describe("Hermes bridge T3 to Hermes requests", () => {
     expect(decoded.user.futureUserField).toBe("preserved");
     expect(decoded.images?.[0]?.futureImageField).toBe(1);
     expect(decoded.images?.[0]?.source.futureSourceField).toBe(true);
-    expect(decoded.model).toBe("gpt-5.6-sol");
-    expect(decoded.modelProvider).toBe("openai-codex");
-    expect(decoded.reasoningEffort).toBe("high");
+    expect(decoded.modelSelection).toEqual({
+      model: "gpt-5.6-sol",
+      provider: "openai-codex",
+      reasoningEffort: "high",
+    });
   });
 
   it("accepts every T3 to Hermes request discriminant", () => {
@@ -407,6 +415,40 @@ describe("Hermes bridge Hermes to T3 callbacks", () => {
 });
 
 describe("Hermes bridge discovery and responses", () => {
+  it("requires exactly one typed conversation source", () => {
+    expect(
+      decodeConversationForkInput({
+        source: { type: "session", sessionId: "discord-source" },
+        forceNew: true,
+      }).source,
+    ).toEqual({ type: "session", sessionId: "discord-source" });
+    expect(
+      decodeConversationForkInput({
+        source: {
+          type: "thread",
+          threadId: "00000000-0000-4000-8000-000000000001",
+        },
+      }).source.type,
+    ).toBe("thread");
+    expect(() =>
+      decodeConversationForkInput({
+        sourceSessionId: "discord-source",
+        sourceThreadId: "00000000-0000-4000-8000-000000000001",
+      }),
+    ).toThrow();
+  });
+
+  it("correlates child-session cleanup to its T3 thread", () => {
+    expect(
+      decodeSessionDeleteRequest({
+        ...requestFields,
+        type: "session.delete",
+        sessionId: "t3-child",
+        targetThreadId: "00000000-0000-4000-8000-000000000001",
+      }).sessionId,
+    ).toBe("t3-child");
+  });
+
   it("requires a logical occurrence id when creating a thread", () => {
     const decoded = decodeThreadCreateRequest({
       ...callbackFields,

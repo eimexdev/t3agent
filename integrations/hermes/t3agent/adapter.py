@@ -154,6 +154,171 @@ def _ack(request_id: str, status: str, message: Optional[str] = None) -> Dict[st
     return body
 
 
+async def _apply_gateway_model_selection(
+    gateway_runner: Any,
+    event: MessageEvent,
+    session_key: str,
+    model: str,
+    provider: str,
+) -> Optional[str]:
+    """Apply a Hermes-native model change and verify it committed.
+
+    Hermes owns provider validation and expensive-model confirmations.  The
+    bridge deliberately goes through that command path, but it must not send
+    the user's prompt until the requested session override actually exists.
+    """
+    rehydrate = getattr(gateway_runner, "_rehydrate_session_model_override", None)
+    if callable(rehydrate):
+        rehydrate(session_key)
+    overrides = getattr(gateway_runner, "_session_model_overrides", {}) or {}
+    selected = overrides.get(session_key) or {}
+    if selected.get("model") == model and selected.get("provider") == provider:
+        return None
+    if not selected:
+        try:
+            from gateway.run import _load_gateway_config
+
+            config = _load_gateway_config() or {}
+            configured_model = config.get("model", {})
+            if (
+                isinstance(configured_model, dict)
+                and str(configured_model.get("default") or "").strip() == model
+                and str(configured_model.get("provider") or "openrouter").strip()
+                == provider
+            ):
+                return None
+        except Exception:
+            logger.debug("[t3agent] unable to compare the Hermes default model", exc_info=True)
+    result = await gateway_runner._handle_model_command(event)
+    overrides = getattr(gateway_runner, "_session_model_overrides", {}) or {}
+    selected = overrides.get(session_key) or {}
+    if selected.get("model") == model and selected.get("provider") == provider:
+        return None
+    detail = result.strip() if isinstance(result, str) and result.strip() else ""
+    retry = (
+        "The message was not sent. Complete the model confirmation if one is "
+        "pending, then send it again."
+    )
+    return f"{detail}\n\n{retry}" if detail else retry
+
+
+def _apply_gateway_reasoning_selection(
+    gateway_runner: Any,
+    session_key: str,
+    platform: Platform,
+    reasoning_effort: str,
+) -> None:
+    from gateway.run import _platform_config_key
+
+    gateway_runner._apply_reasoning_selection(
+        session_key,
+        _platform_config_key(platform),
+        reasoning_effort,
+    )
+
+
+def _gateway_session_resources(gateway_runner: Any) -> Tuple[Any, Any, Any]:
+    """Keep Hermes' session-store compatibility seam in one place."""
+    session_db = getattr(gateway_runner, "_session_db", None)
+    async_store = getattr(gateway_runner, "async_session_store", None)
+    db = getattr(session_db, "_db", session_db)
+    return session_db, async_store, db
+
+
+def _stored_model_config(session: Dict[str, Any]) -> Dict[str, Any]:
+    raw_config = session.get("model_config")
+    if isinstance(raw_config, dict):
+        return dict(raw_config)
+    if isinstance(raw_config, str) and raw_config.strip():
+        try:
+            parsed = json.loads(raw_config)
+            if isinstance(parsed, dict):
+                return parsed
+        except (TypeError, ValueError):
+            logger.debug("[t3agent] unable to parse stored Hermes model config", exc_info=True)
+    return {}
+
+
+def _reasoning_effort_from_config(config: Any) -> Optional[str]:
+    if not isinstance(config, dict):
+        return None
+    if config.get("enabled") is False:
+        return "none"
+    effort = str(config.get("effort") or "").strip()
+    return effort or None
+
+
+def _session_runtime_selection(
+    gateway_runner: Any,
+    session: Dict[str, Any],
+    persisted_model_override: Optional[Dict[str, Any]],
+) -> Tuple[Optional[Dict[str, str]], Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Snapshot the source session's effective runtime for a child copy."""
+    model_config = _stored_model_config(session)
+    gateway_runtime = model_config.get("gateway_runtime")
+    if not isinstance(gateway_runtime, dict):
+        gateway_runtime = {}
+    session_key = str(session.get("session_key") or "").strip()
+    rehydrate = getattr(gateway_runner, "_rehydrate_session_model_override", None)
+    if session_key and callable(rehydrate):
+        rehydrate(session_key)
+    live_model_overrides = getattr(gateway_runner, "_session_model_overrides", {}) or {}
+    model_override = live_model_overrides.get(session_key) or persisted_model_override or {}
+
+    model = str(
+        model_override.get("model")
+        or session.get("model")
+        or model_config.get("model")
+        or ""
+    ).strip()
+    provider = str(
+        model_override.get("provider")
+        or model_config.get("provider")
+        or gateway_runtime.get("provider")
+        or ""
+    ).strip()
+    if not provider:
+        try:
+            from gateway.run import _load_gateway_config
+
+            configured_model = (_load_gateway_config() or {}).get("model", {})
+            if isinstance(configured_model, dict):
+                provider = str(
+                    configured_model.get("provider") or "openrouter"
+                ).strip()
+        except Exception:
+            logger.debug("[t3agent] unable to resolve the stored model provider", exc_info=True)
+
+    reasoning_overrides = getattr(gateway_runner, "_session_reasoning_overrides", {}) or {}
+    reasoning_config = reasoning_overrides.get(session_key)
+    if not isinstance(reasoning_config, dict):
+        reasoning_config = model_config.get("reasoning_config")
+    if not isinstance(reasoning_config, dict):
+        resolve_reasoning = getattr(
+            gateway_runner, "_resolve_session_reasoning_config", None
+        )
+        if callable(resolve_reasoning):
+            reasoning_config = resolve_reasoning(
+                session_key=session_key or None,
+                model=model,
+            )
+    reasoning_effort = _reasoning_effort_from_config(reasoning_config)
+    selection = (
+        {
+            "provider": provider,
+            "model": model,
+            **(
+                {"reasoningEffort": reasoning_effort}
+                if reasoning_effort is not None
+                else {}
+            ),
+        }
+        if provider and model
+        else None
+    )
+    return selection, model_config, reasoning_config if isinstance(reasoning_config, dict) else None
+
+
 def _image_source_value(attachment: Dict[str, Any]) -> str:
     if attachment.get("type") != "image":
         raise ValueError("each images entry must have type image")
@@ -746,6 +911,7 @@ class T3AgentAdapter(BasePlatformAdapter):
         app.router.add_get("/v1/capabilities", self._capabilities)
         app.router.add_get("/v1/sessions", self._list_sessions)
         app.router.add_post("/v1/sessions/fork", self._fork_session)
+        app.router.add_post("/v1/sessions/delete", self._delete_session)
         app.router.add_post("/v1/messages", self._submit_message)
         app.router.add_post("/v1/interrupt", self._interrupt_turn)
         app.router.add_post("/v1/approvals", self._respond_approval)
@@ -957,8 +1123,7 @@ class T3AgentAdapter(BasePlatformAdapter):
         if error is not None:
             return error
         gateway_runner = getattr(self, "gateway_runner", None)
-        session_db = getattr(gateway_runner, "_session_db", None)
-        db = getattr(session_db, "_db", session_db)
+        _, _, db = _gateway_session_resources(gateway_runner)
         if db is None:
             return web.json_response(
                 {"error": "Hermes session database is unavailable"}, status=503
@@ -1030,6 +1195,7 @@ class T3AgentAdapter(BasePlatformAdapter):
             payload = await self._read_frame(request, "session.fork")
             request_id = _require_string(payload, "requestId")
             source_session_id = _require_string(payload, "sourceSessionId")
+            child_session_id = _require_string(payload, "childSessionId")
             target_thread_id = _require_string(payload, "targetThreadId")
             raw_turn_count = payload.get("userTurnCount")
             if raw_turn_count is not None and (
@@ -1039,11 +1205,9 @@ class T3AgentAdapter(BasePlatformAdapter):
         except ValueError as exc:
             return web.json_response({"error": str(exc)}, status=400)
 
-        async def fork() -> Tuple[int, Dict[str, Any]]:
+        async def fork_once() -> Tuple[int, Dict[str, Any]]:
             gateway_runner = getattr(self, "gateway_runner", None)
-            session_db = getattr(gateway_runner, "_session_db", None)
-            async_store = getattr(gateway_runner, "async_session_store", None)
-            db = getattr(session_db, "_db", session_db)
+            session_db, async_store, db = _gateway_session_resources(gateway_runner)
             if session_db is None or async_store is None or db is None:
                 raise RuntimeError("Hermes session database is unavailable")
             source_session = await asyncio.to_thread(db.get_session, source_session_id)
@@ -1053,6 +1217,39 @@ class T3AgentAdapter(BasePlatformAdapter):
                     "requestId": request_id,
                     "error": f"Hermes session not found: {source_session_id}",
                 }
+            source_session_key = str(source_session.get("session_key") or "").strip()
+            persisted_model_override = (
+                await async_store.get_model_override(source_session_key)
+                if source_session_key
+                else None
+            )
+            model_selection, child_model_config, reasoning_config = (
+                _session_runtime_selection(
+                    gateway_runner,
+                    source_session,
+                    persisted_model_override,
+                )
+            )
+            existing_child = await asyncio.to_thread(db.get_session, child_session_id)
+            if existing_child is not None:
+                existing_config = _stored_model_config(existing_child)
+                existing_target = str(
+                    existing_child.get("thread_id")
+                    or existing_config.get("_t3agent_target_thread")
+                    or ""
+                ).strip()
+                if (
+                    str(existing_child.get("source") or "") != "t3agent"
+                    or str(existing_child.get("parent_session_id") or "")
+                    != source_session_id
+                    or existing_target != target_thread_id
+                ):
+                    return 409, {
+                        "protocolVersion": PROTOCOL_VERSION,
+                        "requestId": request_id,
+                        "error": "The requested child Hermes session identity is already in use.",
+                    }
+            child_exists = existing_child is not None
 
             messages = await asyncio.to_thread(db.get_messages, source_session_id)
             copied_messages: List[Dict[str, Any]] = []
@@ -1065,23 +1262,41 @@ class T3AgentAdapter(BasePlatformAdapter):
                         break
                 copied_messages.append(message)
 
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            child_session_id = f"{timestamp}_{secrets.token_hex(3)}"
             source_title = (
                 str(source_session.get("title") or "Conversation").strip()
                 or "Conversation"
             )
-            child_title = await asyncio.to_thread(db.get_next_title_in_lineage, source_title)
-            await session_db.create_session(
-                session_id=child_session_id,
-                source="t3agent",
-                model=source_session.get("model"),
-                model_config={"_t3agent_imported_from": source_session_id},
-                system_prompt=source_session.get("system_prompt"),
-                parent_session_id=source_session_id,
+            child_title = (
+                str(existing_child.get("title") or "").strip()
+                if existing_child is not None
+                else ""
             )
-            await asyncio.to_thread(db.replace_messages, child_session_id, copied_messages)
-            await session_db.set_session_title(child_session_id, child_title)
+            if not child_title:
+                child_title = await asyncio.to_thread(
+                    db.get_next_title_in_lineage,
+                    source_title,
+                )
+            child_model_config["_t3agent_imported_from"] = source_session_id
+            child_model_config["_t3agent_target_thread"] = target_thread_id
+            if not child_exists:
+                await session_db.create_session(
+                    session_id=child_session_id,
+                    source="t3agent",
+                    model=(
+                        model_selection.get("model")
+                        if model_selection is not None
+                        else source_session.get("model")
+                    ),
+                    model_config=child_model_config,
+                    system_prompt=source_session.get("system_prompt"),
+                    parent_session_id=source_session_id,
+                )
+                await asyncio.to_thread(
+                    db.replace_messages,
+                    child_session_id,
+                    copied_messages,
+                )
+                await session_db.set_session_title(child_session_id, child_title)
 
             target_source = self.build_source(
                 chat_id=CANONICAL_CHAT_ID,
@@ -1100,11 +1315,31 @@ class T3AgentAdapter(BasePlatformAdapter):
                     "thread_sessions_per_user", False
                 ),
             )
+            # A newly created T3 thread has not sent a gateway message yet, so
+            # it has no routing entry for switch_session to replace. Establish
+            # that route first; switch_session then records the child session's
+            # T3 peer metadata (including thread_id) for future /sessions calls.
+            await async_store.get_or_create_session(target_source)
             switched = await async_store.switch_session(
                 target_session_key, child_session_id
             )
             if switched is None:
                 raise RuntimeError("Unable to bind the child Hermes session")
+            if model_selection is not None:
+                child_override = {
+                    "model": model_selection["model"],
+                    "provider": model_selection["provider"],
+                }
+                await async_store.set_model_override(target_session_key, child_override)
+                live_overrides = getattr(gateway_runner, "_session_model_overrides", None)
+                if isinstance(live_overrides, dict):
+                    live_overrides[target_session_key] = child_override
+            if reasoning_config is not None:
+                set_reasoning = getattr(
+                    gateway_runner, "_set_session_reasoning_override", None
+                )
+                if callable(set_reasoning):
+                    set_reasoning(target_session_key, reasoning_config)
 
             history: List[Dict[str, Any]] = []
             for message in copied_messages:
@@ -1134,9 +1369,81 @@ class T3AgentAdapter(BasePlatformAdapter):
                 "source": str(source_session.get("source") or "unknown"),
                 "title": child_title,
                 "messages": history,
+                **(
+                    {"modelSelection": model_selection}
+                    if model_selection is not None
+                    else {}
+                ),
             }
 
+        async def fork() -> Tuple[int, Dict[str, Any]]:
+            try:
+                return await fork_once()
+            except Exception:
+                gateway_runner = getattr(self, "gateway_runner", None)
+                _, _, db = _gateway_session_resources(gateway_runner)
+                if db is not None:
+                    child = await asyncio.to_thread(db.get_session, child_session_id)
+                    if child is not None:
+                        child_config = _stored_model_config(child)
+                        child_target = str(
+                            child.get("thread_id")
+                            or child_config.get("_t3agent_target_thread")
+                            or ""
+                        ).strip()
+                        if (
+                            str(child.get("source") or "") == "t3agent"
+                            and str(child.get("parent_session_id") or "")
+                            == source_session_id
+                            and child_target == target_thread_id
+                        ):
+                            await asyncio.to_thread(
+                                db.delete_session,
+                                child_session_id,
+                            )
+                raise
+
         return await self._run_once(request_id, fork, accepted_status=201)
+
+    async def _delete_session(self, request: web.Request) -> web.Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        try:
+            payload = await self._read_frame(request, "session.delete")
+            request_id = _require_string(payload, "requestId")
+            session_id = _require_string(payload, "sessionId")
+            target_thread_id = _require_string(payload, "targetThreadId")
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
+        async def delete() -> Tuple[int, Dict[str, Any]]:
+            gateway_runner = getattr(self, "gateway_runner", None)
+            _, _, db = _gateway_session_resources(gateway_runner)
+            if db is None:
+                raise RuntimeError("Hermes session database is unavailable")
+            session = await asyncio.to_thread(db.get_session, session_id)
+            if not session:
+                return 200, _ack(request_id, "accepted")
+            source = str(session.get("source") or "").strip()
+            thread_id = str(session.get("thread_id") or "").strip()
+            stored_target_thread_id = str(
+                _stored_model_config(session).get("_t3agent_target_thread") or ""
+            ).strip()
+            parent_session_id = str(session.get("parent_session_id") or "").strip()
+            if (
+                source != "t3agent"
+                or target_thread_id not in {thread_id, stored_target_thread_id}
+                or not parent_session_id
+            ):
+                return 409, _ack(
+                    request_id,
+                    "rejected",
+                    "Only the matching child session created by T3 Agent can be deleted.",
+                )
+            await asyncio.to_thread(db.delete_session, session_id)
+            return 200, _ack(request_id, "accepted")
+
+        return await self._run_once(request_id, delete)
 
     async def _submit_message(self, request: web.Request) -> web.Response:
         if not self._authorized(request):
@@ -1148,11 +1455,26 @@ class T3AgentAdapter(BasePlatformAdapter):
             chat_id = _require_string(payload, "chatId")
             thread_id = _optional_string(payload, "threadId")
             content = _require_string(payload, "content", allow_empty=True)
-            model = _optional_string(payload, "model")
-            model_provider = _optional_string(payload, "modelProvider")
-            reasoning_effort = _optional_string(payload, "reasoningEffort")
-            if model is not None and model_provider is None:
-                raise ValueError("modelProvider is required when model is provided")
+            raw_model_selection = payload.get("modelSelection")
+            if raw_model_selection is not None and not isinstance(
+                raw_model_selection, dict
+            ):
+                raise ValueError("modelSelection must be an object")
+            model = (
+                _require_string(raw_model_selection, "model")
+                if raw_model_selection is not None
+                else None
+            )
+            model_provider = (
+                _require_string(raw_model_selection, "provider")
+                if raw_model_selection is not None
+                else None
+            )
+            reasoning_effort = (
+                _optional_string(raw_model_selection, "reasoningEffort")
+                if raw_model_selection is not None
+                else None
+            )
             user = payload.get("user")
             if not isinstance(user, dict):
                 raise ValueError("user must be an object")
@@ -1199,7 +1521,13 @@ class T3AgentAdapter(BasePlatformAdapter):
                 ),
             )
             gateway_runner = getattr(self, "gateway_runner", None)
-            if gateway_runner is not None and model is not None and model_provider is not None:
+            if model is not None and model_provider is not None:
+                if gateway_runner is None:
+                    return 202, _ack(
+                        request_id,
+                        "rejected",
+                        "Hermes model controls are unavailable. The message was not sent.",
+                    )
                 model_event = MessageEvent(
                     text=f"/model {model} --session --provider {model_provider}",
                     message_type=MessageType.TEXT,
@@ -1208,13 +1536,20 @@ class T3AgentAdapter(BasePlatformAdapter):
                     message_id=f"{message_id}:model",
                     metadata={"t3agent": True},
                 )
-                await gateway_runner._handle_model_command(model_event)
-            if gateway_runner is not None and reasoning_effort is not None:
-                from gateway.run import _platform_config_key
-
-                gateway_runner._apply_reasoning_selection(
+                model_error = await _apply_gateway_model_selection(
+                    gateway_runner,
+                    model_event,
                     session_key,
-                    _platform_config_key(source.platform),
+                    model,
+                    model_provider,
+                )
+                if model_error is not None:
+                    return 202, _ack(request_id, "rejected", model_error)
+            if gateway_runner is not None and reasoning_effort is not None:
+                _apply_gateway_reasoning_selection(
+                    gateway_runner,
+                    session_key,
+                    source.platform,
                     reasoning_effort,
                 )
             await self.handle_message(event)
