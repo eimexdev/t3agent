@@ -1363,7 +1363,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   useEffect(() => {
     const nextCustomAnswer = activePendingProgress?.customAnswer;
     if (typeof nextCustomAnswer !== "string") {
+      const hadPendingInput = lastSyncedPendingInputRef.current !== null;
       lastSyncedPendingInputRef.current = null;
+      if (hadPendingInput) {
+        promptRef.current = "";
+        setPrompt("");
+        setComposerCursor(0);
+        setComposerTrigger(null);
+        setComposerHighlightedItemId(null);
+      }
       return;
     }
 

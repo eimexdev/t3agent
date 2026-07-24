@@ -969,6 +969,18 @@ export const makeHermesAdapter = Effect.fn("makeHermesAdapter")(function* (
         });
       }
     }
+    const createdAt = yield* nowIso;
+    yield* publish({
+      eventId: EventId.make(`hermes:${requestId}:resolved`),
+      provider: PROVIDER,
+      providerInstanceId: options.instanceId,
+      threadId,
+      createdAt,
+      ...(context.activeTurnId ? { turnId: context.activeTurnId } : {}),
+      type: "user-input.resolved",
+      requestId: RuntimeRequestId.make(requestId),
+      payload: { answers },
+    });
     context.pendingRequests.delete(requestId);
   });
 

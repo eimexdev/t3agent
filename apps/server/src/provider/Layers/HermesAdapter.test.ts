@@ -9,6 +9,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
+  type ProviderRuntimeEvent,
   type HermesBridgeT3ToHermesRequest,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -377,6 +378,64 @@ it.layer(testLayer)("HermesAdapter", (it) => {
           response: "Staging",
         },
       );
+    }),
+  );
+
+  it.effect("emits user-input resolution after submitting a custom clarification answer", () =>
+    Effect.gen(function* () {
+      const { adapter, sent } = yield* HermesAdapterTestHarness;
+      sent.length = 0;
+      const threadId = ThreadId.make("hermes-custom-clarification-thread");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("hermes"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const emitted: Array<ProviderRuntimeEvent> = [];
+      const eventFiber = yield* adapter.streamEvents.pipe(
+        Stream.runForEach((event) =>
+          Effect.sync(() => {
+            emitted.push(event);
+          }),
+        ),
+        Effect.forkChild,
+      );
+      yield* Effect.yieldNow;
+      yield* adapter.receiveCallback({
+        protocolVersion: HERMES_BRIDGE_PROTOCOL_VERSION,
+        requestId: "custom-clarification-request",
+        deliveryId: "custom-clarification-delivery",
+        type: "clarification.request",
+        threadId,
+        sessionKey: "session-custom-clarification",
+        providerRequestId: "provider-custom-clarification",
+        clarifyId: "clarify-custom",
+        question: "Which area should we prioritize?",
+        choices: [{ id: "sales", label: "Sales" }],
+      });
+      yield* Effect.yieldNow;
+
+      const requested = emitted.find((event) => event.type === "user-input.requested");
+      NodeAssert.equal(requested?.type, "user-input.requested");
+      if (requested?.type !== "user-input.requested" || !requested.requestId) return;
+
+      const answers = { "clarify-custom": "None of the above because this is a test" };
+      yield* adapter.respondToUserInput(
+        threadId,
+        ApprovalRequestId.make(requested.requestId),
+        answers,
+      );
+      yield* Effect.yieldNow;
+      yield* Fiber.interrupt(eventFiber);
+
+      const resolved = emitted.find((event) => event.type === "user-input.resolved");
+      NodeAssert.equal(resolved?.type, "user-input.resolved");
+      if (resolved?.type === "user-input.resolved") {
+        NodeAssert.equal(resolved.requestId, requested.requestId);
+        NodeAssert.deepEqual(resolved.payload.answers, answers);
+      }
+      NodeAssert.equal(sent[0]?.type, "clarification.respond");
     }),
   );
 
