@@ -279,6 +279,16 @@ export const HermesBridgeTurnCompleteRequest = openStruct({
 });
 export type HermesBridgeTurnCompleteRequest = typeof HermesBridgeTurnCompleteRequest.Type;
 
+export const HermesBridgeSessionTitleUpdatedRequest = openStruct({
+  ...CallbackFields,
+  ...DestinationFields,
+  type: Schema.Literal("session.title.updated"),
+  sessionId: HermesBridgeSessionId,
+  title: TrimmedNonEmptyString,
+});
+export type HermesBridgeSessionTitleUpdatedRequest =
+  typeof HermesBridgeSessionTitleUpdatedRequest.Type;
+
 const InteractiveCallbackFields = {
   ...CallbackFields,
   ...DestinationFields,
@@ -334,6 +344,7 @@ export const HermesBridgeHermesToT3Request = Schema.Union([
   HermesBridgeDeleteMessageRequest,
   HermesBridgeTypingRequest,
   HermesBridgeTurnCompleteRequest,
+  HermesBridgeSessionTitleUpdatedRequest,
   HermesBridgeApprovalRequest,
   HermesBridgeClarificationRequest,
   HermesBridgeSlashConfirmationRequest,
@@ -462,6 +473,25 @@ export const HermesBridgeSessionDeleteRequest = openStruct({
 });
 export type HermesBridgeSessionDeleteRequest = typeof HermesBridgeSessionDeleteRequest.Type;
 
+export const HermesBridgeSessionTitleUpdateRequest = openStruct({
+  ...RequestFields,
+  type: Schema.Literal("session.title.update"),
+  sessionId: HermesBridgeSessionId,
+  targetThreadId: ThreadId,
+  title: TrimmedNonEmptyString,
+});
+export type HermesBridgeSessionTitleUpdateRequest =
+  typeof HermesBridgeSessionTitleUpdateRequest.Type;
+
+export const HermesBridgeSessionTitleUpdateResponse = openStruct({
+  ...RequestFields,
+  status: Schema.Literals(["accepted", "duplicate", "rejected"]),
+  title: Schema.optionalKey(TrimmedNonEmptyString),
+  message: Schema.optionalKey(TrimmedNonEmptyString),
+});
+export type HermesBridgeSessionTitleUpdateResponse =
+  typeof HermesBridgeSessionTitleUpdateResponse.Type;
+
 export const HermesBridgeHistoryMessage = openStruct({
   role: Schema.Literals(["user", "assistant", "system"]),
   content: Schema.String,
@@ -505,6 +535,18 @@ export const HermesConversationForkResult = Schema.Struct({
 });
 export type HermesConversationForkResult = typeof HermesConversationForkResult.Type;
 
+export const HermesConversationRenameInput = Schema.Struct({
+  threadId: ThreadId,
+  title: TrimmedNonEmptyString,
+});
+export type HermesConversationRenameInput = typeof HermesConversationRenameInput.Type;
+
+export const HermesConversationRenameResult = Schema.Struct({
+  threadId: ThreadId,
+  title: TrimmedNonEmptyString,
+});
+export type HermesConversationRenameResult = typeof HermesConversationRenameResult.Type;
+
 export const HermesLineageMetadata = Schema.Struct({
   kind: Schema.Literals(["fork", "import"]),
   label: TrimmedNonEmptyString,
@@ -517,7 +559,12 @@ export type HermesLineageMetadata = typeof HermesLineageMetadata.Type;
 export class HermesLifecycleError extends Schema.TaggedErrorClass<HermesLifecycleError>()(
   "HermesLifecycleError",
   {
-    operation: Schema.Literals(["sessions.list", "conversation.fork"]),
+    operation: Schema.Literals([
+      "sessions.list",
+      "conversation.fork",
+      "conversation.rename",
+      "titles.reconcile",
+    ]),
     message: TrimmedNonEmptyString,
     detail: Schema.optional(TrimmedNonEmptyString),
     sourceSessionId: Schema.optional(HermesBridgeSessionId),

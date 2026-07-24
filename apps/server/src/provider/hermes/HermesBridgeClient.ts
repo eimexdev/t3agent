@@ -6,6 +6,8 @@ import {
   HermesBridgeSessionForkRequest,
   HermesBridgeSessionForkResponse,
   HermesBridgeSessionListResponse,
+  HermesBridgeSessionTitleUpdateRequest,
+  HermesBridgeSessionTitleUpdateResponse,
   type HermesBridgeT3ToHermesRequest,
 } from "@t3tools/contracts/hermesBridge";
 import * as Effect from "effect/Effect";
@@ -33,6 +35,9 @@ export interface HermesBridgeClient {
   readonly deleteSession: (
     request: HermesBridgeSessionDeleteRequest,
   ) => Effect.Effect<HermesBridgeAcknowledgement, ProviderAdapterRequestError>;
+  readonly updateSessionTitle: (
+    request: HermesBridgeSessionTitleUpdateRequest,
+  ) => Effect.Effect<HermesBridgeSessionTitleUpdateResponse, ProviderAdapterRequestError>;
 }
 
 function requestPath(request: HermesBridgeT3ToHermesRequest): string {
@@ -127,6 +132,18 @@ export function makeHermesBridgeClient(input: {
       ),
   );
 
+  const updateSessionTitle = Effect.fn("HermesBridgeClient.updateSessionTitle")(
+    (request: HermesBridgeSessionTitleUpdateRequest) =>
+      HttpClientRequest.post(`${baseUrl}/v1/sessions/title`).pipe(
+        authorize,
+        HttpClientRequest.setHeader("idempotency-key", request.requestId),
+        HttpClientRequest.bodyJsonUnsafe(request),
+        execute.execute,
+        Effect.flatMap(HttpClientResponse.schemaBodyJson(HermesBridgeSessionTitleUpdateResponse)),
+        Effect.mapError(mapRequestError("session.title.update")),
+      ),
+  );
+
   const send: HermesBridgeClient["send"] = (request) =>
     HttpClientRequest.post(`${baseUrl}${requestPath(request)}`).pipe(
       authorize,
@@ -137,5 +154,12 @@ export function makeHermesBridgeClient(input: {
       Effect.mapError(mapRequestError(request.type)),
     );
 
-  return { getCapabilities, listSessions, forkSession, deleteSession, send };
+  return {
+    getCapabilities,
+    listSessions,
+    forkSession,
+    deleteSession,
+    updateSessionTitle,
+    send,
+  };
 }

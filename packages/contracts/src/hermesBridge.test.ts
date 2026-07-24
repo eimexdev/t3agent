@@ -13,6 +13,9 @@ import {
   HermesBridgeSlashConfirmationRequest,
   HermesBridgeSlashConfirmationResponseRequest,
   HermesBridgeSessionDeleteRequest,
+  HermesBridgeSessionTitleUpdatedRequest,
+  HermesBridgeSessionTitleUpdateRequest,
+  HermesBridgeSessionTitleUpdateResponse,
   HermesBridgeT3ToHermesRequest,
   HermesBridgeThreadCreateRequest,
   HermesBridgeThreadCreateResponse,
@@ -40,6 +43,15 @@ const decodeThreadCreateRequest = Schema.decodeUnknownSync(HermesBridgeThreadCre
 const decodeThreadCreateResponse = Schema.decodeUnknownSync(HermesBridgeThreadCreateResponse);
 const decodeConversationForkInput = Schema.decodeUnknownSync(HermesConversationForkInput);
 const decodeSessionDeleteRequest = Schema.decodeUnknownSync(HermesBridgeSessionDeleteRequest);
+const decodeSessionTitleUpdateRequest = Schema.decodeUnknownSync(
+  HermesBridgeSessionTitleUpdateRequest,
+);
+const decodeSessionTitleUpdateResponse = Schema.decodeUnknownSync(
+  HermesBridgeSessionTitleUpdateResponse,
+);
+const decodeSessionTitleUpdatedRequest = Schema.decodeUnknownSync(
+  HermesBridgeSessionTitleUpdatedRequest,
+);
 
 const requestFields = {
   protocolVersion: 1,
@@ -253,6 +265,51 @@ describe("Hermes bridge T3 to Hermes requests", () => {
         sessionKey: "session-1",
         confirmId: "confirm-1",
         choice: "yes",
+      }),
+    ).toThrow();
+  });
+});
+
+describe("Hermes session titles", () => {
+  it("decodes title updates in both directions", () => {
+    expect(
+      decodeSessionTitleUpdateRequest({
+        ...requestFields,
+        type: "session.title.update",
+        sessionId: "session-1",
+        targetThreadId: "thread-1",
+        title: "Renamed in the sidebar",
+      }).title,
+    ).toBe("Renamed in the sidebar");
+
+    expect(
+      decodeSessionTitleUpdateResponse({
+        ...requestFields,
+        status: "accepted",
+        title: "Renamed in the sidebar",
+      }).status,
+    ).toBe("accepted");
+
+    expect(
+      decodeSessionTitleUpdatedRequest({
+        ...callbackFields,
+        type: "session.title.updated",
+        chatId: "t3agent",
+        threadId: "thread-1",
+        sessionId: "session-1",
+        title: "Renamed with /title",
+      }).title,
+    ).toBe("Renamed with /title");
+  });
+
+  it("rejects empty session titles", () => {
+    expect(() =>
+      decodeSessionTitleUpdateRequest({
+        ...requestFields,
+        type: "session.title.update",
+        sessionId: "session-1",
+        targetThreadId: "thread-1",
+        title: " ",
       }),
     ).toThrow();
   });

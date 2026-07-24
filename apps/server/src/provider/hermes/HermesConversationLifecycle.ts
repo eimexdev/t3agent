@@ -13,6 +13,8 @@ import {
   type HermesBridgeSessionForkResponse,
   type HermesConversationForkInput,
   type HermesConversationForkResult,
+  type HermesConversationRenameInput,
+  type HermesConversationRenameResult,
   type OrchestrationCommand,
   type ProjectId,
 } from "@t3tools/contracts";
@@ -49,7 +51,10 @@ interface LifecycleProvider {
 
 export interface HermesConversationLifecycleDependencies {
   readonly getClient: () => Effect.Effect<
-    Pick<HermesBridgeClient, "listSessions" | "forkSession" | "deleteSession">,
+    Pick<
+      HermesBridgeClient,
+      "listSessions" | "forkSession" | "deleteSession" | "updateSessionTitle"
+    >,
     Error
   >;
   readonly getSnapshot: () => Effect.Effect<LifecycleSnapshot, Error>;
@@ -64,6 +69,10 @@ export interface HermesConversationLifecycle {
   readonly forkConversation: (
     input: HermesConversationForkInput,
   ) => Effect.Effect<HermesConversationForkResult, HermesLifecycleError>;
+  readonly renameConversation: (
+    input: HermesConversationRenameInput,
+  ) => Effect.Effect<HermesConversationRenameResult, HermesLifecycleError>;
+  readonly reconcileTitles: Effect.Effect<void, HermesLifecycleError>;
 }
 
 type LifecycleOperation = HermesLifecycleError["operation"];
@@ -102,6 +111,7 @@ export function makeHermesConversationLifecycle(
   dependencies: HermesConversationLifecycleDependencies,
 ): HermesConversationLifecycle {
   const forkLock = Semaphore.makeUnsafe(1);
+  const renameLock = Semaphore.makeUnsafe(1);
   const nextCommandId = Effect.fn("HermesConversationLifecycle.nextCommandId")(function* (
     tag: string,
   ) {
@@ -148,12 +158,38 @@ export function makeHermesConversationLifecycle(
     }
   });
 
+  const reconcileTitleProjection = Effect.fn(
+    "HermesConversationLifecycle.reconcileTitleProjection",
+  )(function* (sessions: HermesBridgeSessionListResponse, snapshot: LifecycleSnapshot) {
+    const liveThreads = new Map(
+      snapshot.threads
+        .filter((thread) => thread.deletedAt === null)
+        .map((thread) => [thread.id, thread] as const),
+    );
+    yield* Effect.forEach(
+      sessions.sessions,
+      Effect.fnUntraced(function* (session) {
+        if (session.threadId === undefined || session.title === undefined) return;
+        const thread = liveThreads.get(session.threadId);
+        if (thread === undefined || thread.title === session.title) return;
+        yield* dependencies.dispatch({
+          type: "thread.meta.update",
+          commandId: yield* nextCommandId("hermes-title-reconcile"),
+          threadId: session.threadId,
+          title: session.title,
+        });
+      }),
+      { concurrency: 1, discard: true },
+    );
+  });
+
   const listSessions = Effect.gen(function* () {
     const client = yield* dependencies.getClient();
     const [response, snapshot] = yield* Effect.all([
       client.listSessions,
       dependencies.getSnapshot(),
     ]);
+    yield* reconcileTitleProjection(response, snapshot);
     const liveThreadIds = new Set(
       snapshot.threads.filter((thread) => thread.deletedAt === null).map((thread) => thread.id),
     );
@@ -179,6 +215,95 @@ export function makeHermesConversationLifecycle(
     Effect.mapError((cause) =>
       lifecycleError("sessions.list", cause, "Unable to load Hermes sessions."),
     ),
+  );
+
+  const reconcileTitles = Effect.gen(function* () {
+    const client = yield* dependencies.getClient();
+    const [sessions, snapshot] = yield* Effect.all([
+      client.listSessions,
+      dependencies.getSnapshot(),
+    ]);
+    yield* reconcileTitleProjection(sessions, snapshot);
+  }).pipe(
+    Effect.withSpan("HermesConversationLifecycle.reconcileTitles"),
+    Effect.mapError((cause) =>
+      lifecycleError("titles.reconcile", cause, "Unable to reconcile Hermes session titles."),
+    ),
+  );
+
+  const renameConversation = Effect.fn("HermesConversationLifecycle.renameConversation")(
+    function* (input: HermesConversationRenameInput) {
+      const client = yield* dependencies.getClient();
+      const [sessions, snapshot] = yield* Effect.all([
+        client.listSessions,
+        dependencies.getSnapshot(),
+      ]);
+      const thread = snapshot.threads.find(
+        (candidate) => candidate.id === input.threadId && candidate.deletedAt === null,
+      );
+      if (thread === undefined) {
+        return yield* new HermesLifecycleError({
+          operation: "conversation.rename",
+          message: "The T3 Agent conversation is no longer available.",
+          sourceThreadId: input.threadId,
+        });
+      }
+      const session = sessions.sessions.find((candidate) => candidate.threadId === input.threadId);
+      if (session === undefined) {
+        return yield* new HermesLifecycleError({
+          operation: "conversation.rename",
+          message: "The Hermes session is not available yet.",
+          sourceThreadId: input.threadId,
+        });
+      }
+
+      const response = yield* client.updateSessionTitle({
+        protocolVersion: HERMES_BRIDGE_PROTOCOL_VERSION,
+        requestId: HermesBridgeRequestId.make(
+          `conversation-rename:${session.sessionId}:${yield* dependencies.randomUuid}`,
+        ),
+        type: "session.title.update",
+        sessionId: session.sessionId,
+        targetThreadId: input.threadId,
+        title: input.title,
+      });
+      if (response.status === "rejected") {
+        return yield* new HermesLifecycleError({
+          operation: "conversation.rename",
+          message: response.message ?? "Hermes rejected the session title.",
+          sourceSessionId: session.sessionId,
+          sourceThreadId: input.threadId,
+        });
+      }
+      if (response.title === undefined) {
+        return yield* new HermesLifecycleError({
+          operation: "conversation.rename",
+          message: "Hermes accepted the rename without returning the session title.",
+          sourceSessionId: session.sessionId,
+          sourceThreadId: input.threadId,
+        });
+      }
+      if (thread.title !== response.title) {
+        yield* dependencies.dispatch({
+          type: "thread.meta.update",
+          commandId: yield* nextCommandId("hermes-conversation-rename"),
+          threadId: input.threadId,
+          title: response.title,
+        });
+      }
+      return {
+        threadId: input.threadId,
+        title: response.title,
+      };
+    },
+    (effect) =>
+      renameLock
+        .withPermit(effect)
+        .pipe(
+          Effect.mapError((cause) =>
+            lifecycleError("conversation.rename", cause, "Unable to rename the Hermes session."),
+          ),
+        ),
   );
 
   const forkConversation = Effect.fn("HermesConversationLifecycle.forkConversation")(
@@ -380,5 +505,5 @@ export function makeHermesConversationLifecycle(
         ),
   );
 
-  return { listSessions, forkConversation };
+  return { listSessions, forkConversation, renameConversation, reconcileTitles };
 }

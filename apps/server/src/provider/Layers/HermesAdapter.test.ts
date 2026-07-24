@@ -71,6 +71,7 @@ const testLayer = Layer.effect(
       listSessions: Effect.die("not used by adapter tests"),
       forkSession: () => Effect.die("not used by adapter tests"),
       deleteSession: () => Effect.die("not used by adapter tests"),
+      updateSessionTitle: () => Effect.die("not used by adapter tests"),
     };
     const adapter = yield* makeHermesAdapter({
       instanceId: ProviderInstanceId.make("hermes-test"),
@@ -335,6 +336,41 @@ it.layer(testLayer)("HermesAdapter", (it) => {
       NodeAssert.deepEqual(duplicate, {
         status: "duplicate",
         deliveryId: "duplicate-delivery",
+      });
+    }),
+  );
+
+  it.effect("projects Hermes session title callbacks as thread metadata", () =>
+    Effect.gen(function* () {
+      const { adapter } = yield* HermesAdapterTestHarness;
+      const threadId = ThreadId.make("hermes-title-thread");
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* Effect.yieldNow;
+
+      yield* adapter.receiveCallback({
+        protocolVersion: HERMES_BRIDGE_PROTOCOL_VERSION,
+        requestId: "title-callback-request",
+        deliveryId: "title-callback-delivery",
+        type: "session.title.updated",
+        chatId: "t3agent",
+        threadId,
+        sessionId: "session-title-thread",
+        title: "Renamed with /title",
+      });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      NodeAssert.deepEqual(events[0], {
+        eventId: "hermes:title-callback-delivery:title",
+        provider: "hermes",
+        providerInstanceId: "hermes-test",
+        threadId,
+        createdAt: events[0]?.createdAt,
+        type: "thread.metadata.updated",
+        payload: { name: "Renamed with /title" },
       });
     }),
   );

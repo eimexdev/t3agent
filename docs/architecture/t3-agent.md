@@ -30,6 +30,10 @@ The compatibility project still exists internally because T3's persistence model
 
 A T3 Agent thread is backed by one Hermes session. New conversations create new Hermes sessions; a fork creates a new T3 thread and a child Hermes session. T3's stored transcript is the visible projection, while Hermes's session database remains the authoritative agent context.
 
+The Hermes session title is likewise authoritative. A Hermes-backed T3 thread's stored title is only the sidebar projection of that value, not an independently generated name. While a new session is waiting for Hermes's automatic title, the sidebar may display the first user message as a provisional label. Every successful Hermes title change—including automatic naming and `/title`—replaces that provisional label and updates the projection.
+
+A sidebar rename first updates Hermes and changes the projection only after Hermes accepts it; rejection or unavailability leaves the displayed title unchanged and surfaces the error. T3's inherited first-turn title generator must not run for Hermes-backed threads. Live Hermes title callbacks are the normal update path, while startup and reconnect reconciliation repair missed callbacks; whenever the stored projection disagrees with a titled Hermes session, Hermes wins.
+
 The interface must never silently switch the Hermes session underneath an existing T3 transcript. Lifecycle commands therefore require T3-native navigation semantics rather than unconditional command passthrough.
 
 ### Forking

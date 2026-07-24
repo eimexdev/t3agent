@@ -7,6 +7,7 @@ import {
   ProviderDriverKind,
   type ProjectId,
   type OrchestrationSession,
+  ProviderInstanceId,
   ThreadId,
   type ProviderSession,
   type RuntimeMode,
@@ -87,6 +88,7 @@ const HANDLED_TURN_START_KEY_MAX = 10_000;
 const HANDLED_TURN_START_KEY_TTL = Duration.minutes(30);
 const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 const DEFAULT_THREAD_TITLE = "New thread";
+const HERMES_PROVIDER_INSTANCE_ID = ProviderInstanceId.make("hermes");
 
 export function providerErrorLabel(value: string | undefined): string {
   const normalized = value?.trim();
@@ -816,7 +818,10 @@ const make = Effect.gen(function* () {
         ...generationInput,
       }).pipe(Effect.forkScoped);
 
-      if (canReplaceThreadTitle(thread.title, event.payload.titleSeed)) {
+      if (
+        thread.modelSelection.instanceId !== HERMES_PROVIDER_INSTANCE_ID &&
+        canReplaceThreadTitle(thread.title, event.payload.titleSeed)
+      ) {
         yield* maybeGenerateThreadTitleForFirstTurn({
           threadId: event.payload.threadId,
           cwd: generationCwd,

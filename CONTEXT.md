@@ -30,6 +30,10 @@ _Avoid_: Project thread, workspace, channel
 The durable Hermes-owned conversation context that the agent continues across turns.
 _Avoid_: T3 transcript, project
 
+**Hermes session title**:
+The Hermes-owned name of a session. A Hermes-backed T3 Agent thread displays this title as a local projection rather than owning an independent name.
+_Avoid_: T3 thread name, synchronized title
+
 **Cross-gateway conversation**:
 A Hermes session that originated from the CLI or another messaging surface rather than T3 Agent.
 _Avoid_: Synced thread

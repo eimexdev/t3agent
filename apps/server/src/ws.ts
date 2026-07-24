@@ -312,6 +312,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.serverSignalProcess, AuthOrchestrationOperateScope],
   [WS_METHODS.hermesSessionsList, AuthOrchestrationReadScope],
   [WS_METHODS.hermesConversationFork, AuthOrchestrationOperateScope],
+  [WS_METHODS.hermesConversationRename, AuthOrchestrationOperateScope],
   [WS_METHODS.cloudGetRelayClientStatus, AuthRelayWriteScope],
   [WS_METHODS.cloudInstallRelayClient, AuthRelayWriteScope],
   [WS_METHODS.sourceControlLookupRepository, AuthOrchestrationReadScope],
@@ -1581,6 +1582,12 @@ const makeWsRpcLayer = (
             hermesConversationLifecycle.forkConversation(input),
             { "rpc.aggregate": "hermes" },
           ),
+        [WS_METHODS.hermesConversationRename]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.hermesConversationRename,
+            hermesConversationLifecycle.renameConversation(input),
+            { "rpc.aggregate": "hermes" },
+          ),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) =>
           observeRpcEffect(WS_METHODS.cloudGetRelayClientStatus, relayClient.resolve, {
             "rpc.aggregate": "cloud",
@@ -2039,7 +2046,11 @@ const makeWsRpcLayer = (
 
               yield* providerRegistry
                 .refresh()
-                .pipe(Effect.ignoreCause({ log: true }), Effect.forkScoped);
+                .pipe(
+                  Effect.andThen(hermesConversationLifecycle.reconcileTitles),
+                  Effect.ignoreCause({ log: true }),
+                  Effect.forkScoped,
+                );
 
               const liveUpdates = Stream.merge(
                 keybindingsUpdates,
