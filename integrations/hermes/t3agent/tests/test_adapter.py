@@ -1020,6 +1020,64 @@ async def test_stream_metadata_marks_preview_then_routes_final_edit(
 
 
 @pytest.mark.asyncio
+async def test_structured_tool_lifecycle_posts_full_tool_frames(
+    fake_platform: SimpleNamespace,
+) -> None:
+    received: List[Dict[str, Any]] = []
+
+    async def receive(request: web.Request) -> web.Response:
+        frame = await request.json()
+        received.append(frame)
+        return web.json_response(
+            {
+                "protocolVersion": 1,
+                "requestId": frame["requestId"],
+                "deliveryId": frame["deliveryId"],
+                "status": "accepted",
+            }
+        )
+
+    app = web.Application()
+    app.router.add_post("/api/hermes/hermes-test/events", receive)
+    server = TestServer(app)
+    await server.start_server()
+    adapter = adapter_module.T3AgentAdapter(make_config(bridge_url=str(server.make_url("/"))))
+    adapter.bridge_url = adapter.bridge_url.rstrip("/")
+    adapter._client = ClientSession()
+    adapter._processing_sources[("chat-1", "thread-1")] = "hermes-user:turn-1"
+    try:
+        await adapter.send_tool_started(
+            "chat-1",
+            "call-1",
+            "skill_view",
+            {"name": "query"},
+            metadata={"thread_id": "thread-1"},
+        )
+        await adapter.send_tool_completed(
+            "chat-1",
+            "call-1",
+            "skill_view",
+            {"name": "query"},
+            "Skill loaded",
+            metadata={"thread_id": "thread-1"},
+        )
+
+        assert [frame["type"] for frame in received] == [
+            "tool.started",
+            "tool.completed",
+        ]
+        assert received[0]["sourceMessageId"] == "hermes-user:turn-1"
+        assert received[0]["toolCallId"] == "call-1"
+        assert received[0]["input"] == {"name": "query"}
+        assert received[1]["result"] == "Skill loaded"
+        assert received[1]["isError"] is False
+    finally:
+        await adapter._client.close()
+        adapter._client = None
+        await server.close()
+
+
+@pytest.mark.asyncio
 async def test_real_stream_consumer_does_not_complete_turn_at_segment_boundaries(
     fake_platform: SimpleNamespace,
 ) -> None:

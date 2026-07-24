@@ -2866,9 +2866,16 @@ describe("ProviderRuntimeIngestion", () => {
       turnId: asTurnId("turn-9"),
       payload: {
         itemType: "command_execution",
-        status: "in_progress",
+        status: "inProgress",
         title: "Read file",
         detail: "/tmp/file.ts",
+        data: {
+          toolCallId: "call-read",
+          item: {
+            name: "read_file",
+            input: { path: "/tmp/file.ts" },
+          },
+        },
       },
     });
 
@@ -2883,11 +2890,22 @@ describe("ProviderRuntimeIngestion", () => {
     );
 
     expect(thread.session?.status).toBe("ready");
-    expect(
-      thread.activities.some(
-        (activity: ProviderRuntimeTestActivity) => activity.kind === "tool.started",
-      ),
-    ).toBe(true);
+    const toolStarted = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.kind === "tool.started",
+    );
+    expect(toolStarted?.payload).toEqual({
+      itemType: "command_execution",
+      status: "inProgress",
+      title: "Read file",
+      detail: "/tmp/file.ts",
+      data: {
+        toolCallId: "call-read",
+        item: {
+          name: "read_file",
+          input: { path: "/tmp/file.ts" },
+        },
+      },
+    });
   });
 
   it("consumes P1 runtime events into thread metadata, diff checkpoints, and activities", async () => {

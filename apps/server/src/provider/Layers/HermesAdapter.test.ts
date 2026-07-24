@@ -236,6 +236,77 @@ it.layer(testLayer)("HermesAdapter", (it) => {
     }),
   );
 
+  it.effect("emits correlated native tool lifecycle events with full tool data", () =>
+    Effect.gen(function* () {
+      const { adapter } = yield* HermesAdapterTestHarness;
+      const threadId = ThreadId.make("hermes-tool-thread");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("hermes"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.take(3),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* Effect.yieldNow;
+      const turn = yield* adapter.sendTurn({ threadId, input: "read the skill" });
+      const sourceMessageId = `hermes-user:${turn.turnId}`;
+      yield* adapter.receiveCallback({
+        protocolVersion: HERMES_BRIDGE_PROTOCOL_VERSION,
+        requestId: "callback-tool-start-request",
+        deliveryId: "callback-tool-start-delivery",
+        type: "tool.started",
+        chatId: "t3agent",
+        threadId,
+        sourceMessageId,
+        toolCallId: "call-skill",
+        name: "skill_view",
+        input: { name: "query" },
+      });
+      yield* adapter.receiveCallback({
+        protocolVersion: HERMES_BRIDGE_PROTOCOL_VERSION,
+        requestId: "callback-tool-complete-request",
+        deliveryId: "callback-tool-complete-delivery",
+        type: "tool.completed",
+        chatId: "t3agent",
+        threadId,
+        sourceMessageId,
+        toolCallId: "call-skill",
+        name: "skill_view",
+        input: { name: "query" },
+        result: "Skill loaded",
+        isError: false,
+      });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      NodeAssert.deepEqual(
+        events.map((event) => event.type),
+        ["turn.started", "item.started", "item.completed"],
+      );
+      const started = events[1];
+      const completed = events[2];
+      NodeAssert.equal(started?.itemId, completed?.itemId);
+      NodeAssert.deepEqual(completed?.payload, {
+        itemType: "mcp_tool_call",
+        status: "completed",
+        title: "Read skill",
+        detail: "Skill loaded",
+        data: {
+          toolCallId: "call-skill",
+          item: {
+            toolCallId: "call-skill",
+            name: "skill_view",
+            input: { name: "query" },
+            result: { output: "Skill loaded" },
+          },
+        },
+      });
+    }),
+  );
+
   it.effect("acknowledges a repeated delivery id as a duplicate", () =>
     Effect.gen(function* () {
       const { adapter } = yield* HermesAdapterTestHarness;

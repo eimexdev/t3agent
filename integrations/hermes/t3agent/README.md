@@ -110,8 +110,11 @@ capabilities response includes the initial command catalog; T3 can use it for
 slash-command completion without reimplementing command behavior.
 
 Callback tags are `message.send`, `message.edit`, `message.delete`,
-`typing.set`, `turn.complete`, `approval.request`, `clarification.request`,
-`slash-confirmation.request`, and `thread.create`. Message send/edit content is
+`tool.started`, `tool.completed`, `typing.set`, `turn.complete`,
+`approval.request`, `clarification.request`, `slash-confirmation.request`, and
+`thread.create`. Structured tool callbacks carry the tool-call ID, name,
+arguments, and completion result, so T3 renders native expandable tool cards
+instead of Hermes' compact emoji progress lines. Message send/edit content is
 always cumulative full content. `final` closes an individual message bubble;
 it does not imply that the whole agent turn is done. The plugin emits
 `turn.complete` from Hermes' post-delivery lifecycle hook only after the final
