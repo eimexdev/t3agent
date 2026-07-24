@@ -242,6 +242,79 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-base-")))(
   "OrchestrationProjectionPipeline",
   (it) => {
+    it.effect("fully replaces imported history slots on refresh", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const threadId = ThreadId.make("thread-import-refresh");
+        const messageId = MessageId.make("message-import-refresh");
+        const originalAt = "2026-01-01T00:00:00.000Z";
+        const refreshedAt = "2026-01-01T00:01:00.000Z";
+
+        yield* eventStore.append({
+          type: "thread.message-sent",
+          eventId: EventId.make("evt-import-original"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: originalAt,
+          commandId: CommandId.make("cmd-import-original"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-import-original"),
+          metadata: {},
+          payload: {
+            threadId,
+            messageId,
+            role: "user",
+            text: "legacy provider wrapper",
+            turnId: null,
+            streaming: false,
+            createdAt: originalAt,
+            updatedAt: originalAt,
+          },
+        });
+        yield* eventStore.append({
+          type: "thread.message-sent",
+          eventId: EventId.make("evt-import-refresh"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: refreshedAt,
+          commandId: CommandId.make("cmd-import-refresh"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-import-refresh"),
+          metadata: {},
+          payload: {
+            threadId,
+            messageId,
+            role: "assistant",
+            text: "",
+            replaceText: true,
+            turnId: null,
+            streaming: false,
+            imported: true,
+            createdAt: refreshedAt,
+            updatedAt: refreshedAt,
+          },
+        });
+
+        yield* projectionPipeline.bootstrap;
+
+        const rows = yield* sql<{
+          readonly role: string;
+          readonly text: string;
+          readonly createdAt: string;
+        }>`
+          SELECT
+            role,
+            text,
+            created_at AS "createdAt"
+          FROM projection_thread_messages
+          WHERE message_id = ${messageId}
+        `;
+        assert.deepEqual(rows, [{ role: "assistant", text: "", createdAt: refreshedAt }]);
+      }),
+    );
+
     it.effect("stores message attachment references without mutating payloads", () =>
       Effect.gen(function* () {
         const projectionPipeline = yield* OrchestrationProjectionPipeline;
