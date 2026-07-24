@@ -1,6 +1,7 @@
 import {
   ApprovalRequestId,
   EventId,
+  HermesBridgeAudioAttachmentId,
   type HermesBridgeApprovalRequest,
   HermesBridgeChatId,
   type HermesBridgeChoice,
@@ -724,6 +725,63 @@ export const makeHermesAdapter = Effect.fn("makeHermesAdapter")(function* (
                 };
                 break;
               }
+              case "token-usage.updated": {
+                const base = yield* eventBase(callback, threadId, "token-usage");
+                yield* publish({
+                  ...base,
+                  type: "thread.token-usage.updated",
+                  payload: {
+                    usage: {
+                      usedTokens: callback.usedTokens,
+                      maxTokens: callback.maxTokens,
+                      ...(callback.totalProcessedTokens !== undefined
+                        ? { totalProcessedTokens: callback.totalProcessedTokens }
+                        : {}),
+                      ...(callback.inputTokens !== undefined
+                        ? { inputTokens: callback.inputTokens }
+                        : {}),
+                      ...(callback.cachedInputTokens !== undefined
+                        ? { cachedInputTokens: callback.cachedInputTokens }
+                        : {}),
+                      ...(callback.outputTokens !== undefined
+                        ? { outputTokens: callback.outputTokens }
+                        : {}),
+                      ...(callback.reasoningOutputTokens !== undefined
+                        ? { reasoningOutputTokens: callback.reasoningOutputTokens }
+                        : {}),
+                      compactsAutomatically: callback.compactsAutomatically,
+                    },
+                  },
+                });
+                break;
+              }
+              case "voice.transcription": {
+                const base = yield* eventBase(callback, threadId, "voice-transcription");
+                yield* publish({
+                  ...base,
+                  type: "item.updated",
+                  itemId: RuntimeItemId.make(`hermes-voice:${callback.messageId}`),
+                  payload: {
+                    itemType: "user_message",
+                    status: callback.status === "failed" ? "failed" : "completed",
+                    title:
+                      callback.status === "transcribing"
+                        ? "Transcribing voice note"
+                        : callback.status === "failed"
+                          ? "Voice transcription failed"
+                          : "Voice note transcribed",
+                    data: {
+                      messageId: callback.messageId,
+                      status: callback.status,
+                      ...(callback.transcript !== undefined
+                        ? { transcript: callback.transcript }
+                        : {}),
+                      ...(callback.error !== undefined ? { error: callback.error } : {}),
+                    },
+                  },
+                });
+                break;
+              }
               case "session.title.updated": {
                 const base = yield* eventBase(callback, threadId, "title");
                 yield* publish({
@@ -856,7 +914,7 @@ export const makeHermesAdapter = Effect.fn("makeHermesAdapter")(function* (
       activeTurnId: turnId,
       updatedAt: createdAt,
     };
-    const images = yield* Effect.forEach(input.attachments ?? [], (attachment) => {
+    const bridgeAttachments = yield* Effect.forEach(input.attachments ?? [], (attachment) => {
       const attachmentPath = resolveAttachmentPath({
         attachmentsDir: serverConfig.attachmentsDir,
         attachment,
@@ -870,15 +928,33 @@ export const makeHermesAdapter = Effect.fn("makeHermesAdapter")(function* (
           }),
         );
       }
-      return Effect.succeed({
-        type: "image" as const,
-        id: HermesBridgeImageAttachmentId.make(attachment.id),
-        name: attachment.name,
-        mimeType: attachment.mimeType,
-        sizeBytes: attachment.sizeBytes,
-        source: { type: "local-path" as const, path: attachmentPath },
-      });
+      return Effect.succeed(
+        attachment.type === "image"
+          ? {
+              type: "image" as const,
+              id: HermesBridgeImageAttachmentId.make(attachment.id),
+              name: attachment.name,
+              mimeType: attachment.mimeType,
+              sizeBytes: attachment.sizeBytes,
+              source: { type: "local-path" as const, path: attachmentPath },
+            }
+          : {
+              type: "audio" as const,
+              id: HermesBridgeAudioAttachmentId.make(attachment.id),
+              name: attachment.name,
+              mimeType: attachment.mimeType,
+              sizeBytes: attachment.sizeBytes,
+              durationMs: attachment.durationMs,
+              waveform: attachment.waveform,
+              source: { type: "local-path" as const, path: attachmentPath },
+            },
+      );
     });
+    const images = bridgeAttachments.filter(
+      (attachment): attachment is Extract<(typeof bridgeAttachments)[number], { type: "image" }> =>
+        attachment.type === "image",
+    );
+    const audio = bridgeAttachments.find((attachment) => attachment.type === "audio");
     yield* publish({
       eventId: EventId.make(`hermes:${turnId}:started`),
       provider: PROVIDER,
@@ -916,6 +992,7 @@ export const makeHermesAdapter = Effect.fn("makeHermesAdapter")(function* (
             }
           : {}),
         ...(images.length > 0 ? { images } : {}),
+        ...(audio ? { audio } : {}),
       })
       .pipe(
         Effect.flatMap((acknowledgement) =>

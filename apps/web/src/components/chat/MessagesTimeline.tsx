@@ -50,6 +50,8 @@ import {
   MessageCircleIcon,
   MousePointerClickIcon,
   PaintbrushIcon,
+  PauseIcon,
+  PlayIcon,
   MinusIcon,
   SquarePenIcon,
   TerminalIcon,
@@ -104,6 +106,8 @@ import { formatHermesLineageLabel, parseHermesLineageMessage } from "../../herme
 import { Link } from "@tanstack/react-router";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { useThreadShell } from "../../state/entities";
+import type { ChatAudioAttachment } from "../../types";
+import { formatVoiceDuration } from "../../voiceRecorderStore";
 
 import {
   buildInlineTerminalContextText,
@@ -920,7 +924,11 @@ function SystemTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
-  const userImages = row.message.attachments ?? [];
+  const userAttachments = row.message.attachments ?? [];
+  const userImages = userAttachments.filter((attachment) => attachment.type === "image");
+  const userAudio = userAttachments.filter(
+    (attachment): attachment is ChatAudioAttachment => attachment.type === "audio",
+  );
   const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
   const terminalContexts = displayedUserMessage.contexts;
   const previewAnnotations: ParsedPreviewAnnotation[] = [];
@@ -948,6 +956,9 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           className="mb-2"
           onImageExpand={ctx.onImageExpand}
         />
+        {userAudio.map((audio) => (
+          <VoiceNotePlayer key={audio.id} audio={audio} />
+        ))}
         {previewAnnotations.map((annotation, index) => (
           <UserMessagePreviewAnnotationCard
             key={annotation.id}
@@ -1041,7 +1052,9 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
 
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
-  const assistantImages = row.message.attachments ?? [];
+  const assistantImages = (row.message.attachments ?? []).filter(
+    (attachment) => attachment.type === "image",
+  );
   const messageText =
     row.message.text ||
     (row.message.streaming || assistantImages.length > 0 ? "" : "(empty response)");
@@ -1147,6 +1160,97 @@ function MessageImageAttachmentGrid(props: {
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+function VoiceNotePlayer({ audio }: { audio: ChatAudioAttachment }) {
+  const elementRef = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [rate, setRate] = useState(1);
+  const waveform =
+    audio.waveform.length > 0 ? audio.waveform : Array.from({ length: 36 }, () => 0.2);
+
+  return (
+    <div className="mb-2 min-w-56 rounded-xl border border-border/65 bg-background/35 px-2.5 py-2">
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          size="icon-sm"
+          className="rounded-full"
+          aria-label={playing ? "Pause voice note" : "Play voice note"}
+          disabled={!audio.previewUrl}
+          onClick={() => {
+            const element = elementRef.current;
+            if (!element) return;
+            if (element.paused) void element.play();
+            else element.pause();
+          }}
+        >
+          {playing ? <PauseIcon className="fill-current" /> : <PlayIcon className="fill-current" />}
+        </Button>
+        <svg
+          viewBox={`0 0 ${waveform.length * 3} 28`}
+          preserveAspectRatio="none"
+          className="h-7 min-w-24 flex-1 text-muted-foreground/65"
+          aria-hidden
+        >
+          <path
+            d={waveform
+              .map((level, index) => {
+                const height = Math.max(3, Math.min(26, level * 26));
+                const x = index * 3 + 1;
+                return `M${x} ${14 - height / 2}V${14 + height / 2}`;
+              })
+              .join(" ")}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+        </svg>
+        <span className="text-muted-foreground text-xs tabular-nums">
+          {formatVoiceDuration(playing ? elapsedMs : audio.durationMs)}
+        </span>
+        <button
+          type="button"
+          className="rounded-md bg-muted px-1.5 py-1 font-medium text-muted-foreground text-xs"
+          onClick={() => {
+            const nextRate = rate === 1 ? 1.5 : rate === 1.5 ? 2 : 1;
+            setRate(nextRate);
+            if (elementRef.current) elementRef.current.playbackRate = nextRate;
+          }}
+          aria-label={`Playback speed ${rate}x`}
+        >
+          {rate}x
+        </button>
+        <audio
+          ref={elementRef}
+          src={audio.previewUrl}
+          preload="metadata"
+          onPlay={(event) => {
+            document
+              .querySelectorAll<HTMLAudioElement>("audio[data-voice-note]")
+              .forEach((other) => {
+                if (other !== event.currentTarget) other.pause();
+              });
+            setPlaying(true);
+          }}
+          onPause={() => setPlaying(false)}
+          onEnded={() => setPlaying(false)}
+          onTimeUpdate={(event) => setElapsedMs(event.currentTarget.currentTime * 1_000)}
+          data-voice-note
+          className="hidden"
+        />
+      </div>
+      {audio.transcriptionStatus === "transcribing" ? (
+        <div className="mt-1.5 text-muted-foreground/70 text-xs">Transcribing…</div>
+      ) : audio.transcriptionStatus === "failed" ? (
+        <div className="mt-1.5 text-red-500 text-xs">Couldn’t transcribe</div>
+      ) : audio.transcript ? (
+        <div className="mt-2 border-border/50 border-t pt-2 text-sm">{audio.transcript}</div>
+      ) : null}
     </div>
   );
 }

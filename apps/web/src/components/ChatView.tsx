@@ -112,6 +112,7 @@ import {
   type TurnDiffSummary,
 } from "../types";
 import { useTheme } from "../hooks/useTheme";
+import { useVoiceRecorderStore } from "../voiceRecorderStore";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
@@ -2117,6 +2118,26 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const displayServerMessages = useMemo<ReadonlyArray<ChatMessage>>(() => {
     if (!serverMessages) return [];
+    const voiceTranscriptionByTurnId = new Map<
+      string,
+      { readonly status: "transcribing" | "ready" | "failed"; readonly transcript?: string }
+    >();
+    for (const activity of activeThread?.activities ?? []) {
+      if (activity.kind !== "voice-transcription.updated" || !activity.turnId) continue;
+      if (typeof activity.payload !== "object" || activity.payload === null) continue;
+      const payload = activity.payload as Record<string, unknown>;
+      if (
+        payload.status !== "transcribing" &&
+        payload.status !== "ready" &&
+        payload.status !== "failed"
+      ) {
+        continue;
+      }
+      voiceTranscriptionByTurnId.set(activity.turnId, {
+        status: payload.status,
+        ...(typeof payload.transcript === "string" ? { transcript: payload.transcript } : {}),
+      });
+    }
     return serverMessages.map((message) => {
       if (!message.attachments || message.attachments.length === 0) {
         return message;
@@ -2125,11 +2146,28 @@ function ChatViewContent(props: ChatViewProps) {
         ...message,
         attachments: message.attachments.map((attachment) => {
           const previewUrl = serverAttachmentUrlById.get(attachment.id);
+          if (attachment.type === "audio") {
+            const transcription = message.turnId
+              ? voiceTranscriptionByTurnId.get(message.turnId)
+              : undefined;
+            return {
+              ...attachment,
+              ...(previewUrl ? { previewUrl } : {}),
+              ...(transcription
+                ? {
+                    transcriptionStatus: transcription.status,
+                    ...(transcription.transcript !== undefined
+                      ? { transcript: transcription.transcript }
+                      : {}),
+                  }
+                : {}),
+            };
+          }
           return previewUrl ? { ...attachment, previewUrl } : attachment;
         }),
       };
     });
-  }, [serverAttachmentUrlById, serverMessages]);
+  }, [activeThread?.activities, serverAttachmentUrlById, serverMessages]);
   useEffect(() => {
     if (typeof Image === "undefined" || displayServerMessages.length === 0) {
       return;
@@ -4502,6 +4540,13 @@ function ChatViewContent(props: ChatViewProps) {
       onAdvanceActivePendingUserInput();
       return;
     }
+    const recorderBeforeSend = useVoiceRecorderStore.getState().recorder;
+    if (
+      recorderBeforeSend.status === "recording" &&
+      recorderBeforeSend.threadId === activeThread.id
+    ) {
+      await useVoiceRecorderStore.getState().stop();
+    }
     const sendCtx = composerRef.current?.getSendContext();
     if (!sendCtx) return;
     const {
@@ -4517,6 +4562,11 @@ function ChatViewContent(props: ChatViewProps) {
       selectedModelSelection: ctxSelectedModelSelection,
       providerAvailable,
     } = sendCtx;
+    const recorderForSend = useVoiceRecorderStore.getState().recorder;
+    const voiceDraft =
+      recorderForSend.status === "draft" && recorderForSend.threadId === activeThread.id
+        ? recorderForSend.draft
+        : null;
     const promptForSend = promptRef.current;
     const lifecycleCommand = IS_T3_AGENT_MODE ? parseT3AgentLifecycleCommand(promptForSend) : null;
     if (lifecycleCommand) {
@@ -4602,7 +4652,7 @@ function ChatViewContent(props: ChatViewProps) {
       composerRef.current?.resetCursorState();
       return;
     }
-    if (!hasSendableContent) {
+    if (!hasSendableContent && !voiceDraft) {
       if (expiredTerminalContextCount > 0) {
         const toastCopy = buildExpiredTerminalContextToastCopy(
           expiredTerminalContextCount,
@@ -4686,25 +4736,57 @@ function ChatViewContent(props: ChatViewProps) {
       model: ctxSelectedModel,
       models: ctxSelectedProviderModels,
       effort: ctxSelectedPromptEffort,
-      text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
+      text: messageTextForSend || (voiceDraft ? "" : IMAGE_ONLY_BOOTSTRAP_PROMPT),
     });
-    const turnAttachmentsPromise = Promise.all(
-      composerImagesSnapshot.map(async (image) => ({
+    const turnAttachmentsPromise = Promise.all([
+      ...composerImagesSnapshot.map(async (image) => ({
         type: "image" as const,
         name: image.name,
         mimeType: image.mimeType,
         sizeBytes: image.sizeBytes,
         dataUrl: await readFileAsDataUrl(image.file),
       })),
-    );
-    const optimisticAttachments = composerImagesSnapshot.map((image) => ({
-      type: "image" as const,
-      id: image.id,
-      name: image.name,
-      mimeType: image.mimeType,
-      sizeBytes: image.sizeBytes,
-      previewUrl: image.previewUrl,
-    }));
+      ...(voiceDraft
+        ? [
+            (async () => ({
+              type: "audio" as const,
+              name: `voice-note-${Date.now()}.${voiceDraft.mimeType.includes("mp4") ? "m4a" : "webm"}`,
+              mimeType: voiceDraft.mimeType,
+              sizeBytes: voiceDraft.blob.size,
+              durationMs: voiceDraft.durationMs,
+              waveform: [...voiceDraft.waveform],
+              dataUrl: await readFileAsDataUrl(
+                new File([voiceDraft.blob], "voice-note", { type: voiceDraft.mimeType }),
+              ),
+            }))(),
+          ]
+        : []),
+    ]);
+    const optimisticAttachments = [
+      ...composerImagesSnapshot.map((image) => ({
+        type: "image" as const,
+        id: image.id,
+        name: image.name,
+        mimeType: image.mimeType,
+        sizeBytes: image.sizeBytes,
+        previewUrl: image.previewUrl,
+      })),
+      ...(voiceDraft
+        ? [
+            {
+              type: "audio" as const,
+              id: `voice-${messageIdForSend}`,
+              name: "Voice note",
+              mimeType: voiceDraft.mimeType,
+              sizeBytes: voiceDraft.blob.size,
+              durationMs: voiceDraft.durationMs,
+              waveform: [...voiceDraft.waveform],
+              previewUrl: voiceDraft.previewUrl,
+              transcriptionStatus: "transcribing" as const,
+            },
+          ]
+        : []),
+    ];
     // Sending always returns to the live edge. The new row becomes the
     // anchored end-space target so it lands near the top while the response
     // streams into the reserved space below it.
@@ -4748,6 +4830,9 @@ function ChatViewContent(props: ChatViewProps) {
     }
     promptRef.current = "";
     clearComposerDraftContent(composerDraftTarget);
+    if (voiceDraft) {
+      useVoiceRecorderStore.getState().consumeDraft();
+    }
     composerRef.current?.resetCursorState();
 
     let firstComposerImageName: string | null = null;
@@ -4765,6 +4850,8 @@ function ChatViewContent(props: ChatViewProps) {
         titleSeed = formatTerminalContextLabel(composerTerminalContextsSnapshot[0]!);
       } else if (composerElementContextsSnapshot.length > 0) {
         titleSeed = formatElementContextLabel(composerElementContextsSnapshot[0]!);
+      } else if (voiceDraft) {
+        titleSeed = "Voice note";
       } else {
         titleSeed = "New thread";
       }
@@ -4871,6 +4958,16 @@ function ChatViewContent(props: ChatViewProps) {
     }
 
     if (failure !== null) {
+      if (voiceDraft) {
+        useVoiceRecorderStore.setState({
+          recorder: {
+            status: "draft",
+            environmentId,
+            threadId: threadIdForSend,
+            draft: voiceDraft,
+          },
+        });
+      }
       if (
         promptRef.current.length === 0 &&
         composerImagesRef.current.length === 0 &&

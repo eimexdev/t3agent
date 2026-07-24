@@ -97,16 +97,40 @@ A blocking Hermes request for information needed to continue an agent run.
 _Avoid_: Approval, follow-up message
 
 **Voice note**:
-A recorded user message delivered to Hermes as speech for automatic transcription.
+A recorded user message delivered to Hermes as speech for automatic transcription, optionally with typed accompaniment.
 _Avoid_: Audio file, voice channel
+
+**Voice recording**:
+An in-progress microphone capture that may be stopped into a voice draft or stopped and delivered immediately as a voice note.
+_Avoid_: Voice draft, live voice message
+
+**Recording bar**:
+The persistent control surface for a voice recording when the user navigates away from its originating thread.
+_Avoid_: Composer recorder, voice player
 
 **Voice draft**:
 A completed but unsent voice recording available for replay, discard, or delivery.
 _Avoid_: Paused recording, attachment
 
+**Interrupted voice draft**:
+A recoverable voice draft created when capture ends unexpectedly after recording usable audio.
+_Avoid_: Failed voice note, corrupted recording
+
 **Voice transcript**:
 The Hermes-produced text associated with a specific voice note.
 _Avoid_: Assistant reply, caption
+
+**Typed accompaniment**:
+Optional user-authored text delivered with a voice note to frame, qualify, or instruct Hermes about the recording.
+_Avoid_: Transcript, caption
+
+**Context footprint**:
+The latest real Hermes-reported prompt-token occupancy for a thread relative to its absolute effective model context length. T3 Agent hides the context-window meter until that first trustworthy reading exists; Hermes's automatic-compaction threshold is explanatory metadata rather than the ring's denominator. It is distinct from cumulative tokens processed across the session, especially after compaction.
+_Avoid_: Session token total, billing usage
+
+**Recording stop control**:
+The explicit control that ends microphone capture and creates a voice draft, presented with the same red-square visual language as T3 Code's active-turn stop control.
+_Avoid_: Pause, cancel recording
 
 ## Automation and remote access
 

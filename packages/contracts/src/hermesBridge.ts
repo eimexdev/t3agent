@@ -63,6 +63,8 @@ export type HermesBridgeConfirmationId = typeof HermesBridgeConfirmationId.Type;
 
 export const HermesBridgeImageAttachmentId = makeBridgeId("HermesBridgeImageAttachmentId");
 export type HermesBridgeImageAttachmentId = typeof HermesBridgeImageAttachmentId.Type;
+export const HermesBridgeAudioAttachmentId = makeBridgeId("HermesBridgeAudioAttachmentId");
+export type HermesBridgeAudioAttachmentId = typeof HermesBridgeAudioAttachmentId.Type;
 
 const RequestFields = {
   protocolVersion: HermesBridgeProtocolVersion,
@@ -102,6 +104,18 @@ export const HermesBridgeImageAttachment = openStruct({
 });
 export type HermesBridgeImageAttachment = typeof HermesBridgeImageAttachment.Type;
 
+export const HermesBridgeAudioAttachment = openStruct({
+  type: Schema.Literal("audio"),
+  id: HermesBridgeAudioAttachmentId,
+  name: TrimmedNonEmptyString,
+  mimeType: TrimmedNonEmptyString,
+  sizeBytes: Schema.Number,
+  durationMs: Schema.Number,
+  waveform: Schema.Array(Schema.Number),
+  source: HermesBridgeImageSource,
+});
+export type HermesBridgeAudioAttachment = typeof HermesBridgeAudioAttachment.Type;
+
 export const HermesBridgeUser = openStruct({
   id: TrimmedNonEmptyString,
   name: TrimmedNonEmptyString,
@@ -136,25 +150,17 @@ export const HermesBridgeInboundMessageRequest = openStruct({
   images: Schema.optionalKey(
     Schema.Array(HermesBridgeImageAttachment).check(Schema.isMaxLength(HERMES_BRIDGE_MAX_IMAGES)),
   ),
+  audio: Schema.optionalKey(HermesBridgeAudioAttachment),
 });
 export type HermesBridgeInboundMessageRequest = typeof HermesBridgeInboundMessageRequest.Type;
 
-export const HermesBridgeInterruptRequest = Schema.Union([
-  openStruct({
-    ...RequestFields,
-    type: Schema.Literal("turn.interrupt"),
-    sessionKey: HermesBridgeSessionKey,
-    chatId: Schema.optionalKey(HermesBridgeChatId),
-    threadId: Schema.optionalKey(HermesBridgeThreadId),
-  }),
-  openStruct({
-    ...RequestFields,
-    type: Schema.Literal("turn.interrupt"),
-    sessionKey: Schema.optionalKey(HermesBridgeSessionKey),
-    chatId: HermesBridgeChatId,
-    threadId: Schema.optionalKey(HermesBridgeThreadId),
-  }),
-]);
+export const HermesBridgeInterruptRequest = openStruct({
+  ...RequestFields,
+  type: Schema.Literal("turn.interrupt"),
+  sessionKey: Schema.optionalKey(HermesBridgeSessionKey),
+  chatId: Schema.optionalKey(HermesBridgeChatId),
+  threadId: Schema.optionalKey(HermesBridgeThreadId),
+});
 export type HermesBridgeInterruptRequest = typeof HermesBridgeInterruptRequest.Type;
 
 export const HermesBridgeApprovalResponseRequest = openStruct({
@@ -204,7 +210,7 @@ export type HermesBridgeT3ToHermesRequest = typeof HermesBridgeT3ToHermesRequest
 // Hermes -> T3 Agent callbacks
 
 const DestinationFields = {
-  chatId: HermesBridgeChatId,
+  chatId: Schema.optionalKey(HermesBridgeChatId),
   threadId: Schema.optionalKey(HermesBridgeThreadId),
   sourceMessageId: Schema.optionalKey(MessageId),
 } as const;
@@ -279,6 +285,33 @@ export const HermesBridgeTurnCompleteRequest = openStruct({
 });
 export type HermesBridgeTurnCompleteRequest = typeof HermesBridgeTurnCompleteRequest.Type;
 
+export const HermesBridgeVoiceTranscriptionRequest = openStruct({
+  ...CallbackFields,
+  ...DestinationFields,
+  type: Schema.Literal("voice.transcription"),
+  messageId: MessageId,
+  status: Schema.Literals(["transcribing", "ready", "failed"]),
+  transcript: Schema.optionalKey(Schema.String),
+  error: Schema.optionalKey(TrimmedNonEmptyString),
+});
+export type HermesBridgeVoiceTranscriptionRequest =
+  typeof HermesBridgeVoiceTranscriptionRequest.Type;
+
+export const HermesBridgeTokenUsageRequest = openStruct({
+  ...CallbackFields,
+  ...DestinationFields,
+  type: Schema.Literal("token-usage.updated"),
+  usedTokens: Schema.Number,
+  maxTokens: Schema.Number,
+  totalProcessedTokens: Schema.optionalKey(Schema.Number),
+  inputTokens: Schema.optionalKey(Schema.Number),
+  cachedInputTokens: Schema.optionalKey(Schema.Number),
+  outputTokens: Schema.optionalKey(Schema.Number),
+  reasoningOutputTokens: Schema.optionalKey(Schema.Number),
+  compactsAutomatically: Schema.Boolean,
+});
+export type HermesBridgeTokenUsageRequest = typeof HermesBridgeTokenUsageRequest.Type;
+
 export const HermesBridgeSessionTitleUpdatedRequest = openStruct({
   ...CallbackFields,
   ...DestinationFields,
@@ -344,6 +377,8 @@ export const HermesBridgeHermesToT3Request = Schema.Union([
   HermesBridgeDeleteMessageRequest,
   HermesBridgeTypingRequest,
   HermesBridgeTurnCompleteRequest,
+  HermesBridgeVoiceTranscriptionRequest,
+  HermesBridgeTokenUsageRequest,
   HermesBridgeSessionTitleUpdatedRequest,
   HermesBridgeApprovalRequest,
   HermesBridgeClarificationRequest,
@@ -377,6 +412,9 @@ export const HermesBridgeCapabilities = openStruct({
   slashConfirmations: Schema.Boolean,
   threadCreation: Schema.Boolean,
   commandCatalog: Schema.Boolean,
+  voiceNotes: Schema.optionalKey(Schema.Boolean),
+  voiceNoteMaxBytes: Schema.optionalKey(Schema.Number),
+  contextWindowUsage: Schema.optionalKey(Schema.Boolean),
 });
 export type HermesBridgeCapabilities = typeof HermesBridgeCapabilities.Type;
 

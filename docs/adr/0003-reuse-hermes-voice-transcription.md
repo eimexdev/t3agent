@@ -1,0 +1,3 @@
+# Reuse Hermes voice transcription
+
+T3 Agent sends voice notes through Hermes's existing gateway voice pipeline rather than owning speech-to-text behavior. Hermes remains responsible for transcription, combined voice-and-text input, configured media limits, and agent-run preparation; T3 Agent owns recording, durable audio presentation, and projecting the returned transcript into the originating voice-note message instead of showing a separate transcript echo. Voice support is an additive, capability-gated extension to bridge protocol v1: the controlled T3 Hermes adapter uses a narrow Hermes voice-preparation lifecycle, reports transcription state by stable message and voice-note identity, and releases the normal agent run only after transcription succeeds.

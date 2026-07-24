@@ -1520,6 +1520,9 @@ class T3AgentAdapter(BasePlatformAdapter):
                     "slashConfirmations": True,
                     "threadCreation": True,
                     "commandCatalog": True,
+                    "voiceNotes": True,
+                    "voiceNoteMaxBytes": 128 * 1024 * 1024,
+                    "contextWindowUsage": True,
                 },
                 "commands": _command_catalog(),
                 "models": _model_inventory(),
@@ -1961,6 +1964,13 @@ class T3AgentAdapter(BasePlatformAdapter):
             if not isinstance(images, list) or not all(isinstance(item, dict) for item in images):
                 raise ValueError("images must be an array of image attachments")
             media_urls = [_image_source_value(item) for item in images]
+            audio = payload.get("audio")
+            if audio is not None and not isinstance(audio, dict):
+                raise ValueError("audio must be an audio attachment")
+            audio_path = _image_source_value(audio) if audio is not None else None
+            audio_mime_type = (
+                _require_string(audio, "mimeType") if audio is not None else None
+            )
         except ValueError as exc:
             return web.json_response({"error": str(exc)}, status=400)
 
@@ -1976,18 +1986,35 @@ class T3AgentAdapter(BasePlatformAdapter):
             )
             event = MessageEvent(
                 text=content,
-                message_type=MessageType.TEXT,
+                message_type=MessageType.VOICE if audio_path else MessageType.TEXT,
                 source=source,
                 raw_message=payload,
                 message_id=message_id,
-                media_urls=media_urls,
-                media_types=["image"] * len(images),
+                media_urls=[*media_urls, *([audio_path] if audio_path else [])],
+                media_types=[
+                    *(["image"] * len(images)),
+                    *([audio_mime_type] if audio_mime_type else []),
+                ],
                 metadata={
                     "requestId": request_id,
                     "threadId": thread_id,
                     "t3agent": True,
                 },
             )
+            if audio_path:
+                voice_message_ids = getattr(self, "_t3_voice_message_ids", set())
+                voice_message_ids.add(str(message_id))
+                self._t3_voice_message_ids = voice_message_ids
+                await self._post_event(
+                    "voice.transcription",
+                    {
+                        "chatId": str(chat_id),
+                        **({"threadId": str(thread_id)} if thread_id else {}),
+                        "sourceMessageId": str(message_id),
+                        "messageId": str(message_id),
+                        "status": "transcribing",
+                    },
+                )
             session_key = build_session_key(
                 source,
                 group_sessions_per_user=self.config.extra.get(
@@ -2278,6 +2305,35 @@ class T3AgentAdapter(BasePlatformAdapter):
         source_message_id = self._source_message_id(chat_id, metadata, reply_to)
         if source_message_id:
             fields["sourceMessageId"] = source_message_id
+        voice_message_ids = getattr(self, "_t3_voice_message_ids", set())
+        if (
+            source_message_id in voice_message_ids
+            and content.startswith('🎙️ "')
+            and content.endswith('"')
+        ):
+            transcript = content[len('🎙️ "') : -1]
+            voice_ready_ids = getattr(self, "_t3_voice_ready_ids", set())
+            voice_ready_ids.add(source_message_id)
+            self._t3_voice_ready_ids = voice_ready_ids
+            ok, body, error = await self._post_event(
+                "voice.transcription",
+                {
+                    "chatId": str(chat_id),
+                    **({"threadId": thread_id} if thread_id else {}),
+                    "sourceMessageId": source_message_id,
+                    "messageId": source_message_id,
+                    "status": "ready",
+                    "transcript": transcript,
+                },
+                metadata=metadata,
+            )
+            return SendResult(
+                success=ok,
+                message_id=source_message_id if ok else None,
+                error=error,
+                raw_response=body if ok else None,
+                retryable=not ok,
+            )
         self._message_destinations[message_id] = {
             "chatId": str(chat_id),
             **({"threadId": thread_id} if thread_id else {}),
@@ -2575,6 +2631,101 @@ class T3AgentAdapter(BasePlatformAdapter):
         if thread_id:
             fields["threadId"] = str(thread_id)
         await self._enqueue_turn_completion(fields)
+        gateway_runner = getattr(self, "gateway_runner", None)
+        if gateway_runner is not None:
+            try:
+                session_key = build_session_key(
+                    source,
+                    group_sessions_per_user=self.config.extra.get(
+                        "group_sessions_per_user", True
+                    ),
+                    thread_sessions_per_user=self.config.extra.get(
+                        "thread_sessions_per_user", False
+                    ),
+                )
+                cached = getattr(gateway_runner, "_agent_cache", {}).get(session_key)
+                agent = cached[0] if isinstance(cached, tuple) else cached
+                if agent is None:
+                    agent = getattr(gateway_runner, "_running_agents", {}).get(session_key)
+                compressor = getattr(agent, "context_compressor", None)
+                used_tokens = int(
+                    getattr(compressor, "last_real_prompt_tokens", 0)
+                    or getattr(compressor, "last_prompt_tokens", 0)
+                    or 0
+                )
+                max_tokens = int(getattr(compressor, "context_length", 0) or 0)
+                if used_tokens > 0 and max_tokens > 0:
+                    usage_fields: Dict[str, Any] = {
+                        "chatId": str(source.chat_id),
+                        "sourceMessageId": str(event.message_id),
+                        "usedTokens": used_tokens,
+                        "maxTokens": max_tokens,
+                        "totalProcessedTokens": int(
+                            getattr(agent, "session_total_tokens", 0) or 0
+                        ),
+                        "inputTokens": int(
+                            getattr(agent, "session_input_tokens", 0) or 0
+                        ),
+                        "cachedInputTokens": int(
+                            getattr(agent, "session_cache_read_tokens", 0) or 0
+                        ),
+                        "outputTokens": int(
+                            getattr(agent, "session_output_tokens", 0) or 0
+                        ),
+                        "reasoningOutputTokens": int(
+                            getattr(agent, "session_reasoning_tokens", 0) or 0
+                        ),
+                        "compactsAutomatically": bool(
+                            getattr(compressor, "threshold_tokens", 0)
+                        ),
+                    }
+                    if thread_id:
+                        usage_fields["threadId"] = str(thread_id)
+                    await self._post_event("token-usage.updated", usage_fields)
+            except Exception:
+                logger.debug(
+                    "[t3agent] unable to publish context usage", exc_info=True
+                )
+        voice_message_ids = getattr(self, "_t3_voice_message_ids", set())
+        voice_ready_ids = getattr(self, "_t3_voice_ready_ids", set())
+        source_message_id = str(event.message_id)
+        if source_message_id in voice_message_ids:
+            transcripts = getattr(event, "_gateway_pending_stt_transcripts", None)
+            if (
+                source_message_id not in voice_ready_ids
+                and isinstance(transcripts, list)
+                and transcripts
+            ):
+                transcript = "\n\n".join(
+                    str(item).strip() for item in transcripts if str(item).strip()
+                )
+                if transcript:
+                    await self._post_event(
+                        "voice.transcription",
+                        {
+                            "chatId": str(source.chat_id),
+                            **({"threadId": str(thread_id)} if thread_id else {}),
+                            "sourceMessageId": source_message_id,
+                            "messageId": source_message_id,
+                            "status": "ready",
+                            "transcript": transcript,
+                        },
+                    )
+                    voice_ready_ids.add(source_message_id)
+            if source_message_id not in voice_ready_ids:
+                await self._post_event(
+                    "voice.transcription",
+                    {
+                        "chatId": str(source.chat_id),
+                        **({"threadId": str(thread_id)} if thread_id else {}),
+                        "sourceMessageId": source_message_id,
+                        "messageId": source_message_id,
+                        "status": "failed",
+                        "error": "Hermes could not transcribe this recording.",
+                    },
+                )
+            voice_message_ids.discard(source_message_id)
+            voice_ready_ids.discard(source_message_id)
         if outcome_value == "success":
             self._schedule_session_title_watch(source)
         processing_key = self._destination_key(

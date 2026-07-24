@@ -144,6 +144,13 @@ export function makeHermesProviderSnapshot(input: {
     badgeLabel: "Agent",
     showInteractionModeToggle: false,
     requiresNewThreadForModelChange: false,
+    ...(input.capabilities?.capabilities.voiceNotes
+      ? {
+          voiceNotes: {
+            maxBytes: input.capabilities.capabilities.voiceNoteMaxBytes ?? 128 * 1024 * 1024,
+          },
+        }
+      : {}),
     enabled: input.enabled,
     installed: true,
     version: null,

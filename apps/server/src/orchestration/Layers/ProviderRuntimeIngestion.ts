@@ -636,6 +636,20 @@ export function runtimeEventToActivities(
     }
 
     case "item.updated": {
+      if (event.payload.itemType === "user_message") {
+        return [
+          {
+            id: event.eventId,
+            createdAt: event.createdAt,
+            tone: event.payload.status === "failed" ? "error" : "info",
+            kind: "voice-transcription.updated",
+            summary: event.payload.title ?? "Voice transcription updated",
+            payload: event.payload.data ?? {},
+            turnId: toTurnId(event.turnId) ?? null,
+            ...maybeSequence,
+          },
+        ];
+      }
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }

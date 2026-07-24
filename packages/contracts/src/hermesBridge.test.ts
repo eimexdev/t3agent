@@ -96,6 +96,30 @@ it("decodes model inventory and effective reasoning from capabilities", () => {
 });
 
 describe("Hermes bridge T3 to Hermes requests", () => {
+  it("decodes a voice note with typed accompaniment", () => {
+    const decoded = decodeInboundMessage({
+      protocolVersion: 1,
+      requestId: "request-voice",
+      type: "message.submit",
+      messageId: "message-voice",
+      chatId: "chat-1",
+      user: { id: "owner", name: "Owner" },
+      content: "Please focus on the deployment detail.",
+      audio: {
+        type: "audio",
+        id: "audio-1",
+        name: "voice-note.webm",
+        mimeType: "audio/webm;codecs=opus",
+        sizeBytes: 1024,
+        durationMs: 4200,
+        waveform: [0.1, 0.8, 0.3],
+        source: { type: "local-path", path: "/tmp/voice-note.webm" },
+      },
+    });
+
+    expect(decoded.audio?.durationMs).toBe(4200);
+    expect(decoded.content).toBe("Please focus on the deployment detail.");
+  });
   it("decodes an image-bearing inbound message and preserves future fields", () => {
     const decoded = decodeInboundMessage({
       ...requestFields,
@@ -316,6 +340,32 @@ describe("Hermes session titles", () => {
 });
 
 describe("Hermes bridge Hermes to T3 callbacks", () => {
+  it("decodes voice transcription and context usage callbacks", () => {
+    const voice = decodeHermesToT3({
+      ...callbackFields,
+      type: "voice.transcription",
+      chatId: "chat-1",
+      threadId: "thread-1",
+      sourceMessageId: "message-voice",
+      messageId: "message-voice",
+      status: "ready",
+      transcript: "Ship the web version first.",
+    });
+    const usage = decodeHermesToT3({
+      ...callbackFields,
+      type: "token-usage.updated",
+      chatId: "chat-1",
+      threadId: "thread-1",
+      sourceMessageId: "message-voice",
+      usedTokens: 32000,
+      maxTokens: 200000,
+      totalProcessedTokens: 45000,
+      compactsAutomatically: true,
+    });
+
+    expect(voice.type).toBe("voice.transcription");
+    expect(usage.type).toBe("token-usage.updated");
+  });
   it("decodes send and cumulative edit callbacks with final state", () => {
     const send = decodeHermesToT3({
       ...callbackFields,

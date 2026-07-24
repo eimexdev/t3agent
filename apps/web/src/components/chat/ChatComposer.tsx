@@ -170,6 +170,9 @@ import {
   LockOpenIcon,
   PenLineIcon,
   SparklesIcon,
+  MicIcon,
+  SquareIcon,
+  Trash2Icon,
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
@@ -202,6 +205,11 @@ import { formatProviderSkillDisplayName } from "../../providerSkillPresentation"
 import { searchProviderSkills } from "../../providerSkillSearch";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
+import {
+  formatVoiceDuration,
+  type VoiceDraft,
+  useVoiceRecorderStore,
+} from "../../voiceRecorderStore";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 
@@ -506,6 +514,7 @@ export interface ChatComposerHandle {
     selectedProvider: ProviderDriverKind;
     selectedModel: string;
     selectedProviderModels: ReadonlyArray<ServerProvider["models"][number]>;
+    voiceDraft: VoiceDraft | null;
   };
 }
 
@@ -874,6 +883,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     () => selectedProviderEntry?.snapshot ?? null,
     [selectedProviderEntry],
   );
+  const voiceRecorder = useVoiceRecorderStore((state) => state.recorder);
+  const voiceRecorderError = useVoiceRecorderStore((state) => state.error);
+  const startVoiceRecording = useVoiceRecorderStore((state) => state.start);
+  const stopVoiceRecording = useVoiceRecorderStore((state) => state.stop);
+  const discardVoiceRecording = useVoiceRecorderStore((state) => state.discard);
+  const restoreVoiceRecording = useVoiceRecorderStore((state) => state.restore);
+  const voiceNotesAvailable = selectedProviderEntry?.snapshot.voiceNotes !== undefined;
+  const voiceBelongsToActiveThread =
+    voiceRecorder.status !== "idle" && voiceRecorder.threadId === activeThreadId;
+  const activeVoiceDraft =
+    voiceRecorder.status === "draft" && voiceBelongsToActiveThread ? voiceRecorder.draft : null;
+  useEffect(() => {
+    void restoreVoiceRecording();
+  }, [restoreVoiceRecording]);
   const commandGhostHint = useMemo(
     () => resolveCommandGhostHint(prompt, selectedProviderStatus?.slashCommands ?? []),
     [prompt, selectedProviderStatus?.slashCommands],
@@ -2193,6 +2216,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         selectedProvider,
         selectedModel,
         selectedProviderModels,
+        voiceDraft: activeVoiceDraft,
       }),
     }),
     [
@@ -2221,6 +2245,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       selectedPromptEffort,
       selectedProvider,
       selectedProviderModels,
+      activeVoiceDraft,
     ],
   );
 
@@ -2762,6 +2787,73 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 }
                 className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
               >
+                {voiceNotesAvailable && activeThreadId ? (
+                  voiceRecorder.status === "recording" && voiceBelongsToActiveThread ? (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="rounded-full bg-red-500/12 text-red-500 hover:bg-red-500/20 hover:text-red-500"
+                            aria-label="Stop recording"
+                            onClick={() => void stopVoiceRecording()}
+                          />
+                        }
+                      >
+                        <SquareIcon className="size-3.5 fill-current" />
+                      </TooltipTrigger>
+                      <TooltipPopup side="top">
+                        Stop recording · {formatVoiceDuration(voiceRecorder.elapsedMs)}
+                      </TooltipPopup>
+                    </Tooltip>
+                  ) : voiceRecorder.status === "draft" && voiceBelongsToActiveThread ? (
+                    <div className="flex h-8 items-center gap-2 rounded-full bg-muted/70 px-2">
+                      <audio
+                        src={voiceRecorder.draft.previewUrl}
+                        controls
+                        className="h-7 w-36 max-w-[28vw]"
+                      />
+                      <span className="text-muted-foreground text-xs tabular-nums">
+                        {formatVoiceDuration(voiceRecorder.draft.durationMs)}
+                      </span>
+                      <Button
+                        type="button"
+                        size="icon-xs"
+                        variant="ghost"
+                        aria-label="Discard voice recording"
+                        onClick={discardVoiceRecording}
+                      >
+                        <Trash2Icon />
+                      </Button>
+                    </div>
+                  ) : voiceRecorder.status === "idle" ? (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            aria-label="Record voice note"
+                            onClick={() =>
+                              void startVoiceRecording(
+                                environmentId,
+                                activeThreadId,
+                                selectedProviderEntry.snapshot.voiceNotes?.maxBytes ??
+                                  128 * 1024 * 1024,
+                              )
+                            }
+                          />
+                        }
+                      >
+                        <MicIcon />
+                      </TooltipTrigger>
+                      <TooltipPopup side="top">Record voice note</TooltipPopup>
+                    </Tooltip>
+                  ) : null
+                ) : null}
                 <ComposerFooterPrimaryActions
                   compact={isComposerPrimaryActionsCompact}
                   activeContextWindow={activeContextWindow}
@@ -2778,7 +2870,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     projectSelectionRequired
                   }
                   isPreparingWorktree={isPreparingWorktree}
-                  hasSendableContent={composerSendState.hasSendableContent}
+                  hasSendableContent={
+                    composerSendState.hasSendableContent ||
+                    activeVoiceDraft !== null ||
+                    (voiceRecorder.status === "recording" && voiceBelongsToActiveThread)
+                  }
                   preserveComposerFocusOnPointerDown={isMobileViewport}
                   onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                   onInterrupt={handleInterruptPrimaryAction}
@@ -2787,6 +2883,43 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               </div>
             </div>
           )}
+          {voiceRecorderError ? (
+            <div className="px-3 pb-2 text-red-500 text-xs">{voiceRecorderError}</div>
+          ) : null}
+          {voiceRecorder.status !== "idle" && !voiceBelongsToActiveThread ? (
+            <div className="fixed right-4 bottom-4 z-50 flex items-center gap-3 rounded-full border border-border/70 bg-background/95 px-3 py-2 shadow-lg backdrop-blur">
+              <span className="size-2 animate-pulse rounded-full bg-red-500" />
+              <span className="text-sm">
+                {voiceRecorder.status === "recording"
+                  ? `Recording · ${formatVoiceDuration(voiceRecorder.elapsedMs)}`
+                  : `Voice draft · ${formatVoiceDuration(voiceRecorder.draft.durationMs)}`}
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  window.location.assign(
+                    `/${voiceRecorder.environmentId}/${voiceRecorder.threadId}`,
+                  );
+                }}
+              >
+                Return
+              </Button>
+              {voiceRecorder.status === "recording" ? (
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  className="text-red-500"
+                  aria-label="Stop recording"
+                  onClick={() => void stopVoiceRecording()}
+                >
+                  <SquareIcon className="fill-current" />
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
     </form>

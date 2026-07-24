@@ -275,6 +275,52 @@ async def test_message_submit_builds_normal_event_and_is_idempotent(
 
 
 @pytest.mark.asyncio
+async def test_message_submit_builds_voice_event_with_typed_accompaniment(
+    fake_platform: SimpleNamespace,
+) -> None:
+    adapter = adapter_module.T3AgentAdapter(make_config())
+    events: List[Any] = []
+
+    async def capture(event: Any) -> None:
+        events.append(event)
+
+    adapter.handle_message = capture  # type: ignore[method-assign]
+    client = await make_ingress_client(adapter)
+    try:
+        response = await client.post(
+            "/v1/messages",
+            headers=auth_headers(),
+            json={
+                "protocolVersion": 1,
+                "requestId": "request-voice",
+                "type": "message.submit",
+                "messageId": "message-voice",
+                "chatId": "chat-1",
+                "threadId": "thread-1",
+                "user": {"id": "user-1", "name": "Ada"},
+                "content": "Focus on the final point.",
+                "audio": {
+                    "type": "audio",
+                    "id": "audio-1",
+                    "name": "voice.webm",
+                    "mimeType": "audio/webm;codecs=opus",
+                    "source": {"type": "local-path", "path": "/tmp/voice.webm"},
+                },
+            },
+        )
+
+        assert response.status == 202
+        assert len(events) == 1
+        event = events[0]
+        assert event.text == "Focus on the final point."
+        assert event.message_type == fake_platform.MessageType.VOICE
+        assert event.media_urls == ["/tmp/voice.webm"]
+        assert event.media_types == ["audio/webm;codecs=opus"]
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
 async def test_message_submit_applies_model_and_reasoning_before_dispatch(
     fake_platform: SimpleNamespace,
 ) -> None:
@@ -1134,6 +1180,8 @@ async def test_ingress_requires_bearer_and_exact_protocol(
         assert capabilities_body["requestId"] == "provider-capabilities"
         assert capabilities_body["capabilities"]["asynchronousDelivery"] is True
         assert capabilities_body["capabilities"]["commandCatalog"] is True
+        assert capabilities_body["capabilities"]["voiceNotes"] is True
+        assert capabilities_body["capabilities"]["voiceNoteMaxBytes"] == 128 * 1024 * 1024
         command_names = {command["name"] for command in capabilities_body["commands"]}
         assert {"new", "restart", "model", "stop", "commands"} <= command_names
         assert len(command_names) >= 40

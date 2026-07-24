@@ -142,7 +142,9 @@ export type ProviderUserInputAnswers = typeof ProviderUserInputAnswers.Type;
 export const PROVIDER_SEND_TURN_MAX_INPUT_CHARS = 120_000;
 export const PROVIDER_SEND_TURN_MAX_ATTACHMENTS = 8;
 export const PROVIDER_SEND_TURN_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+export const PROVIDER_SEND_TURN_MAX_AUDIO_BYTES = 128 * 1024 * 1024;
 const PROVIDER_SEND_TURN_MAX_IMAGE_DATA_URL_CHARS = 14_000_000;
+const PROVIDER_SEND_TURN_MAX_AUDIO_DATA_URL_CHARS = 180_000_000;
 const CHAT_ATTACHMENT_ID_MAX_CHARS = 128;
 // Correlation id is command id by design in this model.
 export const CorrelationId = CommandId;
@@ -174,9 +176,35 @@ const UploadChatImageAttachment = Schema.Struct({
 });
 export type UploadChatImageAttachment = typeof UploadChatImageAttachment.Type;
 
-export const ChatAttachment = Schema.Union([ChatImageAttachment]);
+export const ChatAudioAttachment = Schema.Struct({
+  type: Schema.Literal("audio"),
+  id: ChatAttachmentId,
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
+  mimeType: TrimmedNonEmptyString.check(Schema.isMaxLength(100), Schema.isPattern(/^audio\//i)),
+  sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_AUDIO_BYTES)),
+  durationMs: NonNegativeInt,
+  waveform: Schema.Array(Schema.Number).check(Schema.isMaxLength(160)),
+  transcript: Schema.optional(Schema.String),
+  transcriptionStatus: Schema.optional(Schema.Literals(["transcribing", "ready", "failed"])),
+});
+export type ChatAudioAttachment = typeof ChatAudioAttachment.Type;
+
+const UploadChatAudioAttachment = Schema.Struct({
+  type: Schema.Literal("audio"),
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
+  mimeType: TrimmedNonEmptyString.check(Schema.isMaxLength(100), Schema.isPattern(/^audio\//i)),
+  sizeBytes: NonNegativeInt.check(Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_AUDIO_BYTES)),
+  durationMs: NonNegativeInt,
+  waveform: Schema.Array(Schema.Number).check(Schema.isMaxLength(160)),
+  dataUrl: TrimmedNonEmptyString.check(
+    Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_AUDIO_DATA_URL_CHARS),
+  ),
+});
+export type UploadChatAudioAttachment = typeof UploadChatAudioAttachment.Type;
+
+export const ChatAttachment = Schema.Union([ChatImageAttachment, ChatAudioAttachment]);
 export type ChatAttachment = typeof ChatAttachment.Type;
-const UploadChatAttachment = Schema.Union([UploadChatImageAttachment]);
+const UploadChatAttachment = Schema.Union([UploadChatImageAttachment, UploadChatAudioAttachment]);
 export type UploadChatAttachment = typeof UploadChatAttachment.Type;
 
 export const ProjectScriptIcon = Schema.Literals([
