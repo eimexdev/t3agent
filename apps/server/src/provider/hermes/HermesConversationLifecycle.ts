@@ -10,6 +10,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   type HermesBridgeSessionListResponse,
+  type HermesBridgeSessionForkResponse,
   type HermesConversationForkInput,
   type HermesConversationForkResult,
   type OrchestrationCommand,
@@ -120,6 +121,33 @@ export function makeHermesConversationLifecycle(
       .pipe(Effect.ignoreCause({ log: true }));
   });
 
+  const importHistory = Effect.fn("HermesConversationLifecycle.importHistory")(function* (
+    threadId: ThreadId,
+    fork: HermesBridgeSessionForkResponse,
+  ) {
+    for (const [index, message] of fork.messages.entries()) {
+      yield* dependencies.dispatch({
+        type: "thread.message.import",
+        commandId: yield* nextCommandId(`hermes-history-${index}`),
+        threadId,
+        messageId: MessageId.make(`hermes-history:${fork.childSessionId}:${index}`),
+        role: message.role,
+        text: message.content,
+        ...(message.turnId !== undefined ? { turnId: message.turnId } : {}),
+        createdAt: message.createdAt,
+      });
+    }
+    for (const activity of fork.activities ?? []) {
+      yield* dependencies.dispatch({
+        type: "thread.activity.append",
+        commandId: yield* nextCommandId(`hermes-activity-${activity.id}`),
+        threadId,
+        activity,
+        createdAt: activity.createdAt,
+      });
+    }
+  });
+
   const listSessions = Effect.gen(function* () {
     const client = yield* dependencies.getClient();
     const [response, snapshot] = yield* Effect.all([
@@ -186,6 +214,21 @@ export function makeHermesConversationLifecycle(
         source.source !== "t3agent" &&
         existingThreadId !== undefined
       ) {
+        const childSessionId = HermesBridgeSessionId.make(`t3-${existingThreadId}`);
+        const fork = yield* client
+          .forkSession({
+            protocolVersion: HERMES_BRIDGE_PROTOCOL_VERSION,
+            requestId: HermesBridgeRequestId.make(
+              `conversation-refresh:${source.sessionId}:${existingThreadId}`,
+            ),
+            type: "session.fork",
+            sourceSessionId: source.sessionId,
+            childSessionId,
+            targetThreadId: existingThreadId,
+            ...(input.userTurnCount !== undefined ? { userTurnCount: input.userTurnCount } : {}),
+          })
+          .pipe(Effect.retry({ times: 1 }));
+        yield* importHistory(existingThreadId, fork);
         return {
           threadId: existingThreadId,
           existing: true,
@@ -292,17 +335,7 @@ export function makeHermesConversationLifecycle(
           threadId,
           title: fork.title,
         });
-        for (const [index, message] of fork.messages.entries()) {
-          yield* dependencies.dispatch({
-            type: "thread.message.import",
-            commandId: yield* nextCommandId(`hermes-history-${index}`),
-            threadId,
-            messageId: MessageId.make(`hermes-history:${fork.childSessionId}:${index}`),
-            role: message.role,
-            text: message.content,
-            createdAt: message.createdAt,
-          });
-        }
+        yield* importHistory(threadId, fork);
 
         const isT3Fork = source.source === "t3agent" && source.threadId !== undefined;
         const lineage: HermesLineageMetadata = {

@@ -1,11 +1,13 @@
 import { assert, describe, it, vi } from "@effect/vitest";
 import {
   HERMES_BRIDGE_PROTOCOL_VERSION,
+  EventId,
   HermesBridgeRequestId,
   HermesBridgeSessionId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
   type HermesBridgeSessionListResponse,
   type OrchestrationCommand,
 } from "@t3tools/contracts";
@@ -27,6 +29,7 @@ const CHILD_SESSION_ID = HermesBridgeSessionId.make("t3-child");
 const SOURCE_THREAD_ID = ThreadId.make("source-thread");
 const LIVE_IMPORTED_THREAD_ID = ThreadId.make("live-import");
 const DELETED_IMPORTED_THREAD_ID = ThreadId.make("deleted-import");
+const IMPORTED_TURN_ID = TurnId.make("hermes-turn-1");
 
 const sessionList = {
   protocolVersion: HERMES_BRIDGE_PROTOCOL_VERSION,
@@ -103,6 +106,23 @@ function makeHarness(input: {
             {
               role: "assistant",
               content: "Continuing",
+              createdAt: NOW,
+              turnId: IMPORTED_TURN_ID,
+            },
+          ],
+          activities: [
+            {
+              id: EventId.make("hermes-activity-1"),
+              tone: "tool",
+              kind: "tool.completed",
+              summary: "Searched files",
+              payload: {
+                itemType: "mcp_tool_call",
+                status: "completed",
+                data: { toolCallId: "call-1" },
+              },
+              turnId: IMPORTED_TURN_ID,
+              sequence: 0,
               createdAt: NOW,
             },
           ],
@@ -232,7 +252,7 @@ describe("HermesConversationLifecycle", () => {
     });
   });
 
-  it.effect("reuses an existing live import unless another copy is requested", () => {
+  it.effect("refreshes an existing live import in place unless another copy is requested", () => {
     const { lifecycle, commands, forkSession } = makeHarness({});
     return Effect.gen(function* () {
       const result = yield* lifecycle.forkConversation({
@@ -243,8 +263,17 @@ describe("HermesConversationLifecycle", () => {
         threadId: LIVE_IMPORTED_THREAD_ID,
         existing: true,
       });
-      assert.lengthOf(commands, 0);
-      assert.strictEqual(forkSession.mock.calls.length, 0);
+      assert.deepStrictEqual(
+        commands.map((command) => command.type),
+        ["thread.message.import", "thread.message.import", "thread.activity.append"],
+      );
+      const assistantImport = commands[1];
+      assert.strictEqual(assistantImport?.type, "thread.message.import");
+      if (assistantImport?.type === "thread.message.import") {
+        assert.strictEqual(assistantImport.turnId, IMPORTED_TURN_ID);
+      }
+      assert.strictEqual(forkSession.mock.calls.length, 1);
+      assert.strictEqual(forkSession.mock.calls[0]?.[0].targetThreadId, LIVE_IMPORTED_THREAD_ID);
     });
   });
 
@@ -266,6 +295,7 @@ describe("HermesConversationLifecycle", () => {
           "thread.meta.update",
           "thread.message.import",
           "thread.message.import",
+          "thread.activity.append",
           "thread.message.import",
         ],
       );
@@ -283,6 +313,11 @@ describe("HermesConversationLifecycle", () => {
           model: "openai-codex::gpt-5.6-sol",
           options: [{ id: "reasoningEffort", value: "high" }],
         });
+      }
+      const assistantImport = commands[3];
+      assert.strictEqual(assistantImport?.type, "thread.message.import");
+      if (assistantImport?.type === "thread.message.import") {
+        assert.strictEqual(assistantImport.turnId, IMPORTED_TURN_ID);
       }
       const lineage = commands.at(-1);
       assert.strictEqual(lineage?.type, "thread.message.import");
@@ -321,7 +356,7 @@ describe("HermesConversationLifecycle", () => {
 
       assert.strictEqual(first.threadId, second.threadId);
       assert.deepStrictEqual([first.existing, second.existing].sort(), [false, true]);
-      assert.strictEqual(forkSession.mock.calls.length, 1);
+      assert.strictEqual(forkSession.mock.calls.length, 2);
       assert.strictEqual(commands.filter((command) => command.type === "thread.create").length, 1);
     });
   });
