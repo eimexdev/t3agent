@@ -2199,23 +2199,41 @@ class T3AgentAdapter(BasePlatformAdapter):
             "Content-Type": "application/json",
             "Idempotency-Key": request_id,
         }
-        active_client = client or self._client
-        if active_client is None:
+        configured_client = client or self._client
+        if configured_client is None or configured_client.closed:
             return False, {}, "T3 Agent bridge is not connected"
-        try:
+
+        async def post_event(
+            active_client: ClientSession,
+        ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
             async with active_client.post(target, json=frame, headers=headers) as response:
                 if not 200 <= response.status < 300:
-                    return False, {}, f"T3 Agent bridge returned HTTP {response.status}"
+                    return None, f"T3 Agent bridge returned HTTP {response.status}"
                 try:
-                    body = await response.json()
+                    response_body = await response.json()
                 except Exception:
-                    return False, {}, "T3 Agent bridge returned invalid JSON"
+                    return None, "T3 Agent bridge returned invalid JSON"
+            if not isinstance(response_body, dict):
+                return None, "T3 Agent bridge returned invalid JSON"
+            return response_body, None
+
+        try:
+            client_loop = getattr(configured_client, "_loop", None)
+            if client_loop is asyncio.get_running_loop():
+                body, request_error = await post_event(configured_client)
+            else:
+                # Hermes cron delivery can call the connected adapter from its
+                # scheduler loop. aiohttp sessions are bound to the loop where
+                # they were created, so use a request-local session here.
+                timeout = ClientTimeout(total=self.timeout_seconds)
+                async with ClientSession(timeout=timeout) as active_client:
+                    body, request_error = await post_event(active_client)
         except asyncio.CancelledError:
             raise
         except (ClientError, asyncio.TimeoutError):
             return False, {}, "T3 Agent bridge request failed"
-        if not isinstance(body, dict):
-            return False, {}, "T3 Agent bridge returned invalid JSON"
+        if body is None:
+            return False, {}, request_error or "T3 Agent bridge request failed"
         if body.get("protocolVersion") != PROTOCOL_VERSION:
             return False, body, "T3 Agent bridge returned a mismatched protocol version"
         if body.get("requestId") != request_id:

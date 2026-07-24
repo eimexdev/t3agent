@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import threading
 from types import SimpleNamespace
 from typing import Any, Dict, Iterator, List
 
@@ -1144,6 +1145,63 @@ async def test_send_posts_direct_tagged_union_with_stable_ids(
     finally:
         await adapter._client.close()
         adapter._client = None
+        await server.close()
+
+
+@pytest.mark.asyncio
+async def test_send_uses_current_loop_when_connected_client_belongs_to_gateway_loop(
+    fake_platform: SimpleNamespace,
+) -> None:
+    received: List[Dict[str, Any]] = []
+
+    async def receive(request: web.Request) -> web.Response:
+        frame = await request.json()
+        received.append(frame)
+        return web.json_response(
+            {
+                "protocolVersion": 1,
+                "requestId": frame["requestId"],
+                "deliveryId": frame["deliveryId"],
+                "status": "accepted",
+            }
+        )
+
+    app = web.Application()
+    app.router.add_post("/api/hermes/hermes-test/events", receive)
+    server = TestServer(app)
+    await server.start_server()
+
+    gateway_loop = asyncio.new_event_loop()
+    gateway_thread = threading.Thread(target=gateway_loop.run_forever)
+    gateway_thread.start()
+
+    async def create_gateway_client() -> ClientSession:
+        return ClientSession()
+
+    gateway_client = asyncio.run_coroutine_threadsafe(
+        create_gateway_client(), gateway_loop
+    ).result()
+    adapter = adapter_module.T3AgentAdapter(
+        make_config(bridge_url=str(server.make_url("/")))
+    )
+    adapter.bridge_url = adapter.bridge_url.rstrip("/")
+    adapter._client = gateway_client
+    try:
+        result = await adapter.send(
+            "t3agent",
+            "scheduled result",
+            metadata={"threadId": "thread-1", "final": True},
+        )
+
+        assert result.success is True
+        assert received[0]["content"] == "scheduled result"
+        assert received[0]["threadId"] == "thread-1"
+    finally:
+        asyncio.run_coroutine_threadsafe(gateway_client.close(), gateway_loop).result()
+        adapter._client = None
+        gateway_loop.call_soon_threadsafe(gateway_loop.stop)
+        gateway_thread.join()
+        gateway_loop.close()
         await server.close()
 
 

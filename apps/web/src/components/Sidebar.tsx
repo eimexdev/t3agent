@@ -75,6 +75,7 @@ import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstra
 import { isElectron } from "../env";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
 import { isTerminalFocused } from "../lib/terminalFocus";
+import { describeThreadRenameFailure } from "../lib/threadRenameFailure";
 import { isMacPlatform } from "../lib/utils";
 import {
   readThreadShell,
@@ -2059,18 +2060,17 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         finishRename();
         return;
       }
+      finishRename();
       const result = await renameThreadTitle(threadRef, trimmed);
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
+      const failureMessage = describeThreadRenameFailure(result);
+      if (failureMessage) {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Failed to rename thread",
-            description: error instanceof Error ? error.message : "An error occurred.",
+            ...failureMessage,
           }),
         );
       }
-      finishRename();
     },
     [renameThreadTitle],
   );
