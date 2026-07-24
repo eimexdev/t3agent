@@ -408,7 +408,7 @@ async def test_session_fork_creates_child_copy_and_binds_target_thread(
                     "id": 4,
                     "role": "assistant",
                     "content": "first answer",
-                    "timestamp": 12,
+                    "timestamp": 11,
                 },
                 {
                     "role": "user",
@@ -503,6 +503,7 @@ async def test_session_fork_creates_child_copy_and_binds_target_thread(
         assert payload["messages"][1]["turnId"] == turn_id
         assert payload["messages"][2]["turnId"] == turn_id
         assert payload["messages"][4]["turnId"] == turn_id
+        assert payload["messages"][3]["createdAt"] == "1970-01-01T00:00:11.501000Z"
         assert payload["activities"] == [
             {
                 "id": payload["activities"][0]["id"],
