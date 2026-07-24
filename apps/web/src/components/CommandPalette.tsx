@@ -1226,8 +1226,7 @@ function OpenCommandPaletteDialog(props: {
             "discord",
             "telegram",
           ],
-          title: "Open Hermes conversation…",
-          description: "Open a T3 Agent conversation or import one from another Hermes gateway",
+          title: "Open Hermes conversation",
           icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
           run: async () => {
             openHermesConversationBrowser("open");
@@ -1244,8 +1243,7 @@ function OpenCommandPaletteDialog(props: {
             "/fork",
             "/branch",
           ],
-          title: "Fork conversation…",
-          description: "Select any Hermes conversation and create a new child copy",
+          title: "Fork conversation",
           icon: <GitForkIcon className={ITEM_ICON_CLASS} />,
           run: async () => {
             openHermesConversationBrowser("fork");
