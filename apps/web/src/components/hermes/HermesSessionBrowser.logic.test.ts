@@ -22,7 +22,7 @@ describe("resolveHermesConversationSelection", () => {
     });
   });
 
-  it("opens an existing imported copy in open mode", () => {
+  it("refreshes an existing imported copy before opening it", () => {
     expect(
       resolveHermesConversationSelection({
         mode: "open",
@@ -33,8 +33,9 @@ describe("resolveHermesConversationSelection", () => {
         },
       }),
     ).toEqual({
-      type: "open-thread",
-      threadId: "imported-thread",
+      type: "fork-session",
+      sessionId: "session-1",
+      forceNew: false,
     });
   });
 

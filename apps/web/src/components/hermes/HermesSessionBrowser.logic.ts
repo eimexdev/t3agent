@@ -34,14 +34,10 @@ export function resolveHermesConversationSelection(input: {
     };
   }
 
-  const existingThreadId =
-    input.session.source === "t3agent"
-      ? input.session.threadId
-      : input.session.importedThreadIds?.[0];
-  if (existingThreadId !== undefined) {
+  if (input.session.source === "t3agent" && input.session.threadId !== undefined) {
     return {
       type: "open-thread",
-      threadId: existingThreadId,
+      threadId: input.session.threadId,
     };
   }
 
