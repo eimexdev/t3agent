@@ -439,6 +439,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
                 candidate == null ? Number.NEGATIVE_INFINITY : Date.parse(candidate),
               ),
             );
+      // Hermes can complete a request without projecting a normal latestTurn.
+      // A terminal session update at or after the user message proves the
+      // provider adopted and finished that request, so it is no longer queued.
+      const terminalSessionAcknowledgedMessage =
+        thread.session !== null && Date.parse(thread.session.updatedAt) >= latestUserMessageAtMs;
       // The age check is bounded on BOTH sides: message timestamps are
       // client-supplied, so a client clock ahead of the server yields a
       // negative age. Without the lower bound that negative age satisfies
@@ -449,6 +454,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         thread.session?.status !== "error" &&
         Number.isFinite(latestUserMessageAtMs) &&
         latestUserMessageAtMs > latestTurnAtMs &&
+        !terminalSessionAcknowledgedMessage &&
         Math.abs(queuedAgeMs) <= QUEUED_TURN_START_GRACE_MS;
       if (hasQueuedTurnStart) {
         return yield* Effect.fail(

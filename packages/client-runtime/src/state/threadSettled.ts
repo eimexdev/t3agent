@@ -54,6 +54,17 @@ export function hasQueuedTurnStart(
   if (shell.session?.status === "error") return false;
   const messageAt = Date.parse(shell.latestUserMessageAt);
   if (Number.isNaN(messageAt)) return false;
+  // Hermes can finish a request without projecting a normal latestTurn.
+  // A terminal session update at or after the user message is the provider's
+  // acknowledgement that the request is no longer queued.
+  if (
+    shell.session !== null &&
+    shell.session.status !== "starting" &&
+    shell.session.status !== "running" &&
+    Date.parse(shell.session.updatedAt) >= messageAt
+  ) {
+    return false;
+  }
   const nowMs = Date.parse(options.now);
   if (Number.isNaN(nowMs)) return false;
   // Bounded on both sides: message timestamps originate on whichever device

@@ -282,6 +282,28 @@ describe("hasQueuedTurnStart", () => {
     expect(hasQueuedTurnStart(failedShell, JUST_AFTER)).toBe(false);
   });
 
+  it("clears when Hermes finishes without projecting a latest turn", () => {
+    const shell = makeShell({ activityAt: null });
+    expect(
+      hasQueuedTurnStart(
+        {
+          ...shell,
+          latestUserMessageAt: QUEUED_AT,
+          session: {
+            threadId: shell.id,
+            status: "ready",
+            providerName: "Hermes",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: "2026-04-09T12:00:10.000Z",
+          },
+        },
+        JUST_AFTER,
+      ),
+    ).toBe(false);
+  });
+
   it("is quiet without user messages", () => {
     expect(hasQueuedTurnStart(makeShell({ activityAt: FRESH }), JUST_AFTER)).toBe(false);
   });

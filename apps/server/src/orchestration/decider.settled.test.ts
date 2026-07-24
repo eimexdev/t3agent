@@ -291,6 +291,42 @@ it.layer(NodeServices.layer)("settled thread decider", (it) => {
     }),
   );
 
+  it.effect("allows settlement once Hermes has answered a recent queued message", () =>
+    Effect.gen(function* () {
+      const messages: OrchestrationThread["messages"] = [
+        {
+          id: MessageId.make("message-cron-request"),
+          role: "user",
+          text: "Schedule this for later",
+          turnId: null,
+          streaming: false,
+          createdAt: "1969-12-31T23:59:30.000Z",
+          updatedAt: "1969-12-31T23:59:30.000Z",
+        },
+        {
+          id: MessageId.make("message-cron-confirmation"),
+          role: "assistant",
+          text: "Scheduled.",
+          turnId: null,
+          streaming: false,
+          createdAt: "1969-12-31T23:59:40.000Z",
+          updatedAt: "1969-12-31T23:59:40.000Z",
+        },
+      ];
+
+      const settled = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.settle",
+          commandId: CommandId.make("cmd-settle-after-cron-confirmation"),
+          threadId: ThreadId.make("thread-1"),
+        },
+        readModel: makeReadModel(null, null, makeSession("ready"), [], messages),
+      });
+      const events = Array.isArray(settled) ? settled : [settled];
+      expect(events[0]?.type).toBe("thread.settled");
+    }),
+  );
+
   it.effect("rejects settling and unsettling archived threads", () =>
     Effect.gen(function* () {
       const settleError = yield* decideOrchestrationCommand({
