@@ -450,6 +450,10 @@ def _build_imported_history(
             )
             active_tool_calls.pop(call_id, None)
 
+    # Preserve one history slot per source row. The lifecycle derives stable
+    # message IDs from these positions, so compacting hidden tool/synthetic
+    # rows would overwrite the wrong legacy rows when an existing import is
+    # refreshed.
     for index, message in enumerate(copied_messages):
         role = str(message.get("role") or "")
         content = message.get("content")
@@ -457,6 +461,18 @@ def _build_imported_history(
 
         if role == "user":
             if not isinstance(content, str) or _is_synthetic_history_user(content):
+                history.append(
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "createdAt": created_at,
+                        **(
+                            {"turnId": current_turn_id}
+                            if current_turn_id is not None
+                            else {}
+                        ),
+                    }
+                )
                 continue
             flush_unfinished(created_at)
             current_turn_id = _canonical_id(
@@ -477,14 +493,13 @@ def _build_imported_history(
             continue
 
         if role == "system":
-            if isinstance(content, str):
-                history.append(
-                    {
-                        "role": role,
-                        "content": content,
-                        "createdAt": created_at,
-                    }
-                )
+            history.append(
+                {
+                    "role": role,
+                    "content": content if isinstance(content, str) else "",
+                    "createdAt": created_at,
+                }
+            )
             continue
 
         if role == "assistant":
@@ -535,15 +550,14 @@ def _build_imported_history(
                         "createdAt": created_at,
                     }
 
-            if isinstance(content, str) and content.strip():
-                item = {
-                    "role": role,
-                    "content": content,
-                    "createdAt": created_at,
-                }
-                if current_turn_id is not None:
-                    item["turnId"] = current_turn_id
-                history.append(item)
+            item = {
+                "role": role,
+                "content": content if isinstance(content, str) else "",
+                "createdAt": created_at,
+            }
+            if current_turn_id is not None:
+                item["turnId"] = current_turn_id
+            history.append(item)
             continue
 
         if role == "tool":
@@ -574,6 +588,28 @@ def _build_imported_history(
                 created_at=created_at,
                 result=content,
             )
+            history.append(
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "createdAt": created_at,
+                    **({"turnId": turn_id} if turn_id is not None else {}),
+                }
+            )
+            continue
+
+        history.append(
+            {
+                "role": "assistant",
+                "content": "",
+                "createdAt": created_at,
+                **(
+                    {"turnId": current_turn_id}
+                    if current_turn_id is not None
+                    else {}
+                ),
+            }
+        )
 
     final_created_at = (
         _iso_timestamp(copied_messages[-1].get("timestamp"))

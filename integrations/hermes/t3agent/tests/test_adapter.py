@@ -493,10 +493,16 @@ async def test_session_fork_creates_child_copy_and_binds_target_thread(
         assert payload["title"] == "Planning #2"
         assert [message["content"] for message in payload["messages"]] == [
             "**Attached:** notes.txt\n\nfirst",
+            "",
+            "",
             "first answer",
+            "",
         ]
-        turn_id = payload["messages"][1]["turnId"]
+        turn_id = payload["messages"][3]["turnId"]
         assert turn_id.startswith("hermes_turn_")
+        assert payload["messages"][1]["turnId"] == turn_id
+        assert payload["messages"][2]["turnId"] == turn_id
+        assert payload["messages"][4]["turnId"] == turn_id
         assert payload["activities"] == [
             {
                 "id": payload["activities"][0]["id"],
