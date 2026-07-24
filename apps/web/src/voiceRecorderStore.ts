@@ -5,6 +5,7 @@ const DATABASE_NAME = "t3-voice-drafts";
 const STORE_NAME = "recordings";
 const DRAFT_KEY = "active";
 const WAVEFORM_BUCKETS = 64;
+const WAVEFORM_SAMPLE_INTERVAL_MS = 75;
 
 export interface VoiceDraft {
   readonly blob: Blob;
@@ -49,6 +50,31 @@ let timer: number | null = null;
 let analyserFrame: number | null = null;
 let audioContext: AudioContext | null = null;
 let analyser: AnalyserNode | null = null;
+let waveformSamples: number[] = [];
+let lastWaveformSampleAt = 0;
+
+export function downsampleVoiceWaveform(
+  samples: ReadonlyArray<number>,
+  bucketCount = WAVEFORM_BUCKETS,
+): ReadonlyArray<number> {
+  if (samples.length <= bucketCount) return [...samples];
+  return Array.from({ length: bucketCount }, (_, bucketIndex) => {
+    const start = Math.floor((bucketIndex * samples.length) / bucketCount);
+    const end = Math.max(start + 1, Math.floor(((bucketIndex + 1) * samples.length) / bucketCount));
+    return Math.max(...samples.slice(start, end));
+  });
+}
+
+export function voiceLevelFromTimeDomain(samples: Uint8Array): number {
+  if (samples.length === 0) return 0.04;
+  let squaredTotal = 0;
+  for (const sample of samples) {
+    const centered = (sample - 128) / 128;
+    squaredTotal += centered * centered;
+  }
+  const rms = Math.sqrt(squaredTotal / samples.length);
+  return Math.max(0.04, Math.min(1, Math.sqrt(rms) * 1.8));
+}
 
 function openDatabase(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === "undefined") return Promise.resolve(null);
@@ -166,6 +192,8 @@ export const useVoiceRecorderStore = create<VoiceRecorderStore>((set, get) => ({
     try {
       mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       chunks = [];
+      waveformSamples = [];
+      lastWaveformSampleAt = 0;
       const mimeType = chooseMimeType();
       mediaRecorder = new MediaRecorder(mediaStream, mimeType ? { mimeType } : undefined);
       const startedAt = Date.now();
@@ -216,13 +244,18 @@ export const useVoiceRecorderStore = create<VoiceRecorderStore>((set, get) => ({
       const readLevel = () => {
         const current = get().recorder;
         if (current.status !== "recording" || !analyser) return;
-        analyser.getByteTimeDomainData(samples);
-        let peak = 0;
-        for (const sample of samples) peak = Math.max(peak, Math.abs(sample - 128) / 128);
-        const waveform = [...current.waveform, Math.max(0.05, Math.min(1, peak))].slice(
-          -WAVEFORM_BUCKETS,
-        );
-        set({ recorder: { ...current, waveform } });
+        const now = performance.now();
+        if (now - lastWaveformSampleAt >= WAVEFORM_SAMPLE_INTERVAL_MS) {
+          analyser.getByteTimeDomainData(samples);
+          waveformSamples.push(voiceLevelFromTimeDomain(samples));
+          lastWaveformSampleAt = now;
+          set({
+            recorder: {
+              ...current,
+              waveform: downsampleVoiceWaveform(waveformSamples),
+            },
+          });
+        }
         analyserFrame = window.requestAnimationFrame(readLevel);
       };
       readLevel();
@@ -245,6 +278,7 @@ export const useVoiceRecorderStore = create<VoiceRecorderStore>((set, get) => ({
     mediaRecorder = null;
     const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
     chunks = [];
+    waveformSamples = [];
     if (blob.size === 0) {
       set({ recorder: { status: "idle" } });
       return null;

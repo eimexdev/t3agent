@@ -169,6 +169,8 @@ import {
   LockIcon,
   LockOpenIcon,
   PenLineIcon,
+  PauseIcon,
+  PlayIcon,
   SparklesIcon,
   MicIcon,
   SquareIcon,
@@ -210,8 +212,75 @@ import {
   type VoiceDraft,
   useVoiceRecorderStore,
 } from "../../voiceRecorderStore";
+import { VoiceWaveform } from "./VoiceWaveform";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
+
+function VoiceDraftPreview({
+  draft,
+  onDiscard,
+}: {
+  readonly draft: VoiceDraft;
+  readonly onDiscard: () => void;
+}) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const progress = draft.durationMs > 0 ? elapsedMs / draft.durationMs : 0;
+
+  return (
+    <div className="mx-3 mb-2 flex items-center gap-2 rounded-xl bg-muted/45 px-2.5 py-2">
+      <Button
+        type="button"
+        size="icon-sm"
+        className="rounded-full"
+        aria-label={playing ? "Pause voice draft" : "Play voice draft"}
+        onClick={() => {
+          const audio = audioRef.current;
+          if (!audio) return;
+          if (audio.paused) void audio.play();
+          else audio.pause();
+        }}
+      >
+        {playing ? <PauseIcon className="fill-current" /> : <PlayIcon className="fill-current" />}
+      </Button>
+      <VoiceWaveform
+        levels={draft.waveform}
+        progress={progress}
+        onSeek={(nextProgress) => {
+          const audio = audioRef.current;
+          if (!audio) return;
+          audio.currentTime = nextProgress * (audio.duration || draft.durationMs / 1_000);
+          setElapsedMs(audio.currentTime * 1_000);
+        }}
+      />
+      <span className="text-muted-foreground text-xs tabular-nums">
+        {formatVoiceDuration(elapsedMs)} / {formatVoiceDuration(draft.durationMs)}
+      </span>
+      <Button
+        type="button"
+        size="icon-xs"
+        variant="ghost"
+        aria-label="Discard voice recording"
+        onClick={onDiscard}
+      >
+        <Trash2Icon />
+      </Button>
+      <audio
+        ref={audioRef}
+        src={draft.previewUrl}
+        className="hidden"
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => {
+          setPlaying(false);
+          setElapsedMs(0);
+        }}
+        onTimeUpdate={(event) => setElapsedMs(event.currentTarget.currentTime * 1_000)}
+      />
+    </div>
+  );
+}
 
 const runtimeModeConfig: Record<
   RuntimeMode,
@@ -890,8 +959,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const discardVoiceRecording = useVoiceRecorderStore((state) => state.discard);
   const restoreVoiceRecording = useVoiceRecorderStore((state) => state.restore);
   const voiceNotesAvailable = selectedProviderEntry?.snapshot.voiceNotes !== undefined;
+  const voiceTargetThreadId = activeThread?.id ?? activeThreadId;
   const voiceBelongsToActiveThread =
-    voiceRecorder.status !== "idle" && voiceRecorder.threadId === activeThreadId;
+    voiceRecorder.status !== "idle" && voiceRecorder.threadId === voiceTargetThreadId;
   const activeVoiceDraft =
     voiceRecorder.status === "draft" && voiceBelongsToActiveThread ? voiceRecorder.draft : null;
   useEffect(() => {
@@ -2677,6 +2747,28 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             </div>
           </div>
 
+          {voiceRecorder.status === "recording" && voiceBelongsToActiveThread ? (
+            <div className="mx-3 mb-2 flex items-center gap-2 rounded-xl bg-red-500/8 px-2.5 py-2">
+              <span className="size-2 shrink-0 animate-pulse rounded-full bg-red-500" />
+              <VoiceWaveform levels={voiceRecorder.waveform} live />
+              <span className="text-red-500 text-xs tabular-nums">
+                {formatVoiceDuration(voiceRecorder.elapsedMs)}
+              </span>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                className="rounded-full bg-red-500/12 text-red-500 hover:bg-red-500/20 hover:text-red-500"
+                aria-label="Stop recording"
+                onClick={() => void stopVoiceRecording()}
+              >
+                <SquareIcon className="size-3.5 fill-current" />
+              </Button>
+            </div>
+          ) : activeVoiceDraft ? (
+            <VoiceDraftPreview draft={activeVoiceDraft} onDiscard={discardVoiceRecording} />
+          ) : null}
+
           {/* Bottom toolbar */}
           {isComposerCollapsedMobile ? null : activePendingApproval ? (
             <div className="flex items-center justify-end gap-2 px-2.5 pb-2.5 sm:px-3 sm:pb-3">
@@ -2787,48 +2879,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 }
                 className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
               >
-                {voiceNotesAvailable && activeThreadId ? (
-                  voiceRecorder.status === "recording" && voiceBelongsToActiveThread ? (
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            className="rounded-full bg-red-500/12 text-red-500 hover:bg-red-500/20 hover:text-red-500"
-                            aria-label="Stop recording"
-                            onClick={() => void stopVoiceRecording()}
-                          />
-                        }
-                      >
-                        <SquareIcon className="size-3.5 fill-current" />
-                      </TooltipTrigger>
-                      <TooltipPopup side="top">
-                        Stop recording · {formatVoiceDuration(voiceRecorder.elapsedMs)}
-                      </TooltipPopup>
-                    </Tooltip>
-                  ) : voiceRecorder.status === "draft" && voiceBelongsToActiveThread ? (
-                    <div className="flex h-8 items-center gap-2 rounded-full bg-muted/70 px-2">
-                      <audio
-                        src={voiceRecorder.draft.previewUrl}
-                        controls
-                        className="h-7 w-36 max-w-[28vw]"
-                      />
-                      <span className="text-muted-foreground text-xs tabular-nums">
-                        {formatVoiceDuration(voiceRecorder.draft.durationMs)}
-                      </span>
-                      <Button
-                        type="button"
-                        size="icon-xs"
-                        variant="ghost"
-                        aria-label="Discard voice recording"
-                        onClick={discardVoiceRecording}
-                      >
-                        <Trash2Icon />
-                      </Button>
-                    </div>
-                  ) : voiceRecorder.status === "idle" ? (
+                {voiceNotesAvailable && voiceTargetThreadId ? (
+                  voiceRecorder.status === "recording" &&
+                  voiceBelongsToActiveThread ? null : voiceRecorder.status === "idle" ? (
                     <Tooltip>
                       <TooltipTrigger
                         render={
@@ -2840,7 +2893,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             onClick={() =>
                               void startVoiceRecording(
                                 environmentId,
-                                activeThreadId,
+                                voiceTargetThreadId,
                                 selectedProviderEntry.snapshot.voiceNotes?.maxBytes ??
                                   128 * 1024 * 1024,
                               )

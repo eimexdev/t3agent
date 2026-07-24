@@ -313,7 +313,7 @@ async def test_message_submit_builds_voice_event_with_typed_accompaniment(
         assert len(events) == 1
         event = events[0]
         assert event.text == "Focus on the final point."
-        assert event.message_type == fake_platform.MessageType.VOICE
+        assert event.message_type == adapter_module.MessageType.VOICE
         assert event.media_urls == ["/tmp/voice.webm"]
         assert event.media_types == ["audio/webm;codecs=opus"]
     finally:

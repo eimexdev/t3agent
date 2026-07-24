@@ -108,6 +108,7 @@ import { buildThreadRouteParams } from "../../threadRoutes";
 import { useThreadShell } from "../../state/entities";
 import type { ChatAudioAttachment } from "../../types";
 import { formatVoiceDuration } from "../../voiceRecorderStore";
+import { VoiceWaveform } from "./VoiceWaveform";
 
 import {
   buildInlineTerminalContextText,
@@ -1169,11 +1170,10 @@ function VoiceNotePlayer({ audio }: { audio: ChatAudioAttachment }) {
   const [playing, setPlaying] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [rate, setRate] = useState(1);
-  const waveform =
-    audio.waveform.length > 0 ? audio.waveform : Array.from({ length: 36 }, () => 0.2);
+  const progress = audio.durationMs > 0 ? elapsedMs / audio.durationMs : 0;
 
   return (
-    <div className="mb-2 min-w-56 rounded-xl border border-border/65 bg-background/35 px-2.5 py-2">
+    <div className="mb-2 min-w-56 rounded-xl border border-border/55 bg-muted/35 px-2.5 py-2">
       <div className="flex items-center gap-2">
         <Button
           type="button"
@@ -1190,28 +1190,19 @@ function VoiceNotePlayer({ audio }: { audio: ChatAudioAttachment }) {
         >
           {playing ? <PauseIcon className="fill-current" /> : <PlayIcon className="fill-current" />}
         </Button>
-        <svg
-          viewBox={`0 0 ${waveform.length * 3} 28`}
-          preserveAspectRatio="none"
-          className="h-7 min-w-24 flex-1 text-muted-foreground/65"
-          aria-hidden
-        >
-          <path
-            d={waveform
-              .map((level, index) => {
-                const height = Math.max(3, Math.min(26, level * 26));
-                const x = index * 3 + 1;
-                return `M${x} ${14 - height / 2}V${14 + height / 2}`;
-              })
-              .join(" ")}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-          />
-        </svg>
+        <VoiceWaveform
+          levels={audio.waveform}
+          progress={progress}
+          onSeek={(nextProgress) => {
+            const element = elementRef.current;
+            if (!element) return;
+            element.currentTime =
+              nextProgress * (element.duration || Math.max(0, audio.durationMs / 1_000));
+            setElapsedMs(element.currentTime * 1_000);
+          }}
+        />
         <span className="text-muted-foreground text-xs tabular-nums">
-          {formatVoiceDuration(playing ? elapsedMs : audio.durationMs)}
+          {formatVoiceDuration(elapsedMs)} / {formatVoiceDuration(audio.durationMs)}
         </span>
         <button
           type="button"
@@ -1238,7 +1229,10 @@ function VoiceNotePlayer({ audio }: { audio: ChatAudioAttachment }) {
             setPlaying(true);
           }}
           onPause={() => setPlaying(false)}
-          onEnded={() => setPlaying(false)}
+          onEnded={() => {
+            setPlaying(false);
+            setElapsedMs(0);
+          }}
           onTimeUpdate={(event) => setElapsedMs(event.currentTarget.currentTime * 1_000)}
           data-voice-note
           className="hidden"

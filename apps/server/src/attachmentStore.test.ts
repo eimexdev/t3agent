@@ -6,6 +6,7 @@ import * as NodePath from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  attachmentRelativePath,
   createAttachmentId,
   parseThreadSegmentFromAttachmentId,
   resolveAttachmentPathById,
@@ -58,6 +59,35 @@ describe("attachmentStore", () => {
         attachmentId,
       });
       expect(resolved).toBe(pngPath);
+    } finally {
+      NodeFS.rmSync(attachmentsDir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves a supported audio media extension for transcription", () => {
+    expect(
+      attachmentRelativePath({
+        type: "audio",
+        id: "thread-1-audio",
+        name: "voice-note.webm",
+        mimeType: "audio/webm;codecs=opus",
+        sizeBytes: 123,
+        durationMs: 1_000,
+        waveform: [0.1, 0.7],
+      }),
+    ).toBe("thread-1-audio.webm");
+  });
+
+  it("still resolves legacy audio attachments stored with a bin extension", () => {
+    const attachmentsDir = NodeFS.mkdtempSync(
+      NodePath.join(NodeOS.tmpdir(), "t3code-attachment-store-"),
+    );
+    try {
+      const attachmentId = "thread-1-legacy-audio";
+      const binPath = NodePath.join(attachmentsDir, `${attachmentId}.bin`);
+      NodeFS.writeFileSync(binPath, Buffer.from("hello"));
+
+      expect(resolveAttachmentPathById({ attachmentsDir, attachmentId })).toBe(binPath);
     } finally {
       NodeFS.rmSync(attachmentsDir, { recursive: true, force: true });
     }

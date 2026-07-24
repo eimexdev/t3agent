@@ -10,7 +10,24 @@ import {
 } from "./attachmentPaths.ts";
 import { inferImageExtension, SAFE_IMAGE_FILE_EXTENSIONS } from "./imageMime.ts";
 
-const ATTACHMENT_FILENAME_EXTENSIONS = [...SAFE_IMAGE_FILE_EXTENSIONS, ".bin"];
+const AUDIO_MIME_EXTENSION_BY_TYPE: Readonly<Record<string, string>> = {
+  "audio/aac": ".aac",
+  "audio/flac": ".flac",
+  "audio/m4a": ".m4a",
+  "audio/mp4": ".mp4",
+  "audio/mpeg": ".mp3",
+  "audio/ogg": ".ogg",
+  "audio/wav": ".wav",
+  "audio/webm": ".webm",
+};
+const SAFE_AUDIO_FILE_EXTENSIONS = [...new Set(Object.values(AUDIO_MIME_EXTENSION_BY_TYPE))];
+const ATTACHMENT_FILENAME_EXTENSIONS = [
+  ...SAFE_IMAGE_FILE_EXTENSIONS,
+  ...SAFE_AUDIO_FILE_EXTENSIONS,
+  // Retain lookup support for audio attachments written before their media
+  // extension was preserved.
+  ".bin",
+];
 const ATTACHMENT_ID_THREAD_SEGMENT_MAX_CHARS = 80;
 const ATTACHMENT_ID_THREAD_SEGMENT_PATTERN = "[a-z0-9_]+(?:-[a-z0-9_]+)*";
 const ATTACHMENT_ID_UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
@@ -63,8 +80,11 @@ export function attachmentRelativePath(attachment: ChatAttachment): string {
       });
       return `${attachment.id}${extension}`;
     }
-    case "audio":
-      return `${attachment.id}.bin`;
+    case "audio": {
+      const mimeType = attachment.mimeType.split(";")[0]?.trim().toLowerCase() ?? "";
+      const extension = AUDIO_MIME_EXTENSION_BY_TYPE[mimeType] ?? ".bin";
+      return `${attachment.id}${extension}`;
+    }
   }
 }
 

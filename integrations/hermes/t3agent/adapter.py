@@ -725,21 +725,25 @@ def _session_runtime_selection(
     return selection, model_config, reasoning_config if isinstance(reasoning_config, dict) else None
 
 
-def _image_source_value(attachment: Dict[str, Any]) -> str:
-    if attachment.get("type") != "image":
-        raise ValueError("each images entry must have type image")
+def _attachment_source_value(
+    attachment: Dict[str, Any], expected_type: str
+) -> str:
+    if attachment.get("type") != expected_type:
+        raise ValueError(f"attachment type must be {expected_type}")
     _require_string(attachment, "id")
     _require_string(attachment, "name")
     mime_type = _require_string(attachment, "mimeType")
-    if not mime_type.lower().startswith("image/"):
-        raise ValueError("image mimeType must start with image/")
+    if not mime_type.lower().startswith(f"{expected_type}/"):
+        raise ValueError(f"{expected_type} mimeType must start with {expected_type}/")
     source = attachment.get("source")
     if not isinstance(source, dict):
-        raise ValueError("image source must be an object")
+        raise ValueError(f"{expected_type} source must be an object")
     source_type = source.get("type")
     key = {"local-path": "path", "url": "url", "data-url": "dataUrl"}.get(source_type)
     if key is None:
-        raise ValueError("image source type must be local-path, url, or data-url")
+        raise ValueError(
+            f"{expected_type} source type must be local-path, url, or data-url"
+        )
     source_value = _require_string(source, key)
     if source_type != "data-url":
         return source_value
@@ -1963,11 +1967,15 @@ class T3AgentAdapter(BasePlatformAdapter):
             images = payload.get("images", [])
             if not isinstance(images, list) or not all(isinstance(item, dict) for item in images):
                 raise ValueError("images must be an array of image attachments")
-            media_urls = [_image_source_value(item) for item in images]
+            media_urls = [_attachment_source_value(item, "image") for item in images]
             audio = payload.get("audio")
             if audio is not None and not isinstance(audio, dict):
                 raise ValueError("audio must be an audio attachment")
-            audio_path = _image_source_value(audio) if audio is not None else None
+            audio_path = (
+                _attachment_source_value(audio, "audio")
+                if audio is not None
+                else None
+            )
             audio_mime_type = (
                 _require_string(audio, "mimeType") if audio is not None else None
             )
