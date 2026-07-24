@@ -1,6 +1,12 @@
-# T3 Code
+# T3 Agent
 
-T3 Code is a minimal web GUI for coding agents (currently Codex, Claude, Cursor, and OpenCode, more coming soon).
+This is a slop fork of [T3 Code](https://github.com/pingdotgg/t3code), repurposed as a native
+interface and gateway for [Hermes Agent](https://github.com/NousResearch/hermes-agent).
+It is early, rough, and not ready for general use.
+
+> [!IMPORTANT]
+> The documentation below is inherited from T3 Code and is currently incorrect for T3 Agent.
+> It remains here as reference while project-specific installation and usage documentation is written.
 
 ## Installation
 
