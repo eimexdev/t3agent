@@ -441,7 +441,7 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain('data-maintain-scroll-at-end="enabled"');
     expect(markup).toContain('data-maintain-visible-content-position="object"');
     expect(markup).toContain('data-maintain-visible-content-position-data="true"');
-    expect(markup).toContain('data-maintain-visible-content-position-size="false"');
+    expect(markup).toContain('data-maintain-visible-content-position-size="true"');
     expect(onAnchorReady).toHaveBeenCalledOnce();
     expect(onAnchorReady).toHaveBeenCalledWith(secondEntry.message.id, 1);
     expect(onAnchorSizeChanged).toHaveBeenCalledWith(secondEntry.message.id, 240);

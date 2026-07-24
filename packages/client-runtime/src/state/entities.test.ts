@@ -1,5 +1,6 @@
 import {
   EnvironmentId,
+  MessageId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -366,5 +367,104 @@ describe("environment entity projections", () => {
 
     expect(harness.registry.get(messagesAtom)).toBe(messages);
     expect(harness.registry.get(activitiesAtom)).toBe(activities);
+  });
+
+  it("normalizes inherited Discord history before exposing thread messages", () => {
+    const harness = makeHarness();
+    const threadRef = {
+      environmentId: ENVIRONMENT_ID,
+      threadId: THREAD_ID,
+    };
+    const messagesAtom = harness.threadDetails.messagesAtom(threadRef);
+    const createdAt = "2026-07-22T18:36:52.404Z";
+    const lineageText =
+      't3agent-lineage:{"kind":"import","label":"Imported from discord","sourceProvider":"discord","sourceSessionId":"discord-source"}';
+    const detail = {
+      ...THREAD_SHELL,
+      deletedAt: null,
+      messages: [
+        {
+          id: MessageId.make("discord-user"),
+          role: "user",
+          text: "[Triggering message id: `1529557863226150933` — use as `message_id` for reply/react/pin via the discord tools.]\n\n[Parker] Keep this strategy thread focused.",
+          turnId: null,
+          streaming: false,
+          createdAt,
+          updatedAt: createdAt,
+        },
+        {
+          id: MessageId.make("discord-tool-placeholder"),
+          role: "assistant",
+          text: "",
+          turnId: null,
+          streaming: false,
+          createdAt,
+          updatedAt: createdAt,
+        },
+        {
+          id: MessageId.make("discord-answer"),
+          role: "assistant",
+          text: "Understood.",
+          turnId: null,
+          streaming: false,
+          createdAt,
+          updatedAt: createdAt,
+        },
+        {
+          id: MessageId.make("discord-lineage"),
+          role: "system",
+          text: lineageText,
+          turnId: null,
+          streaming: false,
+          createdAt,
+          updatedAt: createdAt,
+        },
+        {
+          id: MessageId.make("native-follow-up"),
+          role: "user",
+          text: "[Parker] This native follow-up must remain untouched.",
+          turnId: null,
+          streaming: false,
+          createdAt,
+          updatedAt: createdAt,
+        },
+      ],
+      proposedPlans: [],
+      activities: [],
+      checkpoints: [],
+    } satisfies OrchestrationThread;
+
+    harness.registry.set(
+      harness.threadStateAtom(THREAD_ID),
+      AsyncResult.success<EnvironmentThreadState>({
+        data: Option.some(detail),
+        status: "live",
+        error: Option.none(),
+      }),
+    );
+
+    expect(
+      harness.registry.get(messagesAtom).map((message) => ({
+        id: message.id,
+        text: message.text,
+      })),
+    ).toEqual([
+      {
+        id: MessageId.make("discord-user"),
+        text: "Keep this strategy thread focused.",
+      },
+      {
+        id: MessageId.make("discord-answer"),
+        text: "Understood.",
+      },
+      {
+        id: MessageId.make("discord-lineage"),
+        text: lineageText,
+      },
+      {
+        id: MessageId.make("native-follow-up"),
+        text: "[Parker] This native follow-up must remain untouched.",
+      },
+    ]);
   });
 });

@@ -13,6 +13,7 @@ import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
 import type { EnvironmentThread, EnvironmentThreadShell } from "./models.ts";
 import { scopeThread } from "./models.ts";
+import { normalizeImportedHermesHistory } from "./hermesImportedHistory.ts";
 import { EMPTY_ENVIRONMENT_THREAD_STATE, type EnvironmentThreadState } from "./threadState.ts";
 import { parseThreadKey, threadKey } from "./entities.ts";
 import { THREAD_STATE_IDLE_TTL_MS } from "./threadRetention.ts";
@@ -92,7 +93,13 @@ export function createEnvironmentThreadDetailAtoms<E>(
         return previousValue;
       }
       previousSource = source;
-      previousValue = source === null ? null : scopeThread(ref.environmentId, source);
+      previousValue =
+        source === null
+          ? null
+          : scopeThread(ref.environmentId, {
+              ...source,
+              messages: normalizeImportedHermesHistory(source.messages),
+            });
       return previousValue;
     }).pipe(
       Atom.setIdleTTL(THREAD_STATE_IDLE_TTL_MS),

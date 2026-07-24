@@ -63,6 +63,10 @@
       "types": "./src/state/git.ts",
       "default": "./src/state/git.ts"
     },
+    "./state/hermes-imported-history": {
+      "types": "./src/state/hermesImportedHistory.ts",
+      "default": "./src/state/hermesImportedHistory.ts"
+    },
     "./state/models": {
       "types": "./src/state/models.ts",
       "default": "./src/state/models.ts"

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from types import SimpleNamespace
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterator, List
 
 from aiohttp import ClientSession, web
 from aiohttp.test_utils import TestClient, TestServer
@@ -13,6 +14,25 @@ import pytest
 
 from integrations.hermes import t3agent as plugin_package
 from integrations.hermes.t3agent import adapter as adapter_module
+
+
+@pytest.fixture(autouse=True)
+def isolate_t3agent_environment() -> Iterator[None]:
+    """Keep lazy Hermes imports from leaking live bridge config between tests."""
+    original = {
+        name: value
+        for name, value in os.environ.items()
+        if name.startswith("T3_AGENT_")
+    }
+    for name in original:
+        os.environ.pop(name, None)
+    try:
+        yield
+    finally:
+        for name in tuple(os.environ):
+            if name.startswith("T3_AGENT_"):
+                os.environ.pop(name, None)
+        os.environ.update(original)
 
 
 def make_config(**extra: Any) -> SimpleNamespace:
@@ -348,10 +368,34 @@ async def test_session_fork_creates_child_copy_and_binds_target_thread(
         def get_messages(self, session_id: str) -> List[Dict[str, Any]]:
             assert session_id == "discord-source"
             return [
-                {"role": "user", "content": "[Ada] first", "timestamp": 10},
-                {"role": "assistant", "content": "first answer", "timestamp": 11},
-                {"role": "user", "content": "[Ada] second", "timestamp": 12},
-                {"role": "assistant", "content": "second answer", "timestamp": 13},
+                {
+                    "role": "user",
+                    "content": (
+                        "[Triggering message id: `123` — use as `message_id` for "
+                        "reply/react/pin via the discord tools.]\n\n"
+                        "[The user sent a text document: 'notes.txt'. Its content "
+                        "has been included below. The file is also saved at: "
+                        "/tmp/notes.txt]\n\n[Ada] first"
+                    ),
+                    "timestamp": 10,
+                },
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{"name": "search"}],
+                    "timestamp": 11,
+                },
+                {"role": "assistant", "content": "first answer", "timestamp": 12},
+                {
+                    "role": "user",
+                    "content": (
+                        "[ASYNC DELEGATION BATCH COMPLETE — deleg_123]\n"
+                        "Internal tool result"
+                    ),
+                    "timestamp": 13,
+                },
+                {"role": "user", "content": "[Ada] second", "timestamp": 14},
+                {"role": "assistant", "content": "second answer", "timestamp": 15},
             ]
 
         def get_next_title_in_lineage(self, title: str) -> str:
@@ -424,7 +468,7 @@ async def test_session_fork_creates_child_copy_and_binds_target_thread(
         assert payload["targetThreadId"] == target_thread_id
         assert payload["title"] == "Planning #2"
         assert [message["content"] for message in payload["messages"]] == [
-            "first",
+            "**Attached:** notes.txt\n\nfirst",
             "first answer",
         ]
         assert created[0]["source"] == "t3agent"
@@ -435,7 +479,9 @@ async def test_session_fork_creates_child_copy_and_binds_target_thread(
         assert created[0]["model_config"]["_t3agent_imported_from"] == (
             "discord-source"
         )
-        assert replacements[0][1][-1]["content"] == "first answer"
+        assert replacements[0][1][-1]["content"].startswith(
+            "[ASYNC DELEGATION BATCH COMPLETE"
+        )
         assert titles[0][1] == "Planning #2"
         assert route_sources[0].thread_id == target_thread_id
         assert switches[0][1] == payload["childSessionId"]
