@@ -166,6 +166,45 @@ describe("HermesBridgeClient", () => {
     });
   });
 
+  it.effect("updates a Hermes session title through the dedicated endpoint", () => {
+    const targetThreadId = ThreadId.make("00000000-0000-4000-8000-000000000003");
+    const { client, execute } = makeClient(() =>
+      Response.json({
+        protocolVersion: 1,
+        requestId: "title-request",
+        status: "accepted",
+        title: "Canonical Hermes title",
+      }),
+    );
+
+    return Effect.gen(function* () {
+      const result = yield* client.updateSessionTitle({
+        protocolVersion: HERMES_BRIDGE_PROTOCOL_VERSION,
+        requestId: HermesBridgeRequestId.make("title-request"),
+        type: "session.title.update",
+        sessionId: HermesBridgeSessionId.make("session-1"),
+        targetThreadId,
+        title: "  Canonical Hermes title  ",
+      });
+
+      assert.strictEqual(result.title, "Canonical Hermes title");
+      const call = execute.mock.calls[0];
+      assert.ok(call);
+      const [request] = call;
+      assert.strictEqual(request.method, "POST");
+      assert.strictEqual(new URL(request.url).pathname, "/v1/sessions/title");
+      assert.strictEqual(request.headers["idempotency-key"], "title-request");
+      assert.deepStrictEqual(jsonBody(request), {
+        protocolVersion: 1,
+        requestId: "title-request",
+        type: "session.title.update",
+        sessionId: "session-1",
+        targetThreadId,
+        title: "  Canonical Hermes title  ",
+      });
+    });
+  });
+
   it.effect("deletes only the child session correlated to its T3 thread", () => {
     const targetThreadId = ThreadId.make("00000000-0000-4000-8000-000000000002");
     const sessionId = HermesBridgeSessionId.make("t3-child");
@@ -223,6 +262,7 @@ describe("HermesBridgeClient", () => {
         protocolVersion: 1,
         requestId: "request-interrupt",
         type: "turn.interrupt",
+        chatId: "t3agent",
         threadId: "thread-1",
       }),
     ],

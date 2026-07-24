@@ -615,6 +615,15 @@ export const makeHermesAdapter = Effect.fn("makeHermesAdapter")(function* (
                 };
                 break;
               }
+              case "session.title.updated": {
+                const base = yield* eventBase(callback, threadId, "title");
+                yield* publish({
+                  ...base,
+                  type: "thread.metadata.updated",
+                  payload: { name: callback.title },
+                });
+                break;
+              }
               case "approval.request":
                 yield* rememberApproval(callback, threadId, context);
                 break;

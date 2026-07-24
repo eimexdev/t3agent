@@ -150,6 +150,8 @@ import {
   HermesBridgeSessionListResponse,
   HermesConversationForkInput,
   HermesConversationForkResult,
+  HermesConversationRenameInput,
+  HermesConversationRenameResult,
   HermesLifecycleError,
 } from "./hermesBridge.ts";
 
@@ -226,6 +228,7 @@ export const WS_METHODS = {
   serverSignalProcess: "server.signalProcess",
   hermesSessionsList: "hermes.sessions.list",
   hermesConversationFork: "hermes.conversation.fork",
+  hermesConversationRename: "hermes.conversation.rename",
 
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
@@ -351,6 +354,12 @@ export const WsHermesSessionsListRpc = Rpc.make(WS_METHODS.hermesSessionsList, {
 export const WsHermesConversationForkRpc = Rpc.make(WS_METHODS.hermesConversationFork, {
   payload: HermesConversationForkInput,
   success: HermesConversationForkResult,
+  error: Schema.Union([HermesLifecycleError, EnvironmentAuthorizationError]),
+});
+
+export const WsHermesConversationRenameRpc = Rpc.make(WS_METHODS.hermesConversationRename, {
+  payload: HermesConversationRenameInput,
+  success: HermesConversationRenameResult,
   error: Schema.Union([HermesLifecycleError, EnvironmentAuthorizationError]),
 });
 
@@ -735,6 +744,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerSignalProcessRpc,
   WsHermesSessionsListRpc,
   WsHermesConversationForkRpc,
+  WsHermesConversationRenameRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
   WsSourceControlLookupRepositoryRpc,

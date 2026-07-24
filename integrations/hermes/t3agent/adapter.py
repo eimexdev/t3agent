@@ -61,6 +61,8 @@ DEFAULT_MAX_BODY_BYTES = 16 * 1_048_576
 MAX_IMAGE_BYTES = 10 * 1_048_576
 DEFAULT_TIMEOUT_SECONDS = 30.0
 DEFAULT_IDEMPOTENCY_CACHE_SIZE = 2_048
+TITLE_WATCH_INTERVAL_SECONDS = 0.25
+TITLE_WATCH_TIMEOUT_SECONDS = 90.0
 CANONICAL_CHAT_ID = "t3agent"
 
 _INGRESS_TOKEN_ENV = "T3_AGENT_INGRESS_TOKEN"
@@ -648,6 +650,8 @@ class T3AgentAdapter(BasePlatformAdapter):
         self._completion_outbox_wakeup = asyncio.Event()
         self._completion_outbox_task: Optional[asyncio.Task] = None
         self._completion_outbox_stopping = False
+        self._title_watch_tasks: Dict[str, asyncio.Task] = {}
+        self._published_titles: Dict[str, str] = {}
 
     @staticmethod
     def _destination_key(
@@ -912,6 +916,7 @@ class T3AgentAdapter(BasePlatformAdapter):
         app.router.add_get("/v1/sessions", self._list_sessions)
         app.router.add_post("/v1/sessions/fork", self._fork_session)
         app.router.add_post("/v1/sessions/delete", self._delete_session)
+        app.router.add_post("/v1/sessions/title", self._update_session_title)
         app.router.add_post("/v1/messages", self._submit_message)
         app.router.add_post("/v1/interrupt", self._interrupt_turn)
         app.router.add_post("/v1/approvals", self._respond_approval)
@@ -942,6 +947,12 @@ class T3AgentAdapter(BasePlatformAdapter):
         return True
 
     async def disconnect(self) -> None:
+        title_watch_tasks = list(self._title_watch_tasks.values())
+        self._title_watch_tasks.clear()
+        for task in title_watch_tasks:
+            task.cancel()
+        if title_watch_tasks:
+            await asyncio.gather(*title_watch_tasks, return_exceptions=True)
         self._completion_outbox_stopping = True
         self._completion_outbox_wakeup.set()
         if self._completion_outbox_task is not None:
@@ -1445,6 +1456,77 @@ class T3AgentAdapter(BasePlatformAdapter):
 
         return await self._run_once(request_id, delete)
 
+    async def _update_session_title(self, request: web.Request) -> web.Response:
+        if not self._authorized(request):
+            return self._unauthorized()
+        try:
+            payload = await self._read_frame(request, "session.title.update")
+            request_id = _require_string(payload, "requestId")
+            session_id = _require_string(payload, "sessionId")
+            target_thread_id = _require_string(payload, "targetThreadId")
+            title = _require_string(payload, "title")
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
+        async def update() -> Tuple[int, Dict[str, Any]]:
+            gateway_runner = getattr(self, "gateway_runner", None)
+            session_db, _, db = _gateway_session_resources(gateway_runner)
+            if session_db is None or db is None:
+                raise RuntimeError("Hermes session database is unavailable")
+            session = await asyncio.to_thread(db.get_session, session_id)
+            if not session:
+                return 200, {
+                    **_ack(
+                        request_id,
+                        "rejected",
+                        "The Hermes session is no longer available.",
+                    )
+                }
+            source = str(session.get("source") or "").strip()
+            thread_id = str(session.get("thread_id") or "").strip()
+            stored_target_thread_id = str(
+                _stored_model_config(session).get("_t3agent_target_thread") or ""
+            ).strip()
+            if (
+                source != "t3agent"
+                or target_thread_id not in {thread_id, stored_target_thread_id}
+            ):
+                return 200, {
+                    **_ack(
+                        request_id,
+                        "rejected",
+                        "The Hermes session is not owned by this T3 Agent thread.",
+                    )
+                }
+            try:
+                updated = await session_db.set_session_title(session_id, title)
+            except ValueError as exc:
+                return 200, _ack(request_id, "rejected", str(exc))
+            if updated is False:
+                return 200, _ack(
+                    request_id,
+                    "rejected",
+                    "The Hermes session is no longer available.",
+                )
+            persisted = await asyncio.to_thread(db.get_session_title, session_id)
+            canonical_title = str(persisted or "").strip()
+            if not canonical_title:
+                raise RuntimeError("Hermes accepted the title without persisting it")
+            await self._publish_session_title(
+                chat_id=CANONICAL_CHAT_ID,
+                thread_id=target_thread_id,
+                session_id=session_id,
+                title=canonical_title,
+            )
+            return 200, {
+                "protocolVersion": PROTOCOL_VERSION,
+                "requestId": request_id,
+                "status": "accepted",
+                "title": canonical_title,
+            }
+
+        return await self._run_once(request_id, update)
+
     async def _submit_message(self, request: web.Request) -> web.Response:
         if not self._authorized(request):
             return self._unauthorized()
@@ -1913,6 +1995,91 @@ class T3AgentAdapter(BasePlatformAdapter):
             fields["sourceMessageId"] = source_message_id
         await self._post_event("typing.set", fields, metadata=metadata)
 
+    async def _publish_session_title(
+        self,
+        *,
+        chat_id: str,
+        thread_id: str,
+        session_id: str,
+        title: str,
+        delivery_id: Optional[str] = None,
+    ) -> bool:
+        if self._published_titles.get(session_id) == title:
+            return True
+        occurrence_id = delivery_id or f"title_{secrets.token_hex(16)}"
+        ok, _, _ = await self._post_event(
+            "session.title.updated",
+            {
+                "chatId": chat_id,
+                "threadId": thread_id,
+                "sessionId": session_id,
+                "title": title,
+            },
+            metadata={"deliveryId": occurrence_id},
+        )
+        if ok:
+            self._published_titles[session_id] = title
+        return ok
+
+    async def _watch_session_title(self, source: Any) -> None:
+        gateway_runner = getattr(self, "gateway_runner", None)
+        _, async_store, db = _gateway_session_resources(gateway_runner)
+        thread_id = str(getattr(source, "thread_id", None) or "").strip()
+        if async_store is None or db is None or not thread_id:
+            return
+        try:
+            session_entry = await async_store.get_or_create_session(source)
+            session_id = str(getattr(session_entry, "session_id", "") or "").strip()
+        except Exception:
+            logger.debug("[t3agent] unable to resolve session for title watch", exc_info=True)
+            return
+        if not session_id:
+            return
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + TITLE_WATCH_TIMEOUT_SECONDS
+        delivery_id: Optional[str] = None
+        observed_title: Optional[str] = None
+        while loop.time() < deadline:
+            try:
+                current = await asyncio.to_thread(db.get_session_title, session_id)
+            except Exception:
+                logger.debug("[t3agent] unable to read watched session title", exc_info=True)
+                return
+            title = str(current or "").strip()
+            if title and self._published_titles.get(session_id) != title:
+                if title != observed_title:
+                    observed_title = title
+                    delivery_id = f"title_{secrets.token_hex(16)}"
+                if await self._publish_session_title(
+                    chat_id=str(source.chat_id),
+                    thread_id=thread_id,
+                    session_id=session_id,
+                    title=title,
+                    delivery_id=delivery_id,
+                ):
+                    return
+            await asyncio.sleep(TITLE_WATCH_INTERVAL_SECONDS)
+
+    def _schedule_session_title_watch(self, source: Any) -> None:
+        thread_id = str(getattr(source, "thread_id", None) or "").strip()
+        if not thread_id:
+            return
+        existing = self._title_watch_tasks.get(thread_id)
+        if existing is not None and not existing.done():
+            return
+        task = asyncio.create_task(
+            self._watch_session_title(source),
+            name=f"t3agent-title-watch:{thread_id}",
+        )
+        self._title_watch_tasks[thread_id] = task
+
+        def forget(completed: asyncio.Task) -> None:
+            if self._title_watch_tasks.get(thread_id) is completed:
+                self._title_watch_tasks.pop(thread_id, None)
+
+        task.add_done_callback(forget)
+
     async def on_processing_complete(self, event: MessageEvent, outcome: Any) -> None:
         """Signal the true end of a Hermes turn after all response delivery.
 
@@ -1934,6 +2101,8 @@ class T3AgentAdapter(BasePlatformAdapter):
         if thread_id:
             fields["threadId"] = str(thread_id)
         await self._enqueue_turn_completion(fields)
+        if outcome_value == "success":
+            self._schedule_session_title_watch(source)
         processing_key = self._destination_key(
             source.chat_id, {"thread_id": thread_id}
         )

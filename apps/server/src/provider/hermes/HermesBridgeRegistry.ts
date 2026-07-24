@@ -17,7 +17,10 @@ export class HermesBridgeRegistryError extends Schema.TaggedErrorClass<HermesBri
 export interface HermesBridgeReceiver {
   readonly token: string;
   readonly receive: (payload: unknown) => Effect.Effect<unknown, ProviderAdapterError>;
-  readonly client?: Pick<HermesBridgeClient, "listSessions" | "forkSession" | "deleteSession">;
+  readonly client?: Pick<
+    HermesBridgeClient,
+    "listSessions" | "forkSession" | "deleteSession" | "updateSessionTitle"
+  >;
 }
 
 export interface HermesBridgeRegistration {
@@ -60,7 +63,7 @@ export const unregister = Effect.fn("HermesBridgeRegistry.unregister")(function*
 export const getClient = Effect.fn("HermesBridgeRegistry.getClient")(function* (
   instanceId: ProviderInstanceId,
 ): Effect.fn.Return<
-  Pick<HermesBridgeClient, "listSessions" | "forkSession" | "deleteSession">,
+  Pick<HermesBridgeClient, "listSessions" | "forkSession" | "deleteSession" | "updateSessionTitle">,
   HermesBridgeRegistryError
 > {
   const receiver = registrations.get(instanceId)?.receiver;

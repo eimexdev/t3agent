@@ -331,6 +331,14 @@ export function createServerEnvironmentAtoms<R, E>(
         key: ({ environmentId }) => environmentId,
       },
     }),
+    hermesConversationRename: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:hermes-conversation-rename",
+      tag: WS_METHODS.hermesConversationRename,
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId, input }) => `${environmentId}:${input.threadId}`,
+      },
+    }),
     updateProvider: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:update-provider",
       tag: WS_METHODS.serverUpdateProvider,

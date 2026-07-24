@@ -24,6 +24,7 @@ const NOW = "2026-07-23T10:00:00.000Z";
 const PROJECT_ID = ProjectId.make("project");
 const SOURCE_SESSION_ID = HermesBridgeSessionId.make("discord-source");
 const CHILD_SESSION_ID = HermesBridgeSessionId.make("t3-child");
+const T3_SOURCE_SESSION_ID = HermesBridgeSessionId.make("t3-source");
 const SOURCE_THREAD_ID = ThreadId.make("source-thread");
 const LIVE_IMPORTED_THREAD_ID = ThreadId.make("live-import");
 const DELETED_IMPORTED_THREAD_ID = ThreadId.make("deleted-import");
@@ -41,7 +42,7 @@ const sessionList = {
       importedThreadIds: [LIVE_IMPORTED_THREAD_ID, DELETED_IMPORTED_THREAD_ID],
     },
     {
-      sessionId: HermesBridgeSessionId.make("t3-source"),
+      sessionId: T3_SOURCE_SESSION_ID,
       source: "t3agent",
       title: "Native conversation",
       threadId: SOURCE_THREAD_ID,
@@ -68,6 +69,7 @@ function makeHarness(input: {
   readonly sessions?: HermesBridgeSessionListResponse;
   readonly failureTarget?: FailureTarget;
   readonly liveImportedThread?: boolean;
+  readonly titleUpdateRejection?: string;
 }) {
   const commands: Array<OrchestrationCommand> = [];
   const createdThreadIds: Array<ThreadId> = [];
@@ -115,8 +117,28 @@ function makeHarness(input: {
       status: "accepted",
     }),
   );
+  const updateSessionTitle = vi.fn<HermesBridgeClient["updateSessionTitle"]>((request) =>
+    Effect.succeed(
+      input.titleUpdateRejection
+        ? {
+            protocolVersion: HERMES_BRIDGE_PROTOCOL_VERSION,
+            requestId: request.requestId,
+            status: "rejected" as const,
+            message: input.titleUpdateRejection,
+          }
+        : {
+            protocolVersion: HERMES_BRIDGE_PROTOCOL_VERSION,
+            requestId: request.requestId,
+            status: "accepted" as const,
+            title: request.title.trim(),
+          },
+    ),
+  );
   const baseSessions = input.sessions ?? sessionList;
-  const client: Pick<HermesBridgeClient, "listSessions" | "forkSession" | "deleteSession"> = {
+  const client: Pick<
+    HermesBridgeClient,
+    "listSessions" | "forkSession" | "deleteSession" | "updateSessionTitle"
+  > = {
     listSessions: Effect.sync(() => ({
       ...baseSessions,
       sessions: baseSessions.sessions.map((session) =>
@@ -130,6 +152,7 @@ function makeHarness(input: {
     })),
     forkSession,
     deleteSession,
+    updateSessionTitle,
   };
   const dispatch: HermesConversationLifecycleDependencies["dispatch"] = (command) => {
     commands.push(command);
@@ -158,10 +181,11 @@ function makeHarness(input: {
         threads: [
           {
             id: LIVE_IMPORTED_THREAD_ID,
+            title: "Imported conversation",
             deletedAt: input.liveImportedThread === false ? NOW : null,
           },
-          { id: DELETED_IMPORTED_THREAD_ID, deletedAt: NOW },
-          { id: SOURCE_THREAD_ID, deletedAt: null },
+          { id: DELETED_IMPORTED_THREAD_ID, title: "Deleted", deletedAt: NOW },
+          { id: SOURCE_THREAD_ID, title: "Provisional title", deletedAt: null },
           ...createdThreadIds.map((id) => ({ id, deletedAt: null })),
         ],
       }),
@@ -180,6 +204,7 @@ function makeHarness(input: {
     commands,
     forkSession,
     deleteSession,
+    updateSessionTitle,
   };
 }
 
@@ -223,12 +248,95 @@ function assertCompensates(failureTarget: FailureTarget) {
 
 describe("HermesConversationLifecycle", () => {
   it.effect("lists sessions without stale T3 thread links", () => {
-    const { lifecycle } = makeHarness({});
+    const { lifecycle, commands } = makeHarness({});
     return Effect.gen(function* () {
       const result = yield* lifecycle.listSessions;
 
       assert.deepStrictEqual(result.sessions[0]?.importedThreadIds, [LIVE_IMPORTED_THREAD_ID]);
       assert.strictEqual(result.sessions[1]?.threadId, SOURCE_THREAD_ID);
+      const titleUpdate = commands.find(
+        (command) => command.type === "thread.meta.update" && command.threadId === SOURCE_THREAD_ID,
+      );
+      assert.strictEqual(titleUpdate?.type, "thread.meta.update");
+      if (titleUpdate?.type === "thread.meta.update") {
+        assert.strictEqual(titleUpdate.title, "Native conversation");
+      }
+    });
+  });
+
+  it.effect("renames Hermes before updating the local projection", () => {
+    const { lifecycle, commands, updateSessionTitle } = makeHarness({});
+    return Effect.gen(function* () {
+      const result = yield* lifecycle.renameConversation({
+        threadId: SOURCE_THREAD_ID,
+        title: "  Sidebar rename  ",
+      });
+
+      assert.deepStrictEqual(result, {
+        threadId: SOURCE_THREAD_ID,
+        title: "Sidebar rename",
+      });
+      assert.strictEqual(updateSessionTitle.mock.calls.length, 1);
+      assert.deepInclude(updateSessionTitle.mock.calls[0]?.[0], {
+        type: "session.title.update",
+        sessionId: T3_SOURCE_SESSION_ID,
+        targetThreadId: SOURCE_THREAD_ID,
+      });
+      assert.deepInclude(commands.at(-1), {
+        type: "thread.meta.update",
+        threadId: SOURCE_THREAD_ID,
+        title: "Sidebar rename",
+      });
+    });
+  });
+
+  it.effect("preserves the local projection when Hermes rejects a rename", () => {
+    const { lifecycle, commands } = makeHarness({
+      titleUpdateRejection: "Title is already in use.",
+    });
+    return Effect.gen(function* () {
+      const result = yield* Effect.result(
+        lifecycle.renameConversation({
+          threadId: SOURCE_THREAD_ID,
+          title: "Duplicate",
+        }),
+      );
+
+      assert.isTrue(Result.isFailure(result));
+      if (Result.isSuccess(result)) return;
+      assert.strictEqual(result.failure.operation, "conversation.rename");
+      assert.match(result.failure.message, /already in use/);
+      assert.lengthOf(commands, 0);
+    });
+  });
+
+  it.effect("reconciles titled Hermes sessions and ignores missing titles", () => {
+    const sessions = {
+      ...sessionList,
+      sessions: [
+        sessionList.sessions[0]!,
+        sessionList.sessions[1]!,
+        {
+          sessionId: HermesBridgeSessionId.make("untitled"),
+          source: "t3agent",
+          threadId: LIVE_IMPORTED_THREAD_ID,
+          startedAt: NOW,
+          messageCount: 1,
+        },
+      ],
+    } satisfies HermesBridgeSessionListResponse;
+    const { lifecycle, commands } = makeHarness({ sessions });
+    return Effect.gen(function* () {
+      yield* lifecycle.reconcileTitles;
+
+      assert.deepStrictEqual(
+        commands.map((command) =>
+          command.type === "thread.meta.update"
+            ? { threadId: command.threadId, title: command.title }
+            : { type: command.type },
+        ),
+        [{ threadId: SOURCE_THREAD_ID, title: "Native conversation" }],
+      );
     });
   });
 
