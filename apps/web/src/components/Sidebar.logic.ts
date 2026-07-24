@@ -126,6 +126,7 @@ type ThreadStatusInput = Pick<
   | "latestTurn"
   | "session"
 > & {
+  latestTurnlessAssistantMessageAt?: string | null | undefined;
   lastVisitedAt?: string | undefined;
 };
 
@@ -221,10 +222,31 @@ export function useThreadJumpHintVisibility(): {
   };
 }
 
+export function getLatestCompletionAt(
+  thread: Pick<SidebarThreadSummary, "latestTurn"> & {
+    latestTurnlessAssistantMessageAt?: string | null | undefined;
+  },
+): string | null {
+  const candidates = [
+    thread.latestTurn?.completedAt ?? null,
+    thread.latestTurnlessAssistantMessageAt ?? null,
+  ];
+  let latest: { readonly value: string; readonly timestamp: number } | null = null;
+  for (const value of candidates) {
+    if (value === null) continue;
+    const timestamp = Date.parse(value);
+    if (Number.isNaN(timestamp)) continue;
+    if (latest === null || timestamp > latest.timestamp) {
+      latest = { value, timestamp };
+    }
+  }
+  return latest?.value ?? null;
+}
+
 export function hasUnseenCompletion(thread: ThreadStatusInput): boolean {
-  if (!thread.latestTurn?.completedAt) return false;
-  const completedAt = Date.parse(thread.latestTurn.completedAt);
-  if (Number.isNaN(completedAt)) return false;
+  const latestCompletionAt = getLatestCompletionAt(thread);
+  if (latestCompletionAt === null) return false;
+  const completedAt = Date.parse(latestCompletionAt);
   if (!thread.lastVisitedAt) return false;
 
   const lastVisitedAt = Date.parse(thread.lastVisitedAt);

@@ -397,6 +397,27 @@ it.layer(NodeServices.layer)("settled thread decider", (it) => {
     }),
   );
 
+  it.effect("wakes settled threads for finalized assistant messages outside a turn", () =>
+    Effect.gen(function* () {
+      const result = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.message.assistant.complete",
+          commandId: CommandId.make("cmd-cron-complete"),
+          threadId: ThreadId.make("thread-1"),
+          messageId: MessageId.make("message-cron"),
+          text: "Scheduled work finished",
+          createdAt: NOW,
+        },
+        readModel: makeReadModel("settled"),
+      });
+      const events = Array.isArray(result) ? result : [result];
+      expect(events.map((event) => event.type)).toEqual([
+        "thread.unsettled",
+        "thread.message-sent",
+      ]);
+    }),
+  );
+
   it.effect("clears a keep-active pin on real activity", () =>
     Effect.gen(function* () {
       const turnResult = yield* decideOrchestrationCommand({

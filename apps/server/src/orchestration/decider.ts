@@ -874,12 +874,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.message.assistant.complete": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
-      return {
+      const messageEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...(yield* withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
@@ -900,6 +900,24 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           updatedAt: command.createdAt,
         },
       };
+      if (command.turnId !== undefined || thread.settledOverride === null) {
+        return messageEvent;
+      }
+      const unsettledEvent: Omit<OrchestrationEvent, "sequence"> = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.unsettled",
+        payload: {
+          threadId: command.threadId,
+          reason: "activity",
+          updatedAt: command.createdAt,
+        },
+      };
+      return [unsettledEvent, messageEvent];
     }
 
     case "thread.message.import": {

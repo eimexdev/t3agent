@@ -610,6 +610,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             settledOverride: null,
             settledAt: null,
             latestUserMessageAt: null,
+            latestTurnlessAssistantMessageAt: null,
             pendingApprovalCount: 0,
             pendingUserInputCount: 0,
             hasActionableProposedPlan: 0,
@@ -761,6 +762,13 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
             updatedAt: event.occurredAt,
+            ...(event.type === "thread.message-sent" &&
+            event.payload.role === "assistant" &&
+            event.payload.turnId === null &&
+            event.payload.streaming === false &&
+            event.payload.imported !== true
+              ? { latestTurnlessAssistantMessageAt: event.payload.updatedAt }
+              : {}),
           });
           yield* refreshThreadShellSummary(event.payload.threadId);
           return;

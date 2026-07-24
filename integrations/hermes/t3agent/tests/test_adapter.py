@@ -99,6 +99,54 @@ def test_plugin_package_exports_register() -> None:
     assert plugin_package.register is adapter_module.register
 
 
+@pytest.mark.asyncio
+async def test_typing_lifecycle_preserves_thread_routing(
+    fake_platform: SimpleNamespace,
+) -> None:
+    adapter = adapter_module.T3AgentAdapter(make_config())
+    events: List[Any] = []
+
+    async def capture(
+        event_type: str,
+        fields: Dict[str, Any],
+        metadata: Dict[str, Any] | None = None,
+    ) -> tuple[bool, Dict[str, Any], None]:
+        events.append((event_type, fields, metadata))
+        return True, {}, None
+
+    adapter._post_event = capture  # type: ignore[method-assign]
+    metadata = {
+        "threadId": "thread-1",
+        "sourceMessageId": "hermes-user:message-1",
+    }
+
+    await adapter.send_typing("chat-1", metadata)
+    await adapter.stop_typing("chat-1", metadata)
+
+    assert events == [
+        (
+            "typing.set",
+            {
+                "chatId": "chat-1",
+                "active": True,
+                "threadId": "thread-1",
+                "sourceMessageId": "hermes-user:message-1",
+            },
+            metadata,
+        ),
+        (
+            "typing.set",
+            {
+                "chatId": "chat-1",
+                "active": False,
+                "threadId": "thread-1",
+                "sourceMessageId": "hermes-user:message-1",
+            },
+            metadata,
+        ),
+    ]
+
+
 async def wait_until(predicate: Any, *, timeout: float = 2.0) -> None:
     async def poll() -> None:
         while not predicate():

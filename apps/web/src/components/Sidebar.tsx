@@ -174,6 +174,7 @@ import { openCommandPalette } from "../commandPaletteBus";
 import {
   archiveSelectedThreadEntries,
   buildMultiSelectThreadContextMenuItems,
+  getLatestCompletionAt,
   getSidebarThreadIdsToPrewarm,
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
@@ -1790,7 +1791,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
       if (clicked === "mark-unread") {
         for (const { threadKey, thread } of selectedThreadEntries) {
-          markThreadUnread(threadKey, thread.latestTurn?.completedAt);
+          markThreadUnread(threadKey, getLatestCompletionAt(thread));
         }
         clearSelection();
         return;
@@ -2180,7 +2181,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       }
 
       if (clicked === "mark-unread") {
-        markThreadUnread(threadKey, thread.latestTurn?.completedAt);
+        markThreadUnread(threadKey, getLatestCompletionAt(thread));
         return;
       }
       if (clicked === "copy-path") {

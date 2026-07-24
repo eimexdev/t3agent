@@ -93,6 +93,7 @@ import type { SidebarThreadSummary } from "../types";
 import { cn } from "~/lib/utils";
 import {
   formatWorkingDurationLabel,
+  getLatestCompletionAt,
   hasUnseenCompletion,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
@@ -1507,7 +1508,7 @@ export default function SidebarV2() {
       if (clicked.value === "mark-unread") {
         for (const threadKey of threadKeys) {
           const thread = threadByKeyRef.current.get(threadKey);
-          markThreadUnread(threadKey, thread?.latestTurn?.completedAt);
+          markThreadUnread(threadKey, thread ? getLatestCompletionAt(thread) : null);
         }
         clearSelection();
         return;
@@ -1612,7 +1613,7 @@ export default function SidebarV2() {
             startThreadRename(threadRef, thread.title);
             return;
           case "mark-unread":
-            markThreadUnread(threadKey, thread.latestTurn?.completedAt);
+            markThreadUnread(threadKey, getLatestCompletionAt(thread));
             return;
           case "delete": {
             if (confirmThreadDelete) {

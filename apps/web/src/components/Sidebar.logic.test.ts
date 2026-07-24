@@ -234,6 +234,21 @@ describe("hasUnseenCompletion", () => {
     ).toBe(true);
   });
 
+  it("counts a finalized assistant message outside a turn as a completion", () => {
+    expect(
+      hasUnseenCompletion({
+        hasActionableProposedPlan: false,
+        hasPendingApprovals: false,
+        hasPendingUserInput: false,
+        interactionMode: "default",
+        latestTurn: null,
+        latestTurnlessAssistantMessageAt: "2026-03-09T10:05:00.000Z",
+        lastVisitedAt: "2026-03-09T10:04:00.000Z",
+        session: null,
+      }),
+    ).toBe(true);
+  });
+
   it("treats a missing client visit marker as read", () => {
     expect(
       hasUnseenCompletion({

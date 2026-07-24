@@ -157,6 +157,16 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       `;
       assert.deepEqual(messageRows, [{ messageId: "message-1", text: "hello" }]);
 
+      const completionRows = yield* sql<{
+        readonly latestTurnlessAssistantMessageAt: string | null;
+      }>`
+        SELECT
+          latest_turnless_assistant_message_at AS "latestTurnlessAssistantMessageAt"
+        FROM projection_threads
+        WHERE thread_id = 'thread-1'
+      `;
+      assert.deepEqual(completionRows, [{ latestTurnlessAssistantMessageAt: now }]);
+
       const stateRows = yield* sql<{
         readonly projector: string;
         readonly lastAppliedSequence: number;

@@ -2457,6 +2457,18 @@ class T3AgentAdapter(BasePlatformAdapter):
             fields["sourceMessageId"] = source_message_id
         await self._post_event("typing.set", fields, metadata=metadata)
 
+    async def stop_typing(
+        self, chat_id: str, metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        fields: Dict[str, Any] = {"chatId": str(chat_id), "active": False}
+        thread_id = _metadata_value(metadata, "threadId", "thread_id")
+        if thread_id:
+            fields["threadId"] = thread_id
+        source_message_id = self._source_message_id(chat_id, metadata)
+        if source_message_id:
+            fields["sourceMessageId"] = source_message_id
+        await self._post_event("typing.set", fields, metadata=metadata)
+
     async def _publish_session_title(
         self,
         *,
