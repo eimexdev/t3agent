@@ -48,6 +48,12 @@ function shouldPersistThread(thread: OrchestrationThread): boolean {
   return status !== "starting" && status !== "running";
 }
 
+function containsAudioAttachment(thread: OrchestrationThread): boolean {
+  return thread.messages.some((message) =>
+    message.attachments?.some((attachment) => attachment.type === "audio"),
+  );
+}
+
 export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make")(function* (
   threadId: ThreadIdType,
 ) {
@@ -252,7 +258,14 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         yield* setSynchronizing;
 
         let current = yield* SubscriptionRef.get(state);
-        if (Option.isNone(current.data) && current.status !== "deleted") {
+        const cachedAudioNeedsCompatibilityRefresh =
+          snapshotLoader.clientCapabilities.audioAttachments !== true &&
+          Option.isSome(current.data) &&
+          containsAudioAttachment(current.data.value);
+        if (
+          (Option.isNone(current.data) || cachedAudioNeedsCompatibilityRefresh) &&
+          current.status !== "deleted"
+        ) {
           const prepared = yield* SubscriptionRef.get(supervisor.prepared).pipe(
             Effect.flatMap(
               Option.match({
@@ -286,7 +299,9 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
 
         return {
           threadId,
-          clientCapabilities: { audioAttachments: true as const },
+          ...(snapshotLoader.clientCapabilities.audioAttachments === true
+            ? { clientCapabilities: { audioAttachments: true as const } }
+            : {}),
           ...(canResume ? { afterSequence: sequence } : {}),
           ...(supportsCompletionMarker ? { requestCompletionMarker: true as const } : {}),
         };

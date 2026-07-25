@@ -1,6 +1,7 @@
 import {
   EnvironmentId,
   EventId,
+  MessageId,
   ORCHESTRATION_WS_METHODS,
   ProjectId,
   ProviderInstanceId,
@@ -133,6 +134,7 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
   readonly cached?: OrchestrationThread;
   readonly httpSnapshot?: Option.Option<OrchestrationThreadDetailSnapshot>;
   readonly completionMarker?: boolean;
+  readonly audioAttachments?: boolean;
 }) {
   const inputs = yield* Queue.unbounded<TestThreadInput>();
   const observed = yield* Queue.unbounded<EnvironmentThreadState>();
@@ -142,6 +144,9 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
   const loaderCalls = yield* Ref.make(0);
   const lastSubscribeAfterSequence = yield* Ref.make<number | undefined>(undefined);
   const lastRequestCompletionMarker = yield* Ref.make<boolean | undefined>(undefined);
+  const lastClientCapabilities = yield* Ref.make<
+    { readonly audioAttachments?: boolean } | undefined
+  >(undefined);
   const savedThreads = yield* Ref.make<ReadonlyArray<OrchestrationThreadDetailSnapshot>>([]);
   const removedThreads = yield* Ref.make<ReadonlyArray<ThreadId>>([]);
   const wakeups = yield* Queue.unbounded<ConnectionWakeups.ConnectionWakeup>();
@@ -157,12 +162,14 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
   const client = {
     [ORCHESTRATION_WS_METHODS.subscribeThread]: (input: {
       readonly afterSequence?: number;
+      readonly clientCapabilities?: { readonly audioAttachments?: boolean };
       readonly requestCompletionMarker?: boolean;
     }) =>
       Stream.unwrap(
         Ref.updateAndGet(subscriptionCount, (count) => count + 1).pipe(
           Effect.andThen(Ref.set(lastSubscribeAfterSequence, input.afterSequence)),
           Effect.andThen(Ref.set(lastRequestCompletionMarker, input.requestCompletionMarker)),
+          Effect.andThen(Ref.set(lastClientCapabilities, input.clientCapabilities)),
           Effect.as(streamFrom(inputs)),
         ),
       ),
@@ -179,6 +186,7 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
     Option.some(PREPARED),
   );
   const snapshotLoader = ThreadSnapshotLoader.of({
+    clientCapabilities: options?.audioAttachments === true ? { audioAttachments: true } : {},
     load: (_prepared, threadId) =>
       Ref.update(loaderCalls, (count) => count + 1).pipe(
         Effect.as(
@@ -244,6 +252,7 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
     loaderCalls,
     lastSubscribeAfterSequence,
     lastRequestCompletionMarker,
+    lastClientCapabilities,
     supervisorState,
     supervisorSession,
     savedThreads,
@@ -415,6 +424,73 @@ describe("EnvironmentThreads", () => {
       // resumed from that snapshot's sequence.
       expect(yield* Ref.get(harness.loaderCalls)).toBeGreaterThanOrEqual(1);
       expect(yield* Ref.get(harness.lastSubscribeAfterSequence)).toBe(1);
+    }),
+  );
+
+  it.effect("only advertises audio attachments when the client surface opts in", () =>
+    Effect.gen(function* () {
+      const legacyHarness = yield* makeHarness();
+      yield* Queue.offer(legacyHarness.inputs, snapshot(BASE_THREAD));
+      yield* awaitThreadState(legacyHarness.observed, (value) => value.status === "live");
+      expect(yield* Ref.get(legacyHarness.lastClientCapabilities)).toBeUndefined();
+
+      const capableHarness = yield* makeHarness({ audioAttachments: true });
+      yield* Queue.offer(capableHarness.inputs, snapshot(BASE_THREAD));
+      yield* awaitThreadState(capableHarness.observed, (value) => value.status === "live");
+      expect(yield* Ref.get(capableHarness.lastClientCapabilities)).toEqual({
+        audioAttachments: true,
+      });
+    }),
+  );
+
+  it.effect("refreshes a cached audio message for a legacy client", () =>
+    Effect.gen(function* () {
+      const cachedThread: OrchestrationThread = {
+        ...BASE_THREAD,
+        messages: [
+          {
+            id: MessageId.make("voice-message"),
+            role: "user",
+            text: "",
+            attachments: [
+              {
+                type: "audio",
+                id: "audio-1",
+                name: "Voice note",
+                mimeType: "audio/webm",
+                sizeBytes: 100,
+                durationMs: 1_000,
+                waveform: [0.5],
+              },
+            ],
+            turnId: null,
+            streaming: false,
+            createdAt: BASE_THREAD.createdAt,
+            updatedAt: BASE_THREAD.createdAt,
+          },
+        ],
+      };
+      const projectedThread: OrchestrationThread = {
+        ...cachedThread,
+        messages: [{ ...cachedThread.messages[0]!, text: "Voice transcript", attachments: [] }],
+      };
+      const harness = yield* makeHarness({
+        cached: cachedThread,
+        httpSnapshot: Option.some({
+          snapshotSequence: CACHED_SNAPSHOT_SEQUENCE + 1,
+          thread: projectedThread,
+        }),
+      });
+
+      const state = yield* awaitThreadState(
+        harness.observed,
+        (value) =>
+          Option.isSome(value.data) && value.data.value.messages[0]?.text === "Voice transcript",
+      );
+
+      expect(Option.getOrThrow(state.data).messages[0]?.attachments).toEqual([]);
+      expect(yield* Ref.get(harness.loaderCalls)).toBeGreaterThanOrEqual(1);
+      expect(yield* Ref.get(harness.lastSubscribeAfterSequence)).toBe(CACHED_SNAPSHOT_SEQUENCE + 1);
     }),
   );
 

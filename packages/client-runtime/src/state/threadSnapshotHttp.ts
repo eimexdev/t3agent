@@ -1,4 +1,8 @@
-import type { OrchestrationThreadDetailSnapshot, ThreadId } from "@t3tools/contracts";
+import type {
+  OrchestrationClientCapabilities,
+  OrchestrationThreadDetailSnapshot,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -31,12 +35,14 @@ export const fetchEnvironmentThreadSnapshot = Effect.fn(
 )(function* (input: {
   readonly prepared: PreparedConnection;
   readonly threadId: ThreadId;
+  readonly clientCapabilities?: OrchestrationClientCapabilities;
   readonly signer: Option.Option<ManagedRelayDpopSigner["Service"]>;
   readonly timeoutMs?: number;
 }) {
+  const supportsAudioAttachments = input.clientCapabilities?.audioAttachments === true;
   const requestUrl = environmentEndpointUrl(
     input.prepared.httpBaseUrl,
-    `/api/orchestration/threads/${input.threadId}?audioAttachments=true`,
+    `/api/orchestration/threads/${input.threadId}${supportsAudioAttachments ? "?audioAttachments=true" : ""}`,
   );
   const client = yield* makeEnvironmentHttpApiClient(input.prepared.httpBaseUrl);
   const headers = yield* buildEnvironmentAuthHeaders(
@@ -52,7 +58,7 @@ export const fetchEnvironmentThreadSnapshot = Effect.fn(
       input.prepared.httpAuthorization,
       client.orchestration.threadSnapshot({
         params: { threadId: input.threadId },
-        query: { audioAttachments: "true" },
+        query: supportsAudioAttachments ? { audioAttachments: "true" } : {},
         headers,
       }),
     ),
@@ -70,6 +76,7 @@ export type FetchEnvironmentThreadSnapshotError = RemoteEnvironmentRequestError;
 export class ThreadSnapshotLoader extends Context.Service<
   ThreadSnapshotLoader,
   {
+    readonly clientCapabilities: OrchestrationClientCapabilities;
     readonly load: (
       prepared: PreparedConnection,
       threadId: ThreadId,
@@ -81,41 +88,53 @@ export const threadSnapshotLoaderLayer: Layer.Layer<
   ThreadSnapshotLoader,
   never,
   HttpClient.HttpClient
-> = Layer.effect(
-  ThreadSnapshotLoader,
-  Effect.gen(function* () {
-    const httpClient = yield* HttpClient.HttpClient;
-    // Resolve the DPoP signer optionally: it is only needed for relay/DPoP
-    // connections, so the loader must not hard-require it (bearer/primary
-    // connections work without one).
-    const signer = yield* Effect.serviceOption(ManagedRelayDpopSigner);
-    return ThreadSnapshotLoader.of({
-      load: (prepared: PreparedConnection, threadId: ThreadId) =>
-        fetchEnvironmentThreadSnapshot({ prepared, threadId, signer }).pipe(
-          Effect.map(Option.some<OrchestrationThreadDetailSnapshot>),
-          Effect.provideService(HttpClient.HttpClient, httpClient),
-          // A genuinely missing thread (404) is expected — the socket
-          // subscription is the source of truth for thread existence and will
-          // surface the deletion — so don't treat it as an error worth warning
-          // about; just defer to the socket path.
-          Effect.catchTags({
-            EnvironmentResourceNotFoundError: () =>
-              Effect.logDebug(
-                "Thread snapshot not found over HTTP; deferring to the socket subscription.",
+> = makeThreadSnapshotLoaderLayer();
+
+export function makeThreadSnapshotLoaderLayer(
+  clientCapabilities: OrchestrationClientCapabilities = {},
+): Layer.Layer<ThreadSnapshotLoader, never, HttpClient.HttpClient> {
+  return Layer.effect(
+    ThreadSnapshotLoader,
+    Effect.gen(function* () {
+      const httpClient = yield* HttpClient.HttpClient;
+      // Resolve the DPoP signer optionally: it is only needed for relay/DPoP
+      // connections, so the loader must not hard-require it (bearer/primary
+      // connections work without one).
+      const signer = yield* Effect.serviceOption(ManagedRelayDpopSigner);
+      return ThreadSnapshotLoader.of({
+        clientCapabilities,
+        load: (prepared: PreparedConnection, threadId: ThreadId) =>
+          fetchEnvironmentThreadSnapshot({
+            prepared,
+            threadId,
+            signer,
+            clientCapabilities,
+          }).pipe(
+            Effect.map(Option.some<OrchestrationThreadDetailSnapshot>),
+            Effect.provideService(HttpClient.HttpClient, httpClient),
+            // A genuinely missing thread (404) is expected — the socket
+            // subscription is the source of truth for thread existence and will
+            // surface the deletion — so don't treat it as an error worth warning
+            // about; just defer to the socket path.
+            Effect.catchTags({
+              EnvironmentResourceNotFoundError: () =>
+                Effect.logDebug(
+                  "Thread snapshot not found over HTTP; deferring to the socket subscription.",
+                ).pipe(
+                  Effect.annotateLogs({ threadId }),
+                  Effect.as(Option.none<OrchestrationThreadDetailSnapshot>()),
+                ),
+            }),
+            Effect.catchCause((cause) =>
+              Effect.logWarning(
+                "Could not load the thread snapshot over HTTP; using the socket snapshot instead.",
               ).pipe(
-                Effect.annotateLogs({ threadId }),
+                Effect.annotateLogs({ threadId, cause: Cause.pretty(cause) }),
                 Effect.as(Option.none<OrchestrationThreadDetailSnapshot>()),
               ),
-          }),
-          Effect.catchCause((cause) =>
-            Effect.logWarning(
-              "Could not load the thread snapshot over HTTP; using the socket snapshot instead.",
-            ).pipe(
-              Effect.annotateLogs({ threadId, cause: Cause.pretty(cause) }),
-              Effect.as(Option.none<OrchestrationThreadDetailSnapshot>()),
             ),
           ),
-        ),
-    });
-  }),
-);
+      });
+    }),
+  );
+}
