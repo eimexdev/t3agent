@@ -36,7 +36,7 @@ export const fetchEnvironmentThreadSnapshot = Effect.fn(
 }) {
   const requestUrl = environmentEndpointUrl(
     input.prepared.httpBaseUrl,
-    `/api/orchestration/threads/${input.threadId}`,
+    `/api/orchestration/threads/${input.threadId}?audioAttachments=true`,
   );
   const client = yield* makeEnvironmentHttpApiClient(input.prepared.httpBaseUrl);
   const headers = yield* buildEnvironmentAuthHeaders(
@@ -52,6 +52,7 @@ export const fetchEnvironmentThreadSnapshot = Effect.fn(
       input.prepared.httpAuthorization,
       client.orchestration.threadSnapshot({
         params: { threadId: input.threadId },
+        query: { audioAttachments: "true" },
         headers,
       }),
     ),

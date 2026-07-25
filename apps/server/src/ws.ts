@@ -70,6 +70,10 @@ import * as ServerConfig from "./config.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
+import {
+  projectOrchestrationEventForClient,
+  projectOrchestrationThreadStreamItemForClient,
+} from "./orchestration/clientCompatibility.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
@@ -1227,6 +1231,11 @@ const makeWsRpcLayer = (
             ).pipe(
               Effect.map((events) => Array.from(events)),
               Effect.flatMap(enrichOrchestrationEvents),
+              Effect.map((events) =>
+                events.map((event) =>
+                  projectOrchestrationEventForClient(event, input.clientCapabilities),
+                ),
+              ),
               Effect.mapError(
                 (cause) =>
                   new OrchestrationReplayEventsError({
@@ -1465,7 +1474,15 @@ const makeWsRpcLayer = (
                 }),
                 afterSnapshot,
               );
-            }),
+            }).pipe(
+              Effect.map((stream) =>
+                stream.pipe(
+                  Stream.map((item) =>
+                    projectOrchestrationThreadStreamItemForClient(item, input.clientCapabilities),
+                  ),
+                ),
+              ),
+            ),
             { "rpc.aggregate": "orchestration" },
           ),
         [WS_METHODS.serverProbe]: (_input) =>

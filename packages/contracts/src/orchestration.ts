@@ -518,8 +518,18 @@ export const OrchestrationSubscribeShellInput = Schema.Struct({
 });
 export type OrchestrationSubscribeShellInput = typeof OrchestrationSubscribeShellInput.Type;
 
+export const OrchestrationClientCapabilities = Schema.Struct({
+  audioAttachments: Schema.optionalKey(Schema.Boolean),
+});
+export type OrchestrationClientCapabilities = typeof OrchestrationClientCapabilities.Type;
+
 export const OrchestrationSubscribeThreadInput = Schema.Struct({
   threadId: ThreadId,
+  /**
+   * Missing means a client released before attachment capability negotiation,
+   * so the server returns a legacy-safe thread projection.
+   */
+  clientCapabilities: Schema.optionalKey(OrchestrationClientCapabilities),
   /**
    * When provided, the server skips the initial snapshot frame and instead
    * replays events after this sequence before streaming live events. Clients
@@ -1076,6 +1086,7 @@ export const ThreadMessageSentPayload = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
+export type ThreadMessageSentPayload = typeof ThreadMessageSentPayload.Type;
 
 export const ThreadTurnStartRequestedPayload = Schema.Struct({
   threadId: ThreadId,
@@ -1410,6 +1421,7 @@ export type OrchestrationGetFullThreadDiffResult = typeof OrchestrationGetFullTh
 
 export const OrchestrationReplayEventsInput = Schema.Struct({
   fromSequenceExclusive: NonNegativeInt,
+  clientCapabilities: Schema.optionalKey(OrchestrationClientCapabilities),
 });
 export type OrchestrationReplayEventsInput = typeof OrchestrationReplayEventsInput.Type;
 

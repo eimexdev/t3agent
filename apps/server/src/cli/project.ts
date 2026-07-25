@@ -313,6 +313,7 @@ const fetchLiveOrchestrationSnapshot = (origin: string, bearerToken: string) =>
     const client = yield* makeLiveServerClient(origin);
     return yield* client.orchestration.snapshot({
       headers: { authorization: `Bearer ${bearerToken}` },
+      query: { audioAttachments: "true" },
     });
   }).pipe(
     withProjectCliLiveServerTimeout,

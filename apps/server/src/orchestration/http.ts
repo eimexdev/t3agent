@@ -17,6 +17,10 @@ import {
 } from "../auth/http.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
+import {
+  projectOrchestrationReadModelForClient,
+  projectOrchestrationThreadSnapshotForClient,
+} from "./clientCompatibility.ts";
 
 export const orchestrationHttpApiLayer = HttpApiBuilder.group(
   EnvironmentHttpApi,
@@ -31,13 +35,17 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
         Effect.fn("environment.orchestration.snapshot")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
           yield* requireEnvironmentScope(AuthOrchestrationReadScope);
-          return yield* projectionSnapshotQuery
-            .getSnapshot()
-            .pipe(
-              Effect.catch((cause) =>
-                failEnvironmentInternal("orchestration_snapshot_failed", cause),
+          return yield* projectionSnapshotQuery.getSnapshot().pipe(
+            Effect.map((snapshot) =>
+              projectOrchestrationReadModelForClient(
+                snapshot,
+                args.query.audioAttachments === "true" ? { audioAttachments: true } : undefined,
               ),
-            );
+            ),
+            Effect.catch((cause) =>
+              failEnvironmentInternal("orchestration_snapshot_failed", cause),
+            ),
+          );
         }),
       )
       .handle(
@@ -69,7 +77,10 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
           if (Option.isNone(snapshot)) {
             return yield* failEnvironmentNotFound("thread_not_found");
           }
-          return snapshot.value;
+          return projectOrchestrationThreadSnapshotForClient(
+            snapshot.value,
+            args.query.audioAttachments === "true" ? { audioAttachments: true } : undefined,
+          );
         }),
       )
       .handle(
