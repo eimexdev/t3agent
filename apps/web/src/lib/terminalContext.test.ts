@@ -13,6 +13,7 @@ import {
   formatInlineTerminalContextLabel,
   formatTerminalContextLabel,
   hasTerminalContextText,
+  IMAGE_ONLY_BOOTSTRAP_PROMPT,
   INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
   insertInlineTerminalContextPlaceholder,
   isTerminalContextExpired,
@@ -124,6 +125,27 @@ describe("terminalContext", () => {
       ],
       elementContexts: [],
     });
+  });
+
+  it("hides the provider bootstrap prompt for image-only messages", () => {
+    expect(
+      deriveDisplayedUserMessageState(IMAGE_ONLY_BOOTSTRAP_PROMPT, {
+        hasImageAttachments: true,
+      }),
+    ).toEqual({
+      visibleText: "",
+      copyText: "",
+      contextCount: 0,
+      previewTitle: null,
+      contexts: [],
+      elementContexts: [],
+    });
+  });
+
+  it("preserves matching user text when no image is attached", () => {
+    expect(deriveDisplayedUserMessageState(IMAGE_ONLY_BOOTSTRAP_PROMPT).visibleText).toBe(
+      IMAGE_ONLY_BOOTSTRAP_PROMPT,
+    );
   });
 
   it("preserves prompt text when no trailing terminal context block exists", () => {

@@ -930,7 +930,9 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
   const userAudio = userAttachments.filter(
     (attachment): attachment is ChatAudioAttachment => attachment.type === "audio",
   );
-  const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
+  const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text, {
+    hasImageAttachments: userImages.length > 0,
+  });
   const terminalContexts = displayedUserMessage.contexts;
   const previewAnnotations: ParsedPreviewAnnotation[] = [];
   let visibleText = displayedUserMessage.visibleText;

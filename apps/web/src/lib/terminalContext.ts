@@ -43,6 +43,8 @@ export interface ParsedTerminalContextEntry {
 }
 
 export const INLINE_TERMINAL_CONTEXT_PLACEHOLDER = "\uFFFC";
+export const IMAGE_ONLY_BOOTSTRAP_PROMPT =
+  "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
 
 const TRAILING_TERMINAL_CONTEXT_BLOCK_PATTERN =
   /\n*<terminal_context>\n([\s\S]*?)\n<\/terminal_context>\s*$/;
@@ -245,15 +247,23 @@ export function extractTrailingTerminalContexts(prompt: string): ExtractedTermin
   };
 }
 
-export function deriveDisplayedUserMessageState(prompt: string): DisplayedUserMessageState {
+export function deriveDisplayedUserMessageState(
+  prompt: string,
+  options?: { readonly hasImageAttachments?: boolean },
+): DisplayedUserMessageState {
   // Order matters: send-time appends `<terminal_context>` first, then
   // `<element_context>` last. Strip element first so the (now-trailing)
   // terminal block can be matched by `extractTrailingTerminalContexts`.
   const extractedElement = extractTrailingElementContexts(prompt);
   const extractedTerminal = extractTrailingTerminalContexts(extractedElement.promptText);
+  const normalizedVisibleText = extractedTerminal.promptText.trim();
+  const hideImageOnlyBootstrapPrompt =
+    options?.hasImageAttachments === true &&
+    (normalizedVisibleText === IMAGE_ONLY_BOOTSTRAP_PROMPT ||
+      normalizedVisibleText === `Ultrathink:\n${IMAGE_ONLY_BOOTSTRAP_PROMPT}`);
   return {
-    visibleText: extractedTerminal.promptText,
-    copyText: prompt,
+    visibleText: hideImageOnlyBootstrapPrompt ? "" : extractedTerminal.promptText,
+    copyText: hideImageOnlyBootstrapPrompt ? "" : prompt,
     contextCount: extractedTerminal.contextCount,
     previewTitle: extractedTerminal.previewTitle,
     contexts: extractedTerminal.contexts,
