@@ -107,8 +107,8 @@ import { Link } from "@tanstack/react-router";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { useThreadShell } from "../../state/entities";
 import type { ChatAudioAttachment } from "../../types";
-import { formatVoiceDuration } from "../../voiceRecorderStore";
-import { VoiceWaveform } from "./VoiceWaveform";
+import { finalizeVoiceRecordingBlob, formatVoiceDuration } from "../../voiceRecorderStore";
+import { VoiceWaveform, voiceSeekTargetSeconds } from "./VoiceWaveform";
 
 import {
   buildInlineTerminalContextText,
@@ -1167,13 +1167,69 @@ function MessageImageAttachmentGrid(props: {
 
 function VoiceNotePlayer({ audio }: { audio: ChatAudioAttachment }) {
   const elementRef = useRef<HTMLAudioElement | null>(null);
+  const repairedUrlRef = useRef<string | null>(null);
+  const repairPromiseRef = useRef<Promise<HTMLAudioElement | null> | null>(null);
   const [playing, setPlaying] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
+  const [playbackDurationMs, setPlaybackDurationMs] = useState(audio.durationMs);
+  const [playbackUrl, setPlaybackUrl] = useState(audio.previewUrl);
   const [rate, setRate] = useState(1);
-  const progress = audio.durationMs > 0 ? elapsedMs / audio.durationMs : 0;
+  const [transcriptExpanded, setTranscriptExpanded] = useState(false);
+  const progress = playbackDurationMs > 0 ? elapsedMs / playbackDurationMs : 0;
+  const transcript = audio.transcript ?? "";
+  const transcriptIsLong = transcript.length > 280 || transcript.split(/\r?\n/).length > 4;
+  useEffect(() => {
+    setPlaybackUrl(audio.previewUrl);
+    return () => {
+      if (repairedUrlRef.current) URL.revokeObjectURL(repairedUrlRef.current);
+      repairedUrlRef.current = null;
+      repairPromiseRef.current = null;
+    };
+  }, [audio.previewUrl]);
+  const ensureSeekable = useCallback(async (): Promise<HTMLAudioElement | null> => {
+    const element = elementRef.current;
+    const previewUrl = audio.previewUrl;
+    if (!element || !previewUrl || !audio.mimeType.toLowerCase().startsWith("audio/webm")) {
+      return element;
+    }
+    const seekableEnd =
+      element.seekable.length > 0 ? element.seekable.end(element.seekable.length - 1) : 0;
+    if (Number.isFinite(seekableEnd) && seekableEnd > 0) return element;
+    if (repairPromiseRef.current) return repairPromiseRef.current;
+
+    const repair = (async () => {
+      try {
+        const response = await fetch(previewUrl);
+        if (!response.ok) return elementRef.current;
+        const source = new Blob([await response.arrayBuffer()], { type: audio.mimeType });
+        const repaired = await finalizeVoiceRecordingBlob(source, audio.durationMs);
+        if (repaired === source || !elementRef.current) return elementRef.current;
+        const repairedUrl = URL.createObjectURL(repaired);
+        if (repairedUrlRef.current) URL.revokeObjectURL(repairedUrlRef.current);
+        repairedUrlRef.current = repairedUrl;
+        setPlaybackUrl(repairedUrl);
+        const currentElement = elementRef.current;
+        await new Promise<void>((resolve) => {
+          currentElement.addEventListener("loadedmetadata", () => resolve(), { once: true });
+          currentElement.addEventListener("error", () => resolve(), { once: true });
+          currentElement.src = repairedUrl;
+          currentElement.load();
+        });
+        return elementRef.current;
+      } catch {
+        return elementRef.current;
+      }
+    })();
+    repairPromiseRef.current = repair;
+    try {
+      return await repair;
+    } finally {
+      repairPromiseRef.current = null;
+    }
+  }, [audio.durationMs, audio.mimeType, audio.previewUrl]);
 
   return (
-    <div className="mb-2 min-w-56 rounded-xl border border-border/55 bg-muted/35 px-2.5 py-2">
+    <div className="mb-2 min-w-72 rounded-xl border border-border/55 bg-muted/35 px-2.5 py-2">
       <div className="flex items-center gap-2">
         <Button
           type="button"
@@ -1182,10 +1238,11 @@ function VoiceNotePlayer({ audio }: { audio: ChatAudioAttachment }) {
           aria-label={playing ? "Pause voice note" : "Play voice note"}
           disabled={!audio.previewUrl}
           onClick={() => {
-            const element = elementRef.current;
-            if (!element) return;
-            if (element.paused) void element.play();
-            else element.pause();
+            void ensureSeekable().then((element) => {
+              if (!element) return;
+              if (element.paused) void element.play();
+              else element.pause();
+            });
           }}
         >
           {playing ? <PauseIcon className="fill-current" /> : <PlayIcon className="fill-current" />}
@@ -1194,19 +1251,24 @@ function VoiceNotePlayer({ audio }: { audio: ChatAudioAttachment }) {
           levels={audio.waveform}
           progress={progress}
           onSeek={(nextProgress) => {
-            const element = elementRef.current;
-            if (!element) return;
-            element.currentTime =
-              nextProgress * (element.duration || Math.max(0, audio.durationMs / 1_000));
-            setElapsedMs(element.currentTime * 1_000);
+            void ensureSeekable().then((element) => {
+              if (!element) return;
+              const targetTime = voiceSeekTargetSeconds(
+                nextProgress,
+                element.duration,
+                playbackDurationMs,
+              );
+              element.currentTime = targetTime;
+              setElapsedMs(targetTime * 1_000);
+            });
           }}
         />
-        <span className="text-muted-foreground text-xs tabular-nums">
-          {formatVoiceDuration(elapsedMs)} / {formatVoiceDuration(audio.durationMs)}
+        <span className="w-24 shrink-0 text-right text-muted-foreground text-xs tabular-nums">
+          {formatVoiceDuration(elapsedMs)} / {formatVoiceDuration(playbackDurationMs)}
         </span>
         <button
           type="button"
-          className="rounded-md bg-muted px-1.5 py-1 font-medium text-muted-foreground text-xs"
+          className="w-9 shrink-0 rounded-md bg-muted px-1 py-1 text-center font-medium text-muted-foreground text-xs"
           onClick={() => {
             const nextRate = rate === 1 ? 1.5 : rate === 1.5 ? 2 : 1;
             setRate(nextRate);
@@ -1218,7 +1280,7 @@ function VoiceNotePlayer({ audio }: { audio: ChatAudioAttachment }) {
         </button>
         <audio
           ref={elementRef}
-          src={audio.previewUrl}
+          src={playbackUrl}
           preload="metadata"
           onPlay={(event) => {
             document
@@ -1234,6 +1296,12 @@ function VoiceNotePlayer({ audio }: { audio: ChatAudioAttachment }) {
             setElapsedMs(0);
           }}
           onTimeUpdate={(event) => setElapsedMs(event.currentTarget.currentTime * 1_000)}
+          onLoadedMetadata={(event) => {
+            const durationMs = event.currentTarget.duration * 1_000;
+            if (Number.isFinite(durationMs) && durationMs > 0) {
+              setPlaybackDurationMs(durationMs);
+            }
+          }}
           data-voice-note
           className="hidden"
         />
@@ -1242,8 +1310,26 @@ function VoiceNotePlayer({ audio }: { audio: ChatAudioAttachment }) {
         <div className="mt-1.5 text-muted-foreground/70 text-xs">Transcribing…</div>
       ) : audio.transcriptionStatus === "failed" ? (
         <div className="mt-1.5 text-red-500 text-xs">Couldn’t transcribe</div>
-      ) : audio.transcript ? (
-        <div className="mt-2 border-border/50 border-t pt-2 text-sm">{audio.transcript}</div>
+      ) : transcript ? (
+        <div className="mt-2 border-border/50 border-t pt-2">
+          <div
+            className={cn(
+              "whitespace-pre-wrap text-sm",
+              transcriptIsLong && !transcriptExpanded && "line-clamp-3",
+            )}
+          >
+            {transcript}
+          </div>
+          {transcriptIsLong ? (
+            <button
+              type="button"
+              className="mt-1 text-muted-foreground text-xs hover:text-foreground"
+              onClick={() => setTranscriptExpanded((expanded) => !expanded)}
+            >
+              {transcriptExpanded ? "View less" : "View more"}
+            </button>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

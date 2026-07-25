@@ -290,6 +290,7 @@ export const HermesBridgeVoiceTranscriptionRequest = openStruct({
   ...DestinationFields,
   type: Schema.Literal("voice.transcription"),
   messageId: MessageId,
+  attachmentId: Schema.optionalKey(HermesBridgeAudioAttachmentId),
   status: Schema.Literals(["transcribing", "ready", "failed"]),
   transcript: Schema.optionalKey(Schema.String),
   error: Schema.optionalKey(TrimmedNonEmptyString),

@@ -57,7 +57,10 @@ logger = logging.getLogger(__name__)
 PROTOCOL_VERSION = 1
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8789
-DEFAULT_MAX_BODY_BYTES = 16 * 1_048_576
+VOICE_NOTE_MAX_BYTES = 25 * 1_048_576
+# A maximal inline audio payload expands by 4/3 in JSON. Keep the ingress cap
+# slightly above that wire size while advertising Hermes' real decoded STT cap.
+DEFAULT_MAX_BODY_BYTES = 36 * 1_048_576
 MAX_IMAGE_BYTES = 10 * 1_048_576
 DEFAULT_TIMEOUT_SECONDS = 30.0
 DEFAULT_IDEMPOTENCY_CACHE_SIZE = 2_048
@@ -1525,7 +1528,7 @@ class T3AgentAdapter(BasePlatformAdapter):
                     "threadCreation": True,
                     "commandCatalog": True,
                     "voiceNotes": True,
-                    "voiceNoteMaxBytes": 128 * 1024 * 1024,
+                    "voiceNoteMaxBytes": VOICE_NOTE_MAX_BYTES,
                     "contextWindowUsage": True,
                 },
                 "commands": _command_catalog(),
@@ -1979,6 +1982,9 @@ class T3AgentAdapter(BasePlatformAdapter):
             audio_mime_type = (
                 _require_string(audio, "mimeType") if audio is not None else None
             )
+            audio_attachment_id = (
+                _require_string(audio, "id") if audio is not None else None
+            )
         except ValueError as exc:
             return web.json_response({"error": str(exc)}, status=400)
 
@@ -2013,6 +2019,11 @@ class T3AgentAdapter(BasePlatformAdapter):
                 voice_message_ids = getattr(self, "_t3_voice_message_ids", set())
                 voice_message_ids.add(str(message_id))
                 self._t3_voice_message_ids = voice_message_ids
+                voice_attachment_ids = getattr(
+                    self, "_t3_voice_attachment_ids", {}
+                )
+                voice_attachment_ids[str(message_id)] = str(audio_attachment_id)
+                self._t3_voice_attachment_ids = voice_attachment_ids
                 await self._post_event(
                     "voice.transcription",
                     {
@@ -2020,6 +2031,7 @@ class T3AgentAdapter(BasePlatformAdapter):
                         **({"threadId": str(thread_id)} if thread_id else {}),
                         "sourceMessageId": str(message_id),
                         "messageId": str(message_id),
+                        "attachmentId": str(audio_attachment_id),
                         "status": "transcribing",
                     },
                 )
@@ -2323,6 +2335,9 @@ class T3AgentAdapter(BasePlatformAdapter):
             voice_ready_ids = getattr(self, "_t3_voice_ready_ids", set())
             voice_ready_ids.add(source_message_id)
             self._t3_voice_ready_ids = voice_ready_ids
+            attachment_id = getattr(
+                self, "_t3_voice_attachment_ids", {}
+            ).get(source_message_id)
             ok, body, error = await self._post_event(
                 "voice.transcription",
                 {
@@ -2330,6 +2345,7 @@ class T3AgentAdapter(BasePlatformAdapter):
                     **({"threadId": thread_id} if thread_id else {}),
                     "sourceMessageId": source_message_id,
                     "messageId": source_message_id,
+                    **({"attachmentId": attachment_id} if attachment_id else {}),
                     "status": "ready",
                     "transcript": transcript,
                 },
@@ -2697,6 +2713,8 @@ class T3AgentAdapter(BasePlatformAdapter):
         voice_message_ids = getattr(self, "_t3_voice_message_ids", set())
         voice_ready_ids = getattr(self, "_t3_voice_ready_ids", set())
         source_message_id = str(event.message_id)
+        voice_attachment_ids = getattr(self, "_t3_voice_attachment_ids", {})
+        attachment_id = voice_attachment_ids.get(source_message_id)
         if source_message_id in voice_message_ids:
             transcripts = getattr(event, "_gateway_pending_stt_transcripts", None)
             if (
@@ -2715,6 +2733,7 @@ class T3AgentAdapter(BasePlatformAdapter):
                             **({"threadId": str(thread_id)} if thread_id else {}),
                             "sourceMessageId": source_message_id,
                             "messageId": source_message_id,
+                            **({"attachmentId": attachment_id} if attachment_id else {}),
                             "status": "ready",
                             "transcript": transcript,
                         },
@@ -2728,12 +2747,14 @@ class T3AgentAdapter(BasePlatformAdapter):
                         **({"threadId": str(thread_id)} if thread_id else {}),
                         "sourceMessageId": source_message_id,
                         "messageId": source_message_id,
+                        **({"attachmentId": attachment_id} if attachment_id else {}),
                         "status": "failed",
                         "error": "Hermes could not transcribe this recording.",
                     },
                 )
             voice_message_ids.discard(source_message_id)
             voice_ready_ids.discard(source_message_id)
+            voice_attachment_ids.pop(source_message_id, None)
         if outcome_value == "success":
             self._schedule_session_title_watch(source)
         processing_key = self._destination_key(

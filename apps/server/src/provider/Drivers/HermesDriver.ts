@@ -147,7 +147,7 @@ export function makeHermesProviderSnapshot(input: {
     ...(input.capabilities?.capabilities.voiceNotes
       ? {
           voiceNotes: {
-            maxBytes: input.capabilities.capabilities.voiceNoteMaxBytes ?? 128 * 1024 * 1024,
+            maxBytes: input.capabilities.capabilities.voiceNoteMaxBytes ?? 25 * 1024 * 1024,
           },
         }
       : {}),

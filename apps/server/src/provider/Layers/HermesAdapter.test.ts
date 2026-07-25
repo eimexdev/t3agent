@@ -168,6 +168,48 @@ it.layer(testLayer)("HermesAdapter", (it) => {
     }),
   );
 
+  it.effect("preserves voice attachment identity in transcription events", () =>
+    Effect.gen(function* () {
+      const { adapter } = yield* HermesAdapterTestHarness;
+      const threadId = ThreadId.make("hermes-voice-thread");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("hermes"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* Effect.yieldNow;
+      yield* adapter.receiveCallback({
+        protocolVersion: HERMES_BRIDGE_PROTOCOL_VERSION,
+        requestId: "voice-transcription-request",
+        deliveryId: "voice-transcription-delivery",
+        type: "voice.transcription",
+        threadId,
+        sourceMessageId: "hermes-user:turn-voice",
+        messageId: "hermes-user:turn-voice",
+        attachmentId: "voice-attachment-1",
+        status: "ready",
+        transcript: "Transcript text",
+      });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      const event = events[0];
+      NodeAssert.equal(event?.type, "item.updated");
+      if (event?.type !== "item.updated") return;
+      NodeAssert.deepEqual(event.payload.data, {
+        messageId: "hermes-user:turn-voice",
+        attachmentId: "voice-attachment-1",
+        status: "ready",
+        transcript: "Transcript text",
+      });
+    }),
+  );
+
   it.effect("emits only cumulative text deltas and completes the active turn", () =>
     Effect.gen(function* () {
       const { adapter, sent } = yield* HermesAdapterTestHarness;

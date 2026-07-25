@@ -113,6 +113,7 @@ import {
 } from "../types";
 import { useTheme } from "../hooks/useTheme";
 import { useVoiceRecorderStore } from "../voiceRecorderStore";
+import { deriveVoiceTranscriptionsByAttachmentId } from "../voiceTranscription";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
@@ -2118,26 +2119,10 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const displayServerMessages = useMemo<ReadonlyArray<ChatMessage>>(() => {
     if (!serverMessages) return [];
-    const voiceTranscriptionByTurnId = new Map<
-      string,
-      { readonly status: "transcribing" | "ready" | "failed"; readonly transcript?: string }
-    >();
-    for (const activity of activeThread?.activities ?? []) {
-      if (activity.kind !== "voice-transcription.updated" || !activity.turnId) continue;
-      if (typeof activity.payload !== "object" || activity.payload === null) continue;
-      const payload = activity.payload as Record<string, unknown>;
-      if (
-        payload.status !== "transcribing" &&
-        payload.status !== "ready" &&
-        payload.status !== "failed"
-      ) {
-        continue;
-      }
-      voiceTranscriptionByTurnId.set(activity.turnId, {
-        status: payload.status,
-        ...(typeof payload.transcript === "string" ? { transcript: payload.transcript } : {}),
-      });
-    }
+    const voiceTranscriptionByAttachmentId = deriveVoiceTranscriptionsByAttachmentId(
+      serverMessages,
+      activeThread?.activities ?? [],
+    );
     return serverMessages.map((message) => {
       if (!message.attachments || message.attachments.length === 0) {
         return message;
@@ -2147,9 +2132,7 @@ function ChatViewContent(props: ChatViewProps) {
         attachments: message.attachments.map((attachment) => {
           const previewUrl = serverAttachmentUrlById.get(attachment.id);
           if (attachment.type === "audio") {
-            const transcription = message.turnId
-              ? voiceTranscriptionByTurnId.get(message.turnId)
-              : undefined;
+            const transcription = voiceTranscriptionByAttachmentId.get(attachment.id);
             return {
               ...attachment,
               ...(previewUrl ? { previewUrl } : {}),

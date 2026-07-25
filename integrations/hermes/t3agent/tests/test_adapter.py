@@ -280,11 +280,21 @@ async def test_message_submit_builds_voice_event_with_typed_accompaniment(
 ) -> None:
     adapter = adapter_module.T3AgentAdapter(make_config())
     events: List[Any] = []
+    callbacks: List[tuple[str, Dict[str, Any]]] = []
 
     async def capture(event: Any) -> None:
         events.append(event)
 
+    async def capture_callback(
+        event_type: str,
+        fields: Dict[str, Any],
+        metadata: Dict[str, Any] | None = None,
+    ) -> tuple[bool, Dict[str, Any], None]:
+        callbacks.append((event_type, fields))
+        return True, {}, None
+
     adapter.handle_message = capture  # type: ignore[method-assign]
+    adapter._post_event = capture_callback  # type: ignore[method-assign]
     client = await make_ingress_client(adapter)
     try:
         response = await client.post(
@@ -316,8 +326,55 @@ async def test_message_submit_builds_voice_event_with_typed_accompaniment(
         assert event.message_type == adapter_module.MessageType.VOICE
         assert event.media_urls == ["/tmp/voice.webm"]
         assert event.media_types == ["audio/webm;codecs=opus"]
+        assert callbacks == [
+            (
+                "voice.transcription",
+                {
+                    "chatId": "chat-1",
+                    "threadId": "thread-1",
+                    "sourceMessageId": "message-voice",
+                    "messageId": "message-voice",
+                    "attachmentId": "audio-1",
+                    "status": "transcribing",
+                },
+            )
+        ]
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_voice_completion_preserves_attachment_identity(
+    fake_platform: SimpleNamespace,
+) -> None:
+    adapter = adapter_module.T3AgentAdapter(make_config())
+    callbacks: List[tuple[str, Dict[str, Any]]] = []
+
+    async def capture_callback(
+        event_type: str,
+        fields: Dict[str, Any],
+        metadata: Dict[str, Any] | None = None,
+    ) -> tuple[bool, Dict[str, Any], None]:
+        callbacks.append((event_type, fields))
+        return True, {}, None
+
+    adapter._post_event = capture_callback  # type: ignore[method-assign]
+    adapter._t3_voice_message_ids = {"message-voice"}
+    adapter._t3_voice_attachment_ids = {"message-voice": "audio-1"}
+    event = SimpleNamespace(
+        source=SimpleNamespace(chat_id="chat-1", thread_id="thread-1"),
+        message_id="message-voice",
+        _gateway_pending_stt_transcripts=["The transcript made it back."],
+    )
+
+    await adapter.on_processing_complete(event, SimpleNamespace(value="success"))
+
+    transcription = next(
+        fields for event_type, fields in callbacks if event_type == "voice.transcription"
+    )
+    assert transcription["attachmentId"] == "audio-1"
+    assert transcription["status"] == "ready"
+    assert transcription["transcript"] == "The transcript made it back."
 
 
 @pytest.mark.asyncio
@@ -1181,7 +1238,7 @@ async def test_ingress_requires_bearer_and_exact_protocol(
         assert capabilities_body["capabilities"]["asynchronousDelivery"] is True
         assert capabilities_body["capabilities"]["commandCatalog"] is True
         assert capabilities_body["capabilities"]["voiceNotes"] is True
-        assert capabilities_body["capabilities"]["voiceNoteMaxBytes"] == 128 * 1024 * 1024
+        assert capabilities_body["capabilities"]["voiceNoteMaxBytes"] == 25 * 1024 * 1024
         command_names = {command["name"] for command in capabilities_body["commands"]}
         assert {"new", "restart", "model", "stop", "commands"} <= command_names
         assert len(command_names) >= 40

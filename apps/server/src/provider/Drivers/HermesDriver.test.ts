@@ -122,3 +122,31 @@ it("does not invent a model inventory while the Hermes bridge is unavailable", (
   assert.equal(snapshot.status, "error");
   assert.deepEqual(snapshot.models, []);
 });
+
+it("uses Hermes' STT file limit when an older voice-capable bridge omits its byte cap", () => {
+  const snapshot = makeHermesProviderSnapshot({
+    instanceId: ProviderInstanceId.make("hermes"),
+    displayName: undefined,
+    accentColor: undefined,
+    enabled: true,
+    checkedAt: "2026-07-22T00:00:00.000Z",
+    capabilities: {
+      protocolVersion: 1,
+      requestId: HermesBridgeRequestId.make("capabilities"),
+      capabilities: {
+        asynchronousDelivery: true,
+        imageAttachments: true,
+        interrupts: true,
+        approvals: true,
+        clarifications: true,
+        slashConfirmations: true,
+        threadCreation: true,
+        commandCatalog: true,
+        voiceNotes: true,
+      },
+      commands: [],
+    },
+  });
+
+  assert.deepEqual(snapshot.voiceNotes, { maxBytes: 25 * 1024 * 1024 });
+});

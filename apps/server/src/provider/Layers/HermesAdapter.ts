@@ -772,6 +772,9 @@ export const makeHermesAdapter = Effect.fn("makeHermesAdapter")(function* (
                           : "Voice note transcribed",
                     data: {
                       messageId: callback.messageId,
+                      ...(callback.attachmentId !== undefined
+                        ? { attachmentId: callback.attachmentId }
+                        : {}),
                       status: callback.status,
                       ...(callback.transcript !== undefined
                         ? { transcript: callback.transcript }

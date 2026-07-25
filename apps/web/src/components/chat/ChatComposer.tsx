@@ -24,6 +24,7 @@ import {
 } from "@t3tools/client-runtime/connection";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
+import { useNavigate } from "@tanstack/react-router";
 import {
   memo,
   type ReactNode,
@@ -212,7 +213,7 @@ import {
   type VoiceDraft,
   useVoiceRecorderStore,
 } from "../../voiceRecorderStore";
-import { VoiceWaveform } from "./VoiceWaveform";
+import { VoiceWaveform, voiceSeekTargetSeconds } from "./VoiceWaveform";
 
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 
@@ -226,7 +227,8 @@ function VoiceDraftPreview({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
-  const progress = draft.durationMs > 0 ? elapsedMs / draft.durationMs : 0;
+  const [playbackDurationMs, setPlaybackDurationMs] = useState(draft.durationMs);
+  const progress = playbackDurationMs > 0 ? elapsedMs / playbackDurationMs : 0;
 
   return (
     <div className="mx-3 mb-2 flex items-center gap-2 rounded-xl bg-muted/45 px-2.5 py-2">
@@ -250,12 +252,17 @@ function VoiceDraftPreview({
         onSeek={(nextProgress) => {
           const audio = audioRef.current;
           if (!audio) return;
-          audio.currentTime = nextProgress * (audio.duration || draft.durationMs / 1_000);
-          setElapsedMs(audio.currentTime * 1_000);
+          const targetTime = voiceSeekTargetSeconds(
+            nextProgress,
+            audio.duration,
+            playbackDurationMs,
+          );
+          audio.currentTime = targetTime;
+          setElapsedMs(targetTime * 1_000);
         }}
       />
-      <span className="text-muted-foreground text-xs tabular-nums">
-        {formatVoiceDuration(elapsedMs)} / {formatVoiceDuration(draft.durationMs)}
+      <span className="w-24 shrink-0 text-right text-muted-foreground text-xs tabular-nums">
+        {formatVoiceDuration(elapsedMs)} / {formatVoiceDuration(playbackDurationMs)}
       </span>
       <Button
         type="button"
@@ -270,13 +277,25 @@ function VoiceDraftPreview({
         ref={audioRef}
         src={draft.previewUrl}
         className="hidden"
-        onPlay={() => setPlaying(true)}
+        onPlay={(event) => {
+          document.querySelectorAll<HTMLAudioElement>("audio[data-voice-note]").forEach((other) => {
+            if (other !== event.currentTarget) other.pause();
+          });
+          setPlaying(true);
+        }}
         onPause={() => setPlaying(false)}
         onEnded={() => {
           setPlaying(false);
           setElapsedMs(0);
         }}
         onTimeUpdate={(event) => setElapsedMs(event.currentTarget.currentTime * 1_000)}
+        onLoadedMetadata={(event) => {
+          const durationMs = event.currentTarget.duration * 1_000;
+          if (Number.isFinite(durationMs) && durationMs > 0) {
+            setPlaybackDurationMs(durationMs);
+          }
+        }}
+        data-voice-note
       />
     </div>
   );
@@ -706,6 +725,7 @@ export interface ChatComposerProps {
 // --------------------------------------------------------------------------
 
 export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps) {
+  const navigate = useNavigate();
   const {
     composerDraftTarget,
     environmentId,
@@ -955,6 +975,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const voiceRecorder = useVoiceRecorderStore((state) => state.recorder);
   const voiceRecorderError = useVoiceRecorderStore((state) => state.error);
   const startVoiceRecording = useVoiceRecorderStore((state) => state.start);
+  const pauseVoiceRecording = useVoiceRecorderStore((state) => state.pause);
+  const resumeVoiceRecording = useVoiceRecorderStore((state) => state.resume);
   const stopVoiceRecording = useVoiceRecorderStore((state) => state.stop);
   const discardVoiceRecording = useVoiceRecorderStore((state) => state.discard);
   const restoreVoiceRecording = useVoiceRecorderStore((state) => state.restore);
@@ -964,6 +986,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     voiceRecorder.status !== "idle" && voiceRecorder.threadId === voiceTargetThreadId;
   const activeVoiceDraft =
     voiceRecorder.status === "draft" && voiceBelongsToActiveThread ? voiceRecorder.draft : null;
+  const voiceInputLocked = voiceRecorder.status !== "idle" && voiceBelongsToActiveThread;
   useEffect(() => {
     void restoreVoiceRecording();
   }, [restoreVoiceRecording]);
@@ -2715,7 +2738,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                   : "Ask anything, @tag files/folders, $use skills, or / for commands"
                 }
                 ghostHint={commandGhostHint}
-                disabled={isConnecting || isComposerApprovalState || projectSelectionRequired}
+                disabled={
+                  isConnecting ||
+                  isComposerApprovalState ||
+                  projectSelectionRequired ||
+                  voiceInputLocked
+                }
               />
               {showMobilePendingAnswerActions ? (
                 <div
@@ -2749,11 +2777,40 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
           {voiceRecorder.status === "recording" && voiceBelongsToActiveThread ? (
             <div className="mx-3 mb-2 flex items-center gap-2 rounded-xl bg-red-500/8 px-2.5 py-2">
-              <span className="size-2 shrink-0 animate-pulse rounded-full bg-red-500" />
+              <span
+                className={cn(
+                  "size-2 shrink-0 rounded-full bg-red-500",
+                  !voiceRecorder.paused && "animate-pulse",
+                )}
+              />
               <VoiceWaveform levels={voiceRecorder.waveform} live />
-              <span className="text-red-500 text-xs tabular-nums">
+              <span className="w-12 shrink-0 text-right text-red-500 text-xs tabular-nums">
                 {formatVoiceDuration(voiceRecorder.elapsedMs)}
               </span>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                className="rounded-full text-muted-foreground"
+                aria-label={voiceRecorder.paused ? "Resume recording" : "Pause recording"}
+                onClick={voiceRecorder.paused ? resumeVoiceRecording : pauseVoiceRecording}
+              >
+                {voiceRecorder.paused ? (
+                  <PlayIcon className="size-3.5 fill-current" />
+                ) : (
+                  <PauseIcon className="size-3.5 fill-current" />
+                )}
+              </Button>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                className="rounded-full text-muted-foreground"
+                aria-label="Cancel recording"
+                onClick={discardVoiceRecording}
+              >
+                <XIcon className="size-4" />
+              </Button>
               <Button
                 type="button"
                 size="icon-sm"
@@ -2890,6 +2947,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             size="icon"
                             variant="ghost"
                             aria-label="Record voice note"
+                            disabled={composerSendState.hasSendableContent}
                             onClick={() =>
                               void startVoiceRecording(
                                 environmentId,
@@ -2903,7 +2961,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       >
                         <MicIcon />
                       </TooltipTrigger>
-                      <TooltipPopup side="top">Record voice note</TooltipPopup>
+                      <TooltipPopup side="top">
+                        {composerSendState.hasSendableContent
+                          ? "Clear the composer to record a voice note"
+                          : "Record voice note"}
+                      </TooltipPopup>
                     </Tooltip>
                   ) : null
                 ) : null}
@@ -2941,10 +3003,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           ) : null}
           {voiceRecorder.status !== "idle" && !voiceBelongsToActiveThread ? (
             <div className="fixed right-4 bottom-4 z-50 flex items-center gap-3 rounded-full border border-border/70 bg-background/95 px-3 py-2 shadow-lg backdrop-blur">
-              <span className="size-2 animate-pulse rounded-full bg-red-500" />
-              <span className="text-sm">
+              <span
+                className={cn(
+                  "size-2 rounded-full bg-red-500",
+                  voiceRecorder.status === "recording" && !voiceRecorder.paused && "animate-pulse",
+                )}
+              />
+              <span className="min-w-28 text-sm tabular-nums">
                 {voiceRecorder.status === "recording"
-                  ? `Recording · ${formatVoiceDuration(voiceRecorder.elapsedMs)}`
+                  ? `${voiceRecorder.paused ? "Paused" : "Recording"} · ${formatVoiceDuration(voiceRecorder.elapsedMs)}`
                   : `Voice draft · ${formatVoiceDuration(voiceRecorder.draft.durationMs)}`}
               </span>
               <Button
@@ -2952,9 +3019,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 size="sm"
                 variant="ghost"
                 onClick={() => {
-                  window.location.assign(
-                    `/${voiceRecorder.environmentId}/${voiceRecorder.threadId}`,
-                  );
+                  void navigate({
+                    to: "/$environmentId/$threadId",
+                    params: {
+                      environmentId: voiceRecorder.environmentId,
+                      threadId: voiceRecorder.threadId,
+                    },
+                  });
                 }}
               >
                 Return

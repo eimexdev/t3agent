@@ -51,18 +51,18 @@ Implemented on the T3 Agent feature branch:
 
 ### Voice notes
 
-- [ ] Add a voice-attachment contract and non-base64 upload path sized to Hermes's real 25 MiB STT ceiling.
-- [ ] Add the web recording bar with elapsed time, waveform, pause/resume, cancel, stop, and send.
-- [ ] Make Stop enter a replayable voice-draft state with discard and send controls.
-- [ ] Make Send finalize and submit an active recording immediately without requiring preview.
-- [ ] Preserve the browser-selected WebM/Opus or MP4/AAC MIME type.
-- [ ] Mark recordings as voice notes and deliver them to Hermes's existing STT flow.
-- [ ] Keep STT providers, transcription, and agent-input enrichment entirely Hermes-owned.
-- [ ] Add semantic Hermes integration metadata that tags the existing transcript echo and its source voice message.
-- [ ] Render the playable voice bubble immediately without inventing a local transcription-progress state.
-- [ ] Expand short transcripts by default and collapse long transcripts.
-- [ ] Leave transcript echoes as ordinary Hermes messages when semantic transcript metadata is unavailable.
-- [ ] Do not add a retry control unless Hermes exposes a real retry operation.
+- [x] Add a voice-attachment contract and size inline ingress to Hermes's real 25 MiB STT ceiling.
+- [x] Add the web recording bar with elapsed time, rolling waveform, pause/resume, cancel, stop, and send.
+- [x] Make Stop enter a replayable voice-draft state with discard and send controls.
+- [x] Make Send finalize and submit an active recording immediately without requiring preview.
+- [x] Preserve the browser-selected WebM/Opus or MP4/AAC MIME type.
+- [x] Mark recordings as voice notes and deliver them to Hermes's existing STT flow.
+- [x] Keep STT providers, transcription, and agent-input enrichment entirely Hermes-owned.
+- [x] Add attachment-correlated Hermes integration metadata for transcription lifecycle and result.
+- [x] Render the playable voice bubble immediately and project Hermes's actual transcription state into it.
+- [x] Expand short transcripts by default and collapse long transcripts.
+- [x] Preserve legacy transcript presentation when semantic metadata is unavailable.
+- [x] Do not add a retry control unless Hermes exposes a real retry operation.
 - [ ] Avoid an arbitrary duration cap; enforce Hermes's actual 25 MiB file limit.
 - [ ] Keep outbound Hermes TTS as a separate follow-up.
 
