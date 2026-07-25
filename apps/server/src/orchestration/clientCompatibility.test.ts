@@ -2,14 +2,21 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   EventId,
   MessageId,
+  ProjectId,
+  ProviderInstanceId,
   ThreadId,
+  TurnId,
   type OrchestrationMessage,
+  type OrchestrationThread,
+  type OrchestrationThreadActivity,
   type ThreadMessageSentPayload,
 } from "@t3tools/contracts";
 
 import {
+  makeOrchestrationThreadStreamProjectorForClient,
   projectOrchestrationEventForClient,
   projectOrchestrationMessageForClient,
+  projectOrchestrationThreadForClient,
 } from "./clientCompatibility.ts";
 
 const audioAttachment = {
@@ -32,6 +39,55 @@ const message: OrchestrationMessage = {
   createdAt: "2026-07-24T12:00:00.000Z",
   updatedAt: "2026-07-24T12:00:00.000Z",
 };
+
+function transcriptionActivity(
+  status: "transcribing" | "ready" | "failed",
+  transcript?: string,
+): OrchestrationThreadActivity {
+  return {
+    id: EventId.make(`activity-${status}`),
+    tone: status === "failed" ? "error" : "info",
+    kind: "voice-transcription.updated",
+    summary: "Voice transcription updated",
+    payload: {
+      attachmentId: audioAttachment.id,
+      status,
+      ...(transcript !== undefined ? { transcript } : {}),
+    },
+    turnId: TurnId.make("turn-1"),
+    createdAt: "2026-07-24T12:00:01.000Z",
+  };
+}
+
+function threadWithActivities(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): OrchestrationThread {
+  return {
+    id: ThreadId.make("thread-1"),
+    projectId: ProjectId.make("project-1"),
+    title: "Voice thread",
+    modelSelection: {
+      instanceId: ProviderInstanceId.make("hermes"),
+      model: "gpt-5.6",
+    },
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    branch: null,
+    worktreePath: null,
+    latestTurn: null,
+    createdAt: "2026-07-24T12:00:00.000Z",
+    updatedAt: "2026-07-24T12:00:01.000Z",
+    archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
+    deletedAt: null,
+    messages: [message],
+    proposedPlans: [],
+    activities: [...activities],
+    checkpoints: [],
+    session: null,
+  };
+}
 
 describe("clientCompatibility", () => {
   it("keeps audio attachments for capable clients", () => {
@@ -115,5 +171,54 @@ describe("clientCompatibility", () => {
     expect(projectOrchestrationEventForClient(event, undefined).payload).not.toHaveProperty(
       "attachments",
     );
+  });
+
+  it("joins completed transcription activities into legacy thread snapshots", () => {
+    const projected = projectOrchestrationThreadForClient(
+      threadWithActivities([transcriptionActivity("ready", "The persisted transcript.")]),
+      undefined,
+    );
+
+    expect(projected.messages[0]).toMatchObject({
+      text: "[Voice note transcript]\nThe persisted transcript.",
+    });
+    expect(projected.messages[0]).not.toHaveProperty("attachments");
+  });
+
+  it("replaces a live legacy placeholder when transcription completes", () => {
+    const projector = makeOrchestrationThreadStreamProjectorForClient(
+      undefined,
+      threadWithActivities([]),
+    );
+    const activity = transcriptionActivity("ready", "The live transcript.");
+    const activityEvent = {
+      sequence: 2,
+      eventId: EventId.make("event-2"),
+      aggregateKind: "thread" as const,
+      aggregateId: ThreadId.make("thread-1"),
+      occurredAt: activity.createdAt,
+      commandId: null,
+      causationEventId: null,
+      correlationId: null,
+      metadata: {},
+      type: "thread.activity-appended" as const,
+      payload: {
+        threadId: ThreadId.make("thread-1"),
+        activity,
+      },
+    };
+
+    expect(projector({ kind: "event", event: activityEvent })).toMatchObject({
+      kind: "event",
+      event: {
+        sequence: 2,
+        type: "thread.message-sent",
+        payload: {
+          messageId: MessageId.make("message-1"),
+          text: "[Voice note transcript]\nThe live transcript.",
+          replaceText: true,
+        },
+      },
+    });
   });
 });

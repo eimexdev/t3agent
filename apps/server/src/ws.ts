@@ -71,8 +71,8 @@ import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
 import {
+  makeOrchestrationThreadStreamProjectorForClient,
   projectOrchestrationEventForClient,
-  projectOrchestrationThreadStreamItemForClient,
 } from "./orchestration/clientCompatibility.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -1394,6 +1394,23 @@ const makeWsRpcLayer = (
                 liveStream.pipe(Stream.runForEach((item) => Queue.offer(liveBuffer, item))),
               );
               const bufferedLiveStream = Stream.fromQueue(liveBuffer);
+              const compatibilitySeed =
+                input.afterSequence !== undefined &&
+                input.clientCapabilities?.audioAttachments !== true
+                  ? yield* projectionSnapshotQuery.getThreadDetailSnapshot(input.threadId).pipe(
+                      Effect.mapError(
+                        (cause) =>
+                          new OrchestrationGetSnapshotError({
+                            message: `Failed to load compatibility state for thread ${input.threadId}`,
+                            cause,
+                          }),
+                      ),
+                    )
+                  : Option.none();
+              const projectStreamItem = makeOrchestrationThreadStreamProjectorForClient(
+                input.clientCapabilities,
+                Option.getOrUndefined(compatibilitySeed)?.thread,
+              );
 
               // When the client already loaded the snapshot over HTTP it passes
               // that snapshot's sequence, and we resume the live subscription by
@@ -1436,7 +1453,9 @@ const makeWsRpcLayer = (
                         bufferedLiveStream,
                       )
                     : bufferedLiveStream;
-                return Stream.concat(catchUpStream, afterCatchUp);
+                return Stream.concat(catchUpStream, afterCatchUp).pipe(
+                  Stream.map(projectStreamItem),
+                );
               }
 
               const snapshot = yield* projectionSnapshotQuery
@@ -1473,16 +1492,8 @@ const makeWsRpcLayer = (
                   snapshot: snapshot.value,
                 }),
                 afterSnapshot,
-              );
-            }).pipe(
-              Effect.map((stream) =>
-                stream.pipe(
-                  Stream.map((item) =>
-                    projectOrchestrationThreadStreamItemForClient(item, input.clientCapabilities),
-                  ),
-                ),
-              ),
-            ),
+              ).pipe(Stream.map(projectStreamItem));
+            }),
             { "rpc.aggregate": "orchestration" },
           ),
         [WS_METHODS.serverProbe]: (_input) =>
