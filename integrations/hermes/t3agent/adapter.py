@@ -23,6 +23,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import weakref
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote, unquote_to_bytes, urlparse
@@ -992,7 +993,7 @@ class T3AgentAdapter(BasePlatformAdapter):
 
     supports_async_delivery = True
     supports_code_blocks = True
-    supports_structured_tool_events = True
+    _instances: "weakref.WeakSet[T3AgentAdapter]" = weakref.WeakSet()
 
     def __init__(self, config: PlatformConfig):
         super().__init__(config, Platform("t3agent"))
@@ -1064,6 +1065,9 @@ class T3AgentAdapter(BasePlatformAdapter):
         self._completion_outbox_stopping = False
         self._title_watch_tasks: Dict[str, asyncio.Task] = {}
         self._published_titles: Dict[str, str] = {}
+        self._event_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._scheduled_tasks: "set[asyncio.Task[Any]]" = set()
+        type(self)._instances.add(self)
 
     @staticmethod
     def _destination_key(
@@ -1322,6 +1326,7 @@ class T3AgentAdapter(BasePlatformAdapter):
             logger.error("[t3agent] configuration is incomplete or unsafe")
             return False
 
+        self._event_loop = asyncio.get_running_loop()
         app = web.Application(client_max_size=self.max_body_bytes)
         app.router.add_get("/v1/health", self._health)
         app.router.add_get("/v1/capabilities", self._capabilities)
@@ -1359,6 +1364,12 @@ class T3AgentAdapter(BasePlatformAdapter):
         return True
 
     async def disconnect(self) -> None:
+        scheduled_tasks = list(self._scheduled_tasks)
+        self._scheduled_tasks.clear()
+        for task in scheduled_tasks:
+            task.cancel()
+        if scheduled_tasks:
+            await asyncio.gather(*scheduled_tasks, return_exceptions=True)
         title_watch_tasks = list(self._title_watch_tasks.values())
         self._title_watch_tasks.clear()
         for task in title_watch_tasks:
@@ -1384,6 +1395,7 @@ class T3AgentAdapter(BasePlatformAdapter):
         if self._client is not None:
             await self._client.close()
             self._client = None
+        self._event_loop = None
         self._mark_disconnected()
 
     def _authorized(self, request: web.Request) -> bool:
@@ -2424,6 +2436,157 @@ class T3AgentAdapter(BasePlatformAdapter):
         fields["isError"] = bool(is_error)
         await self._post_event("tool.completed", fields)
 
+    def _tool_hook_destination(
+        self,
+        session_id: str,
+        task_id: str,
+    ) -> Optional[Tuple[str, Dict[str, str]]]:
+        """Resolve a Hermes tool hook back to its active T3 Agent turn."""
+        identifiers = {
+            str(value).strip()
+            for value in (session_id, task_id)
+            if str(value).strip()
+        }
+        if not identifiers:
+            return None
+        gateway_runner = getattr(self, "gateway_runner", None)
+        session_store = getattr(gateway_runner, "session_store", None)
+        entries = getattr(session_store, "_entries", {})
+        if not isinstance(entries, dict):
+            return None
+        for entry_key, entry in entries.items():
+            entry_identifiers = {
+                str(entry_key).strip(),
+                str(getattr(entry, "session_key", "") or "").strip(),
+                str(getattr(entry, "session_id", "") or "").strip(),
+            }
+            if identifiers.isdisjoint(entry_identifiers):
+                continue
+            source = getattr(entry, "origin", None)
+            platform = getattr(getattr(source, "platform", None), "value", None)
+            if source is None or str(platform or "") != "t3agent":
+                return None
+            chat_id = str(getattr(source, "chat_id", "") or "").strip()
+            thread_id = str(getattr(source, "thread_id", "") or "").strip()
+            if not chat_id:
+                return None
+            source_message_id = self._processing_sources.get(
+                self._destination_key(chat_id, {"thread_id": thread_id})
+            )
+            if not source_message_id:
+                return None
+            metadata = {
+                **({"thread_id": thread_id} if thread_id else {}),
+                "source_message_id": source_message_id,
+            }
+            return chat_id, metadata
+        return None
+
+    def _schedule_tool_hook_delivery(self, delivery: Awaitable[None]) -> None:
+        """Move a synchronous Hermes plugin hook onto the adapter's event loop."""
+        loop = self._event_loop
+        if loop is None or loop.is_closed():
+            close = getattr(delivery, "close", None)
+            if callable(close):
+                close()
+            return
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+        if running_loop is loop:
+            task = loop.create_task(delivery)
+            self._scheduled_tasks.add(task)
+            task.add_done_callback(self._finish_scheduled_task)
+            return
+        try:
+            future = asyncio.run_coroutine_threadsafe(delivery, loop)
+        except RuntimeError:
+            close = getattr(delivery, "close", None)
+            if callable(close):
+                close()
+            return
+
+        def log_failure(completed: Any) -> None:
+            if completed.cancelled():
+                return
+            try:
+                completed.result()
+            except Exception as error:
+                logger.error(
+                    "[t3agent] structured tool delivery failed: %s",
+                    error,
+                    exc_info=error,
+                )
+
+        future.add_done_callback(log_failure)
+
+    def _finish_scheduled_task(self, task: "asyncio.Task[Any]") -> None:
+        self._scheduled_tasks.discard(task)
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            logger.error(
+                "[t3agent] structured tool delivery failed: %s",
+                error,
+                exc_info=error,
+            )
+
+    @classmethod
+    def route_tool_started(
+        cls,
+        tool_name: str,
+        args: Dict[str, Any],
+        *,
+        session_id: str,
+        task_id: str,
+        tool_call_id: str,
+    ) -> None:
+        for adapter in list(cls._instances):
+            destination = adapter._tool_hook_destination(session_id, task_id)
+            if destination is None:
+                continue
+            chat_id, metadata = destination
+            adapter._schedule_tool_hook_delivery(
+                adapter.send_tool_started(
+                    chat_id,
+                    tool_call_id or f"{session_id or task_id}:{tool_name}",
+                    tool_name,
+                    args,
+                    metadata=metadata,
+                )
+            )
+
+    @classmethod
+    def route_tool_completed(
+        cls,
+        tool_name: str,
+        args: Dict[str, Any],
+        result: Any,
+        *,
+        session_id: str,
+        task_id: str,
+        tool_call_id: str,
+        status: str,
+    ) -> None:
+        for adapter in list(cls._instances):
+            destination = adapter._tool_hook_destination(session_id, task_id)
+            if destination is None:
+                continue
+            chat_id, metadata = destination
+            adapter._schedule_tool_hook_delivery(
+                adapter.send_tool_completed(
+                    chat_id,
+                    tool_call_id or f"{session_id or task_id}:{tool_name}",
+                    tool_name,
+                    args,
+                    result,
+                    metadata=metadata,
+                    is_error=status.lower() not in {"", "ok", "success", "completed"},
+                )
+            )
+
     async def send_image_file(
         self,
         chat_id: str,
@@ -3009,6 +3172,39 @@ def _env_enablement() -> Optional[dict]:
     return seed
 
 
+def _pre_tool_call(
+    tool_name: str,
+    args: Dict[str, Any],
+    task_id: str,
+    **kwargs: Any,
+) -> None:
+    T3AgentAdapter.route_tool_started(
+        tool_name,
+        args,
+        session_id=str(kwargs.get("session_id") or ""),
+        task_id=str(task_id or ""),
+        tool_call_id=str(kwargs.get("tool_call_id") or ""),
+    )
+
+
+def _post_tool_call(
+    tool_name: str,
+    args: Dict[str, Any],
+    result: Any,
+    task_id: str,
+    **kwargs: Any,
+) -> None:
+    T3AgentAdapter.route_tool_completed(
+        tool_name,
+        args,
+        result,
+        session_id=str(kwargs.get("session_id") or ""),
+        task_id=str(task_id or ""),
+        tool_call_id=str(kwargs.get("tool_call_id") or ""),
+        status=str(kwargs.get("status") or ""),
+    )
+
+
 def register(ctx: Any) -> None:
     ctx.register_platform(
         name="t3agent",
@@ -3035,3 +3231,5 @@ def register(ctx: Any) -> None:
             "Replies support Markdown and may arrive asynchronously in the same thread."
         ),
     )
+    ctx.register_hook("pre_tool_call", _pre_tool_call)
+    ctx.register_hook("post_tool_call", _post_tool_call)

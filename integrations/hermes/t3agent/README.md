@@ -51,6 +51,19 @@ In T3 Agent settings, open the Hermes provider and set:
 single-instance provider uses `hermes`; use another value only after creating a
 matching explicit provider instance.
 
+Disable Hermes' legacy text progress for this platform so each tool appears
+once as a native T3 tool card:
+
+```yaml
+display:
+  platforms:
+    t3agent:
+      tool_progress: off
+```
+
+This override is intentionally platform-specific; the global `tool_progress`
+setting still controls Hermes' other chat surfaces.
+
 The ingress defaults to `127.0.0.1:8789`. A non-loopback bind is rejected. If
 T3 and Hermes run on different machines, keep this plugin loopback-only and put
 an authenticated tunnel or a small local forwarder next to Hermes; do not bind
@@ -114,7 +127,9 @@ Callback tags are `message.send`, `message.edit`, `message.delete`,
 `approval.request`, `clarification.request`, `slash-confirmation.request`, and
 `thread.create`. Structured tool callbacks carry the tool-call ID, name,
 arguments, and completion result, so T3 renders native expandable tool cards
-instead of Hermes' compact emoji progress lines. Message send/edit content is
+instead of Hermes' compact emoji progress lines. The plugin receives those
+lifecycle events through Hermes' public `pre_tool_call` and `post_tool_call`
+plugin hooks; no Hermes source patch is required. Message send/edit content is
 always cumulative full content. `final` closes an individual message bubble;
 it does not imply that the whole agent turn is done. The plugin emits
 `turn.complete` from Hermes' post-delivery lifecycle hook only after the final

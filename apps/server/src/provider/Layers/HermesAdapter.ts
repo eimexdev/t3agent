@@ -253,27 +253,217 @@ function hermesToolTitle(name: string): string {
   return titles[name] ?? name.replaceAll("_", " ").replace(/^\w/, (value) => value.toUpperCase());
 }
 
-function hermesToolItemType(
-  name: string,
-):
+type HermesToolItemType =
   | "command_execution"
   | "file_change"
   | "mcp_tool_call"
+  | "dynamic_tool_call"
   | "collab_agent_tool_call"
   | "web_search"
-  | "image_view" {
+  | "image_view";
+
+type HermesToolStatus = "inProgress" | "completed" | "failed";
+
+function asRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : undefined;
+}
+
+function stringField(
+  record: Readonly<Record<string, unknown>> | undefined,
+  ...keys: ReadonlyArray<string>
+): string | undefined {
+  for (const key of keys) {
+    const value = record?.[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return undefined;
+}
+
+function hermesMcpIdentity(
+  name: string,
+  input: unknown,
+): { readonly server: string; readonly tool: string } | undefined {
+  const record = asRecord(input);
+  const explicitServer = stringField(record, "server");
+  const explicitTool = stringField(record, "tool", "operation");
+  if (explicitServer && explicitTool) return { server: explicitServer, tool: explicitTool };
+
+  const parts = name.split("__").filter(Boolean);
+  if (parts[0]?.toLowerCase() === "mcp" && parts.length >= 3) {
+    return {
+      server: parts[1] ?? "hermes",
+      tool: parts.slice(2).join("__"),
+    };
+  }
+  if (name.toLowerCase().startsWith("mcp")) {
+    return { server: explicitServer ?? "hermes", tool: explicitTool ?? name };
+  }
+  return undefined;
+}
+
+function hermesToolItemType(name: string, input: unknown): HermesToolItemType {
   if (name === "terminal" || name === "execute_code" || name === "process") {
     return "command_execution";
   }
-  if (name === "write_file" || name === "patch") return "file_change";
+  if (
+    name === "write_file" ||
+    name === "patch" ||
+    name === "apply_patch" ||
+    name === "edit_file" ||
+    name === "delete_file" ||
+    name === "move_file"
+  ) {
+    return "file_change";
+  }
+  if (hermesMcpIdentity(name, input)) return "mcp_tool_call";
   if (name === "web_search" || name === "web_extract") return "web_search";
   if (name === "computer_use" || name === "image_view") return "image_view";
   if (name === "delegate_task") return "collab_agent_tool_call";
-  return "mcp_tool_call";
+  return "dynamic_tool_call";
 }
 
-function toolResultData(result: unknown): unknown {
-  return typeof result === "string" ? { output: result } : result;
+function resultText(result: unknown): string | undefined {
+  if (typeof result === "string") return result;
+  if (result === undefined) return undefined;
+  try {
+    return JSON.stringify(result);
+  } catch {
+    return String(result);
+  }
+}
+
+function patchChanges(input: unknown): ReadonlyArray<{
+  readonly path: string;
+  readonly kind:
+    | { readonly type: "add" }
+    | { readonly type: "delete" }
+    | { readonly type: "update" };
+  readonly diff: string;
+}> {
+  const record = asRecord(input);
+  const patch = stringField(record, "patch", "diff") ?? "";
+  const changes: Array<{
+    readonly path: string;
+    readonly kind:
+      | { readonly type: "add" }
+      | { readonly type: "delete" }
+      | { readonly type: "update" };
+    readonly diff: string;
+  }> = [];
+  const seen = new Set<string>();
+  const add = (path: string, kind: { readonly type: "add" | "delete" | "update" }): void => {
+    const normalized = path.trim();
+    if (!normalized || normalized === "/dev/null" || seen.has(normalized)) return;
+    seen.add(normalized);
+    changes.push({ path: normalized, kind, diff: patch });
+  };
+
+  for (const line of patch.split(/\r?\n/u)) {
+    const marker = /^\*\*\* (Add|Update|Delete) File: (.+)$/u.exec(line);
+    if (marker) {
+      const operation = marker[1];
+      const path = marker[2];
+      if (path) {
+        add(path, {
+          type: operation === "Add" ? "add" : operation === "Delete" ? "delete" : "update",
+        });
+      }
+      continue;
+    }
+    const unified = /^\+\+\+ (?:b\/)?(.+)$/u.exec(line);
+    if (unified?.[1]) add(unified[1], { type: "update" });
+  }
+
+  if (changes.length === 0) {
+    const path = stringField(record, "path", "file_path", "filePath", "filename");
+    if (path) add(path, { type: "update" });
+  }
+  return changes;
+}
+
+function hermesToolItem(
+  itemType: HermesToolItemType,
+  callback: Extract<HermesBridgeHermesToT3Request, { type: "tool.started" | "tool.completed" }>,
+  status: HermesToolStatus,
+): unknown {
+  const input = asRecord(callback.input) ?? {};
+  const completed = callback.type === "tool.completed";
+  const output = completed ? resultText(callback.result) : undefined;
+  switch (itemType) {
+    case "command_execution": {
+      const command =
+        stringField(input, "command", "code", "process") ?? hermesToolTitle(callback.name);
+      return {
+        type: "commandExecution",
+        id: callback.toolCallId,
+        command,
+        cwd: stringField(input, "cwd", "workdir") ?? "",
+        commandActions: [{ type: "unknown", command }],
+        status,
+        ...(output !== undefined ? { aggregatedOutput: output } : {}),
+      };
+    }
+    case "file_change":
+      return {
+        type: "fileChange",
+        id: callback.toolCallId,
+        status,
+        changes: patchChanges(input),
+      };
+    case "mcp_tool_call": {
+      const identity = hermesMcpIdentity(callback.name, input) ?? {
+        server: "hermes",
+        tool: callback.name,
+      };
+      return {
+        type: "mcpToolCall",
+        id: callback.toolCallId,
+        server: identity.server,
+        tool: identity.tool,
+        arguments: input,
+        status,
+        ...(completed ? { result: callback.result } : {}),
+      };
+    }
+    case "web_search":
+      return {
+        type: "webSearch",
+        id: callback.toolCallId,
+        query: stringField(input, "query", "q", "url") ?? "",
+        ...(completed ? { results: callback.result } : {}),
+      };
+    case "image_view":
+      return {
+        type: "imageView",
+        id: callback.toolCallId,
+        path: stringField(input, "path", "image_path") ?? "",
+      };
+    case "collab_agent_tool_call":
+      return {
+        type: "collabAgentToolCall",
+        id: callback.toolCallId,
+        tool: callback.name,
+        arguments: input,
+        status,
+        ...(completed ? { result: callback.result } : {}),
+      };
+    case "dynamic_tool_call":
+      return {
+        type: "dynamicToolCall",
+        id: callback.toolCallId,
+        tool: callback.name,
+        arguments: input,
+        status,
+        ...(completed
+          ? {
+              success: !callback.isError,
+              result: callback.result,
+            }
+          : {}),
+      };
+  }
 }
 
 function toolResultDetail(result: unknown): string | undefined {
@@ -528,28 +718,26 @@ export const makeHermesAdapter = Effect.fn("makeHermesAdapter")(function* (
       threadId,
       callback.type === "tool.started" ? "tool-started" : "tool-completed",
     );
-    const itemType = hermesToolItemType(callback.name);
-    const title = hermesToolTitle(callback.name);
-    const item = {
-      toolCallId: callback.toolCallId,
-      name: callback.name,
-      input: callback.input,
-      ...(callback.type === "tool.completed" ? { result: toolResultData(callback.result) } : {}),
-    };
+    const itemType = hermesToolItemType(callback.name, callback.input);
+    const status: HermesToolStatus =
+      callback.type === "tool.started" ? "inProgress" : callback.isError ? "failed" : "completed";
+    const mcpIdentity =
+      itemType === "mcp_tool_call" ? hermesMcpIdentity(callback.name, callback.input) : undefined;
+    const title = mcpIdentity
+      ? `${mcpIdentity.server} · ${mcpIdentity.tool}`
+      : hermesToolTitle(callback.name);
+    const item = hermesToolItem(itemType, callback, status);
     const detail =
-      callback.type === "tool.completed" ? toolResultDetail(callback.result) : undefined;
+      callback.type === "tool.completed" && itemType !== "file_change"
+        ? toolResultDetail(callback.result)
+        : undefined;
     yield* publish({
       ...base,
       type: callback.type === "tool.started" ? "item.started" : "item.completed",
       itemId: RuntimeItemId.make(`hermes-tool:${callback.toolCallId}`),
       payload: {
         itemType,
-        status:
-          callback.type === "tool.started"
-            ? "inProgress"
-            : callback.isError
-              ? "failed"
-              : "completed",
+        status,
         title,
         ...(detail ? { detail } : {}),
         data: {

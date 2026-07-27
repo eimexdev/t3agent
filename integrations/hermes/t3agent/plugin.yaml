@@ -8,6 +8,9 @@ description: >
   approvals, clarifications, handoffs, and cron output to a self-hosted T3
   server bridge.
 author: T3 Agent
+provides_hooks:
+  - pre_tool_call
+  - post_tool_call
 requires_env:
   - name: T3_AGENT_INSTANCE_ID
     description: "Stable ID for this Hermes installation"

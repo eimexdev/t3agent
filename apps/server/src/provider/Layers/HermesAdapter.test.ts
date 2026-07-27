@@ -279,7 +279,7 @@ it.layer(testLayer)("HermesAdapter", (it) => {
     }),
   );
 
-  it.effect("emits correlated native tool lifecycle events with full tool data", () =>
+  it.effect("emits correlated native tool lifecycle events with canonical dynamic-tool data", () =>
     Effect.gen(function* () {
       const { adapter } = yield* HermesAdapterTestHarness;
       const threadId = ThreadId.make("hermes-tool-thread");
@@ -333,17 +333,112 @@ it.layer(testLayer)("HermesAdapter", (it) => {
       const completed = events[2];
       NodeAssert.equal(started?.itemId, completed?.itemId);
       NodeAssert.deepEqual(completed?.payload, {
-        itemType: "mcp_tool_call",
+        itemType: "dynamic_tool_call",
         status: "completed",
         title: "Read skill",
         detail: "Skill loaded",
         data: {
           toolCallId: "call-skill",
           item: {
-            toolCallId: "call-skill",
-            name: "skill_view",
-            input: { name: "query" },
-            result: { output: "Skill loaded" },
+            type: "dynamicToolCall",
+            id: "call-skill",
+            tool: "skill_view",
+            arguments: { name: "query" },
+            status: "completed",
+            success: true,
+            result: "Skill loaded",
+          },
+        },
+      });
+    }),
+  );
+
+  it.effect("formats command and patch callbacks as canonical T3 tool items", () =>
+    Effect.gen(function* () {
+      const { adapter } = yield* HermesAdapterTestHarness;
+      const threadId = ThreadId.make("hermes-formatted-tool-thread");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("hermes"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.take(3),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* Effect.yieldNow;
+      const turn = yield* adapter.sendTurn({ threadId, input: "run and patch" });
+      const sourceMessageId = `hermes-user:${turn.turnId}`;
+      yield* adapter.receiveCallback({
+        protocolVersion: HERMES_BRIDGE_PROTOCOL_VERSION,
+        requestId: "callback-command-request",
+        deliveryId: "callback-command-delivery",
+        type: "tool.completed",
+        chatId: "t3agent",
+        threadId,
+        sourceMessageId,
+        toolCallId: "call-command",
+        name: "terminal",
+        input: { command: "pnpm test", cwd: "/workspace" },
+        result: "Tests passed",
+        isError: false,
+      });
+      yield* adapter.receiveCallback({
+        protocolVersion: HERMES_BRIDGE_PROTOCOL_VERSION,
+        requestId: "callback-patch-request",
+        deliveryId: "callback-patch-delivery",
+        type: "tool.completed",
+        chatId: "t3agent",
+        threadId,
+        sourceMessageId,
+        toolCallId: "call-patch",
+        name: "patch",
+        input: {
+          patch:
+            "*** Begin Patch\n*** Update File: apps/web/src/App.tsx\n@@\n-old\n+new\n*** End Patch",
+        },
+        result: "Done!",
+        isError: false,
+      });
+
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      NodeAssert.deepEqual(events[1]?.payload, {
+        itemType: "command_execution",
+        status: "completed",
+        title: "Terminal",
+        detail: "Tests passed",
+        data: {
+          toolCallId: "call-command",
+          item: {
+            type: "commandExecution",
+            id: "call-command",
+            command: "pnpm test",
+            cwd: "/workspace",
+            commandActions: [{ type: "unknown", command: "pnpm test" }],
+            status: "completed",
+            aggregatedOutput: "Tests passed",
+          },
+        },
+      });
+      NodeAssert.deepEqual(events[2]?.payload, {
+        itemType: "file_change",
+        status: "completed",
+        title: "Edited files",
+        data: {
+          toolCallId: "call-patch",
+          item: {
+            type: "fileChange",
+            id: "call-patch",
+            status: "completed",
+            changes: [
+              {
+                path: "apps/web/src/App.tsx",
+                kind: { type: "update" },
+                diff: "*** Begin Patch\n*** Update File: apps/web/src/App.tsx\n@@\n-old\n+new\n*** End Patch",
+              },
+            ],
           },
         },
       });

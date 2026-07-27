@@ -99,6 +99,21 @@ def test_plugin_package_exports_register() -> None:
     assert plugin_package.register is adapter_module.register
 
 
+def test_plugin_registers_public_tool_lifecycle_hooks() -> None:
+    hooks: Dict[str, Any] = {}
+    context = SimpleNamespace(
+        register_platform=lambda **_kwargs: None,
+        register_hook=lambda name, callback: hooks.__setitem__(name, callback),
+    )
+
+    adapter_module.register(context)
+
+    assert hooks == {
+        "pre_tool_call": adapter_module._pre_tool_call,
+        "post_tool_call": adapter_module._post_tool_call,
+    }
+
+
 @pytest.mark.asyncio
 async def test_typing_lifecycle_preserves_thread_routing(
     fake_platform: SimpleNamespace,
@@ -1523,6 +1538,87 @@ async def test_structured_tool_lifecycle_posts_full_tool_frames(
         await adapter._client.close()
         adapter._client = None
         await server.close()
+
+
+@pytest.mark.asyncio
+async def test_public_tool_hooks_route_to_the_active_t3agent_turn(
+    fake_platform: SimpleNamespace,
+) -> None:
+    adapter = adapter_module.T3AgentAdapter(make_config())
+    adapter._event_loop = asyncio.get_running_loop()
+    source = SimpleNamespace(
+        platform=fake_platform,
+        chat_id="chat-1",
+        thread_id="thread-1",
+    )
+    session_entry = SimpleNamespace(
+        session_key="agent:main:t3agent:thread:thread-1",
+        session_id="hermes-session-1",
+        origin=source,
+    )
+    adapter.gateway_runner = SimpleNamespace(
+        session_store=SimpleNamespace(
+            _entries={session_entry.session_key: session_entry}
+        )
+    )
+    adapter._processing_sources[("chat-1", "thread-1")] = "hermes-user:turn-1"
+    received: List[tuple[str, Dict[str, Any]]] = []
+
+    async def capture(
+        event_type: str,
+        fields: Dict[str, Any],
+        metadata: Dict[str, Any] | None = None,
+    ) -> tuple[bool, Dict[str, Any], None]:
+        del metadata
+        received.append((event_type, fields))
+        return True, {}, None
+
+    adapter._post_event = capture  # type: ignore[method-assign]
+
+    adapter_module._pre_tool_call(
+        "skill_view",
+        {"name": "query"},
+        "task-1",
+        session_id="hermes-session-1",
+        tool_call_id="call-1",
+    )
+    adapter_module._post_tool_call(
+        "skill_view",
+        {"name": "query"},
+        "Skill loaded",
+        "task-1",
+        session_id="hermes-session-1",
+        tool_call_id="call-1",
+        status="ok",
+    )
+
+    await wait_until(lambda: len(received) == 2)
+    assert received == [
+        (
+            "tool.started",
+            {
+                "chatId": "chat-1",
+                "toolCallId": "call-1",
+                "name": "skill_view",
+                "input": {"name": "query"},
+                "threadId": "thread-1",
+                "sourceMessageId": "hermes-user:turn-1",
+            },
+        ),
+        (
+            "tool.completed",
+            {
+                "chatId": "chat-1",
+                "toolCallId": "call-1",
+                "name": "skill_view",
+                "input": {"name": "query"},
+                "threadId": "thread-1",
+                "sourceMessageId": "hermes-user:turn-1",
+                "result": "Skill loaded",
+                "isError": False,
+            },
+        ),
+    ]
 
 
 @pytest.mark.asyncio
