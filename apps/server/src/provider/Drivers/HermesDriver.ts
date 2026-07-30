@@ -104,20 +104,12 @@ export function makeHermesProviderSnapshot(input: {
                           id: "reasoningEffort",
                           label: "Reasoning",
                           type: "select" as const,
-                          options: [
-                            {
-                              id: "reset",
-                              label: inheritedReasoning
-                                ? `Default (${reasoningLabel(inheritedReasoning)})`
-                                : "Default",
-                              isDefault: true,
-                            },
-                            ...reasoningEfforts.map((effort) => ({
-                              id: effort,
-                              label: reasoningLabel(effort),
-                            })),
-                          ],
-                          currentValue: "reset",
+                          options: reasoningEfforts.map((effort) => ({
+                            id: effort,
+                            label: reasoningLabel(effort),
+                            ...(effort === inheritedReasoning ? { isDefault: true } : {}),
+                          })),
+                          ...(inheritedReasoning ? { currentValue: inheritedReasoning } : {}),
                         },
                       ],
                     }
