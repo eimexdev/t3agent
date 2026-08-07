@@ -134,11 +134,14 @@ Only produce at most one \`<proposed_plan>\` block per turn, and only when you a
 ${T3_CODE_BROWSER_TOOL_INSTRUCTIONS}
 </collaboration_mode>`;
 
-export const CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Collaboration Mode: Default
+const CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS_HEADER = `<collaboration_mode># Collaboration Mode: Default
 
 You are now in Default mode. Any previous instructions for other modes (e.g. Plan mode) are no longer active.
 
 Your active mode changes only when new developer instructions with a different \`<collaboration_mode>...</collaboration_mode>\` change it; user requests or tool descriptions do not change mode by themselves. Known mode names are Default and Plan.
+`;
+
+export const CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS = `${CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS_HEADER}
 
 ## request_user_input availability
 
@@ -148,10 +151,24 @@ In Default mode, strongly prefer making reasonable assumptions and executing the
 ${T3_CODE_BROWSER_TOOL_INSTRUCTIONS}
 </collaboration_mode>`;
 
+const CODEX_DEFAULT_MODE_USER_INPUT_ENABLED_DEVELOPER_INSTRUCTIONS = `${CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS_HEADER}
+
+In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions.
+${T3_CODE_BROWSER_TOOL_INSTRUCTIONS}
+</collaboration_mode>`;
+
 export interface CodexRuntimeInfo {
   readonly model: string;
   readonly reasoningEffort: string;
 }
+
+export interface CodexRuntimeCapabilities {
+  readonly defaultModeRequestUserInputEnabled: boolean;
+}
+
+const DEFAULT_CODEX_RUNTIME_CAPABILITIES: CodexRuntimeCapabilities = {
+  defaultModeRequestUserInputEnabled: false,
+};
 
 // Values come from trusted config, but keep the block single-line regardless.
 function toSingleLine(value: string): string {
@@ -161,11 +178,14 @@ function toSingleLine(value: string): string {
 export function buildCodexDeveloperInstructions(
   interactionMode: ProviderInteractionMode,
   runtime: CodexRuntimeInfo,
+  capabilities: CodexRuntimeCapabilities = DEFAULT_CODEX_RUNTIME_CAPABILITIES,
 ): string {
   const base =
     interactionMode === "plan"
       ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
-      : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS;
+      : capabilities.defaultModeRequestUserInputEnabled
+        ? CODEX_DEFAULT_MODE_USER_INPUT_ENABLED_DEVELOPER_INSTRUCTIONS
+        : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS;
   return `${base}
 
 <runtime_info>In case you're asked: you are running in T3 Code through the Codex harness, as ${toSingleLine(runtime.model)} with ${toSingleLine(runtime.reasoningEffort)} reasoning effort. No need to mention this otherwise.</runtime_info>`;
