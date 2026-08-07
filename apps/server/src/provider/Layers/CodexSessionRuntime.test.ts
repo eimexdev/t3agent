@@ -181,7 +181,7 @@ describe("buildTurnStartParams", () => {
     });
   });
 
-  it.effect("removes Default-mode user-input restrictions when Codex enables the feature", () =>
+  it.effect("uses enabled Default-mode user-input guidance when Codex enables the feature", () =>
     Effect.gen(function* () {
       const params = yield* buildTurnStartParams({
         threadId: "provider-thread-1",
@@ -193,9 +193,11 @@ describe("buildTurnStartParams", () => {
 
       const instructions = params.collaborationMode?.settings.developer_instructions;
       NodeAssert.ok(instructions);
-      NodeAssert.doesNotMatch(instructions, /request_user_input/);
-      NodeAssert.doesNotMatch(instructions, /plain-text question/);
-      NodeAssert.doesNotMatch(instructions, /multiple choice question/);
+      NodeAssert.match(instructions, /Use the `request_user_input` tool only when it is listed/);
+      NodeAssert.doesNotMatch(instructions, /unavailable in Default mode/);
+      NodeAssert.doesNotMatch(instructions, /will return an error/);
+      NodeAssert.match(instructions, /plain-text question/);
+      NodeAssert.match(instructions, /Never write a multiple choice question/);
       NodeAssert.match(instructions, /strongly prefer making reasonable assumptions/);
       NodeAssert.match(instructions, /preview_status/);
     }),
