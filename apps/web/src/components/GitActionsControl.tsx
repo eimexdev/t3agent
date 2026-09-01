@@ -99,11 +99,7 @@ import { resolvePathLinkTarget } from "~/terminal-links";
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { readLocalApi } from "~/localApi";
 import { getSourceControlPresentation } from "~/sourceControlPresentation";
-import {
-  openPullRequestLink,
-  parseChangeRequestUrl,
-  shouldOpenPullRequestExternally,
-} from "~/lib/openPullRequestLink";
+import { openPullRequestLink, useOpenPrLink } from "~/lib/openPullRequestLink";
 
 interface GitActionsControlProps {
   gitCwd: string | null;
@@ -1007,6 +1003,7 @@ export default function GitActionsControl({
     () => (activeThreadRef ? { threadRef: activeThreadRef } : undefined),
     [activeThreadRef],
   );
+  const openPrLink = useOpenPrLink(activeThreadRef ?? undefined);
   const activeDraftThread = useComposerDraftStore((store) =>
     draftId
       ? store.getDraftSession(draftId)
@@ -1467,23 +1464,11 @@ export default function GitActionsControl({
           },
         };
       } else if (toastCta.kind === "open_pr") {
-        const pullRequestNumber = parseChangeRequestUrl(toastCta.url)?.number;
         toastActionProps = {
           children: toastCta.label,
           onClick: (event) => {
-            if (
-              pullRequestNumber !== undefined &&
-              onOpenPullRequest &&
-              !shouldOpenPullRequestExternally(event)
-            ) {
-              closeResultToast();
-              onOpenPullRequest(pullRequestNumber);
-              return;
-            }
-            const api = readLocalApi();
-            if (!api) return;
             closeResultToast();
-            void api.shell.openExternal(toastCta.url);
+            openPrLink(event, toastCta.url);
           },
         };
       }
