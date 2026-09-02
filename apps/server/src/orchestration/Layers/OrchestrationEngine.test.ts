@@ -386,6 +386,7 @@ describe("OrchestrationEngine", () => {
             commandId: CommandId.make("cmd-auto-settle-stale-snapshot"),
             threadId: guardedThreadId,
             snapshotSequence,
+            settledAt: now(),
           })
           .pipe(Effect.flip);
         expect(staleError._tag).toBe("OrchestrationCommandInvariantError");
@@ -413,6 +414,7 @@ describe("OrchestrationEngine", () => {
               commandId: CommandId.make(`cmd-auto-settle-${expectedLiveness}`),
               threadId: liveThreadId,
               snapshotSequence: livenessSnapshotSequence,
+              settledAt: now(),
             })
             .pipe(Effect.flip);
           expect(livenessError._tag).toBe("OrchestrationCommandInvariantError");
@@ -425,6 +427,7 @@ describe("OrchestrationEngine", () => {
           commandId: CommandId.make("cmd-auto-settle-after-liveness-cleared"),
           threadId: liveThreadId,
           snapshotSequence: livenessSnapshotSequence,
+          settledAt: now(),
         });
 
         const freshSnapshotSequence = yield* engine.latestSequence;
@@ -439,6 +442,7 @@ describe("OrchestrationEngine", () => {
           commandId: CommandId.make("cmd-auto-settle-after-unrelated-update"),
           threadId: guardedThreadId,
           snapshotSequence: freshSnapshotSequence,
+          settledAt: now(),
         });
 
         const settled = yield* snapshots.getSnapshot();

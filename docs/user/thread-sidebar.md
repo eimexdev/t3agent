@@ -16,7 +16,8 @@ activity and when their pull request merges. An eligible idle thread also settle
 request closes. An open pull request blocks inactivity settlement. Active work, pending input, and
 live background work keep the thread active. T3 Code settles from a closed or merged pull request
 only when its timestamp is not older than the user's latest activity. If that timestamp is not
-available, the inactivity rule still applies. A manual un-settle also keeps the thread active.
+available, the inactivity rule still applies. Automatically settled threads keep their last
+activity time for ordering in **Settled**. A manual un-settle also keeps the thread active.
 
 Change these rules in **Settings > General**. The change is written to every environment you are
 connected to at that moment. An environment that is offline keeps its old value. When a connected
