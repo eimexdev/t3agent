@@ -64,6 +64,28 @@ describe("projectActivityPayload", () => {
     expect(JSON.stringify(projected.payload).length).toBeLessThan(500);
   });
 
+  it("keeps preview normalization and fence-only fallback while scanning lines", () => {
+    const preview = projectActivityPayload(
+      activity({
+        itemType: "command_execution",
+        data: { rawOutput: `\`\`\`\n  actual\tresult  \n${"x".repeat(5000)}` },
+      }),
+    );
+    const fences = projectActivityPayload(
+      activity({
+        itemType: "command_execution",
+        data: { rawOutput: "```\r\n \t \n```\n" },
+      }),
+    );
+
+    expect((preview.payload as { data: { rawOutput: unknown } }).data.rawOutput).toEqual({
+      content: "actual result",
+    });
+    expect((fences.payload as { data: { rawOutput: unknown } }).data.rawOutput).toEqual({
+      content: "2 lines",
+    });
+  });
+
   it("keeps bounded Claude and ACP command output summaries", () => {
     const claude = projectActivityPayload(
       activity({
@@ -134,6 +156,33 @@ describe("projectActivityPayload", () => {
     });
     expect(JSON.stringify(claude.payload).length).toBeLessThan(200);
     expect(JSON.stringify(openCode.payload).length).toBeLessThan(200);
+  });
+
+  it("keeps full Claude Read image paths through repeated projection", () => {
+    const imagePath = `/workspace/${"nested folder/".repeat(16)}reference image.webp`;
+    const projected = projectActivityPayload(
+      activity({
+        itemType: "dynamic_tool_call",
+        detail: 'Read: {"file_path":"truncated..."}',
+        data: {
+          toolName: "Read",
+          input: { file_path: imagePath },
+          result: { content: "Image Size: 1280x720." },
+        },
+      }),
+    );
+    const projectedAgain = projectActivityPayload(projected);
+
+    expect(projected.payload).toMatchObject({ data: { imagePath } });
+    expect(projectedAgain.payload).toMatchObject({ data: { imagePath } });
+
+    const textRead = projectActivityPayload(
+      activity({
+        itemType: "dynamic_tool_call",
+        data: { toolName: "Read", input: { file_path: "/workspace/src/index.ts" } },
+      }),
+    );
+    expect(textRead.payload).not.toMatchObject({ data: { imagePath: expect.anything() } });
   });
 
   it("slims Codex-shaped mcp_tool_call items to rendered fields plus a result summary", () => {

@@ -4,9 +4,11 @@ import {
   type ThreadId,
   type ToolLifecycleItemType,
 } from "@t3tools/contracts";
+import {
+  classifyMarkdownImageSource,
+  markdownImageSourceFragment,
+} from "@t3tools/client-runtime/markdown-images";
 import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
-
-import { classifyMarkdownImageSource, markdownImageSourceFragment } from "../markdownImages.js";
 
 export function isWorktreeSetupActivity(kind: string): boolean {
   return kind === "setup-script.requested" || kind === "setup-script.started";
@@ -18,6 +20,7 @@ export interface WorkLogPresentationEntry {
   readonly tone: "thinking" | "tool" | "info" | "error";
   readonly command?: string;
   readonly detail?: string;
+  readonly viewedImagePath?: string;
   readonly changedFiles?: ReadonlyArray<string>;
   readonly itemType?: ToolLifecycleItemType;
   readonly requestKind?: string;
@@ -66,6 +69,7 @@ export function toolGroupAction(entry: WorkLogPresentationEntry): ToolGroupActio
   if (
     entry.requestKind === "file-read" ||
     entry.itemType === "image_view" ||
+    entry.viewedImagePath !== undefined ||
     (entry.itemType === "dynamic_tool_call" &&
       entry.toolTitle?.trim().toLowerCase() === "read file")
   ) {
@@ -87,6 +91,14 @@ export function toolGroupAction(entry: WorkLogPresentationEntry): ToolGroupActio
 }
 
 export function workEntryViewedImagePath(entry: WorkLogPresentationEntry): string | null {
+  const viewedImagePath = entry.viewedImagePath?.trim();
+  if (
+    viewedImagePath !== undefined &&
+    !/[\r\n]/.test(viewedImagePath) &&
+    isWorkspaceImagePreviewPath(viewedImagePath)
+  ) {
+    return viewedImagePath;
+  }
   const detail = entry.detail?.trim();
   return toolGroupAction(entry) === "read" &&
     detail !== undefined &&
@@ -97,7 +109,7 @@ export function workEntryViewedImagePath(entry: WorkLogPresentationEntry): strin
 }
 
 export interface ViewedImageAsset {
-  readonly resource: Extract<AssetResource, { readonly _tag: "attachment" | "workspace-file" }>;
+  readonly resource: Extract<AssetResource, { readonly _tag: "attachment" | "media-file" }>;
   readonly alt: string;
   readonly srcFragment: string;
 }
@@ -127,7 +139,7 @@ export function resolveViewedImageAsset(
   return {
     resource: attachmentId
       ? { _tag: "attachment", attachmentId }
-      : { _tag: "workspace-file", threadId: input.threadId, path },
+      : { _tag: "media-file", threadId: input.threadId, path },
     alt: path.split(/[\\/]/).at(-1) ?? "image",
     srcFragment: markdownImageSourceFragment(source),
   };
