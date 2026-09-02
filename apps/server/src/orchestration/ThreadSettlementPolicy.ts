@@ -79,7 +79,7 @@ export function resolveAutoSettlementAt(input: {
   ]);
   if (pullRequest !== null) {
     if (pullRequestSettles(thread, pullRequest, input.autoSettleOnMerge)) {
-      return activityAt ?? thread.updatedAt;
+      return activityAt ?? thread.createdAt;
     }
     if (pullRequest.state === "open") return null;
   }

@@ -1,4 +1,4 @@
-import type { ProjectId } from "@t3tools/contracts";
+import type { OrchestrationThreadShell, ProjectId } from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
@@ -17,6 +17,33 @@ export function toSortableTimestamp(iso: string | undefined): number | null {
   if (!iso) return null;
   const ms = Date.parse(iso);
   return Number.isFinite(ms) ? ms : null;
+}
+
+export type SettledThreadTimestampInput = Pick<
+  OrchestrationThreadShell,
+  "settledAt" | "latestUserMessageAt" | "latestTurn" | "updatedAt"
+>;
+
+/** Shared sort and label timestamp for settled rows on every client. */
+export function resolveSettledThreadTimestamp(thread: SettledThreadTimestampInput): string | null {
+  if (toSortableTimestamp(thread.settledAt ?? undefined) !== null) return thread.settledAt;
+
+  let latest: string | null = null;
+  let latestMs = Number.NEGATIVE_INFINITY;
+  for (const candidate of [
+    thread.latestUserMessageAt,
+    thread.latestTurn?.requestedAt,
+    thread.latestTurn?.startedAt,
+    thread.latestTurn?.completedAt,
+  ]) {
+    const parsed = toSortableTimestamp(candidate ?? undefined);
+    if (candidate != null && parsed !== null && parsed > latestMs) {
+      latest = candidate;
+      latestMs = parsed;
+    }
+  }
+  if (latest !== null) return latest;
+  return toSortableTimestamp(thread.updatedAt) === null ? null : thread.updatedAt;
 }
 
 function getFirstSortableTimestamp(...values: Array<string | null | undefined>): number | null {

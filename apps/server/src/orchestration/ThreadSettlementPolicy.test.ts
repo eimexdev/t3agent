@@ -69,6 +69,22 @@ describe("resolveAutoSettlementAt", () => {
     ).toBe("2026-08-21T00:00:00.000Z");
   });
 
+  it("uses creation time for PR settlement when the thread has no activity", () => {
+    expect(
+      resolveAutoSettlementAt({
+        thread: makeThread({
+          latestUserMessageAt: null,
+          latestTurn: null,
+          updatedAt: "2026-08-27T00:00:00.000Z",
+        }),
+        pullRequest: { state: "closed", updatedAt: NOW },
+        now: NOW,
+        autoSettleAfterDays: null,
+        autoSettleOnMerge: true,
+      }),
+    ).toBe("2026-08-01T00:00:00.000Z");
+  });
+
   it("settles inactive threads and leaves never-used threads active", () => {
     expect(decide(makeThread())).toBe(true);
     expect(decide(makeThread({ latestUserMessageAt: null }))).toBe(false);
