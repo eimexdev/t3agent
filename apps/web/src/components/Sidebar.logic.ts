@@ -666,17 +666,13 @@ export function reduceSidebarProjectScopeMenuState(
   }
 }
 
-/** The timestamp a settled row sorts and labels by: settledAt when stamped,
-    otherwise the latest message or turn stamp. updatedAt is the final net. */
-export const resolveSettledTimestamp = resolveSettledThreadTimestamp;
-
 // Settled rows are history, so they order by when the work ENDED, not when
 // the thread was created or last touched.
 export function sortSettledThreadsForSidebar<
   T extends SettledThreadTimestampInput & { readonly id: string },
 >(threads: readonly T[]): T[] {
   const timestampMs = (thread: T) => {
-    const timestamp = resolveSettledTimestamp(thread);
+    const timestamp = resolveSettledThreadTimestamp(thread);
     return timestamp === null ? 0 : Date.parse(timestamp);
   };
   return [...threads].toSorted(

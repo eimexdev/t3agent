@@ -24,9 +24,12 @@ export type SettledThreadTimestampInput = Pick<
   "settledAt" | "latestUserMessageAt" | "latestTurn" | "updatedAt"
 >;
 
-/** Shared sort and label timestamp for settled rows on every client. */
+/** The timestamp a settled row sorts and labels by on every client: settledAt
+    when stamped, otherwise the latest message or turn stamp, then updatedAt. */
 export function resolveSettledThreadTimestamp(thread: SettledThreadTimestampInput): string | null {
-  if (toSortableTimestamp(thread.settledAt ?? undefined) !== null) return thread.settledAt;
+  if (thread.settledAt != null && toSortableTimestamp(thread.settledAt) !== null) {
+    return thread.settledAt;
+  }
 
   let latest: string | null = null;
   let latestMs = Number.NEGATIVE_INFINITY;

@@ -96,6 +96,8 @@ it.layer(NodeServices.layer)("settled thread decider", (it) => {
       const events = Array.isArray(result) ? result : [result];
       const settled = events.find((event) => event.type === "thread.settled");
       expect(settled?.payload.settledAt).toBe(SETTLED_AT);
+      // updatedAt stays the command time so the row still moves on settle.
+      expect(settled?.payload.updatedAt).toBe(settled?.occurredAt);
       expect(settled?.payload.updatedAt).not.toBe(SETTLED_AT);
     }),
   );
