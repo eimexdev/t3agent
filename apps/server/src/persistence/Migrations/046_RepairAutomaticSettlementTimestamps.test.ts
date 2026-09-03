@@ -4,17 +4,17 @@ import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { runMigrations } from "../Migrations.ts";
-import * as NodeSqliteClient from "../NodeSqliteClient.ts";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
 const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
 
 const MODEL_SELECTION = '{"instanceId":"codex","model":"gpt-5.6-sol"}';
 
-layer("045_RepairAutomaticSettlementTimestamps", (it) => {
+layer("046_RepairAutomaticSettlementTimestamps", (it) => {
   it.effect("repairs automatic stamps and leaves manual settlement alone", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 44 });
+      yield* runMigrations({ toMigrationInclusive: 45 });
 
       yield* sql`
         INSERT INTO projection_threads (
@@ -164,7 +164,7 @@ layer("045_RepairAutomaticSettlementTimestamps", (it) => {
       const eventsBefore =
         yield* sql`SELECT payload_json FROM orchestration_events ORDER BY event_id`;
 
-      yield* runMigrations({ toMigrationInclusive: 45 });
+      yield* runMigrations({ toMigrationInclusive: 46 });
 
       const threads = yield* sql<{
         readonly threadId: string;
